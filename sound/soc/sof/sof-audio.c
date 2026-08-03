@@ -11,6 +11,7 @@
 #include <linux/bitfield.h>
 #include <trace/events/sof.h>
 #include "sof-audio.h"
+#include "sof-client-audio.h"
 #include "sof-utils.h"
 #include "ops.h"
 
@@ -165,6 +166,42 @@ int sof_instance_set_up_pipelines(struct snd_sof_audio_instance *instance)
 
 	return 0;
 }
+
+/*
+ * Tear down the topology pipelines owned by a single audio instance. The other
+ * instances backed by the same DSP are left untouched.
+ */
+int sof_audio_instance_suspend(struct snd_soc_component *component)
+{
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	int ret;
+
+	if (!instance)
+		return 0;
+
+	if (!instance->tplg_ops || !instance->tplg_ops->tear_down_all_pipelines)
+		return 0;
+
+	ret = instance->tplg_ops->tear_down_all_pipelines(component, false);
+	if (ret < 0)
+		return ret;
+
+	instance->pipelines_set_up = false;
+
+	return 0;
+}
+EXPORT_SYMBOL(sof_audio_instance_suspend);
+
+/*
+ * Set up the topology pipelines owned by a single audio instance.
+ */
+int sof_audio_instance_resume(struct snd_soc_component *component)
+{
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+
+	return instance ? sof_instance_set_up_pipelines(instance) : 0;
+}
+EXPORT_SYMBOL(sof_audio_instance_resume);
 
 /*
  * Set up the static pipelines of every audio instance. Called after the DSP

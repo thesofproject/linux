@@ -135,18 +135,58 @@ static void sof_audio_client_remove(struct auxiliary_device *auxdev)
 	snd_soc_unregister_component(&auxdev->dev);
 }
 
+/*
+ * Tear down the topology pipelines owned by this audio client.
+ *
+ * The audio clients are children of the SOF device, so the PM core invokes
+ * their suspend callbacks before the SOF device is suspended. Only the
+ * pipelines of the calling instance are freed, other audio clients of the same
+ * DSP are left untouched.
+ */
 static int sof_audio_client_suspend(struct device *dev)
 {
 	struct auxiliary_device *auxdev = to_auxiliary_dev(dev);
+	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(dev);
 
-	return sof_client_audio_suspend(auxiliary_dev_to_sof_client_dev(auxdev));
+	if (!pdata || !pdata->component)
+		return 0;
+
+	/*
+	 * The pipelines need to be torn down only if the DSP hardware is
+	 * active. If it is already suspended there is nothing to free up.
+	 */
+	if (!sof_client_is_dsp_in_d0(cdev))
+		return 0;
+
+	return sof_audio_instance_suspend(pdata->component);
 }
 
+/*
+ * Set up the static topology pipelines owned by this audio client.
+ *
+ * The audio clients are children of the SOF device, so the PM core invokes
+ * their resume callbacks after the SOF device has been resumed. If the DSP was
+ * powered down the firmware boot has already restored all instances, this only
+ * covers the case when the instance was suspended while the DSP remained in D0.
+ */
 static int sof_audio_client_resume(struct device *dev)
 {
 	struct auxiliary_device *auxdev = to_auxiliary_dev(dev);
+	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(dev);
 
-	return sof_client_audio_resume(auxiliary_dev_to_sof_client_dev(auxdev));
+	if (!pdata || !pdata->component)
+		return 0;
+
+	/*
+	 * With on-demand DSP boot the firmware is not running at this point,
+	 * the pipelines are set up when the DSP is booted.
+	 */
+	if (sof_client_get_fw_state(cdev) != SOF_FW_BOOT_COMPLETE)
+		return 0;
+
+	return sof_audio_instance_resume(pdata->component);
 }
 
 static const struct dev_pm_ops sof_audio_client_pm = {

@@ -65,6 +65,7 @@ bool sof_client_get_ssp_mclk_id_quirk(struct sof_client_dev *cdev, u16 *mclk_id)
 const struct snd_soc_acpi_mach *sof_client_get_machine(struct sof_client_dev *cdev);
 bool sof_client_is_function_topology_disabled(struct sof_client_dev *cdev);
 bool sof_client_is_suspend_target_s0ix(struct sof_client_dev *cdev);
+bool sof_client_is_dsp_in_d0(struct sof_client_dev *cdev);
 
 /* DSP/firmware boot request */
 int sof_client_boot_dsp(struct sof_client_dev *cdev);
@@ -144,10 +145,6 @@ u32 sof_client_get_new_comp_id(struct sof_client_dev *cdev);
 /* machine driver registration */
 int sof_client_machine_register(struct sof_client_dev *cdev);
 void sof_client_machine_unregister(struct sof_client_dev *cdev);
-
-/* audio client power management */
-int sof_client_audio_suspend(struct sof_client_dev *cdev);
-int sof_client_audio_resume(struct sof_client_dev *cdev);
 
 /* audio client pdata initialization */
 struct sof_audio_client_pdata;

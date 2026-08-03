@@ -50,4 +50,8 @@ struct sof_audio_client_pdata {
 extern const struct sof_audio_client_ipc_ops sof_audio_client_ipc3_ops;
 extern const struct sof_audio_client_ipc_ops sof_audio_client_ipc4_ops;
 
+/* power management of a single audio instance */
+int sof_audio_instance_suspend(struct snd_soc_component *component);
+int sof_audio_instance_resume(struct snd_soc_component *component);
+
 #endif /* __SOF_CLIENT_AUDIO_H */

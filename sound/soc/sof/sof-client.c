@@ -541,6 +541,14 @@ bool sof_client_is_suspend_target_s0ix(struct sof_client_dev *cdev)
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_is_suspend_target_s0ix, "SND_SOC_SOF_CLIENT");
 
+bool sof_client_is_dsp_in_d0(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->dsp_power_state.state == SOF_DSP_PM_D0;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_is_dsp_in_d0, "SND_SOC_SOF_CLIENT");
+
 /**
  * sof_client_get_topology_name - get the topology file name of the SOF device
  * @cdev:	SOF client device
@@ -891,82 +899,6 @@ void sof_client_machine_unregister(struct sof_client_dev *cdev)
 	snd_sof_machine_unregister(sdev, sdev->pdata);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_machine_unregister, "SND_SOC_SOF_CLIENT");
-
-/*
- * Tear down the topology pipelines owned by this audio client.
- *
- * The audio clients are children of the SOF device, so the PM core invokes
- * their suspend callbacks before the SOF device is suspended. Only the
- * pipelines of the calling instance are freed, other audio clients of the same
- * DSP are left untouched.
- */
-int sof_client_audio_suspend(struct sof_client_dev *cdev)
-{
-	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct snd_sof_audio_instance *instance;
-	const struct sof_ipc_tplg_ops *tplg_ops;
-	int ret;
-
-	if (!pdata || !pdata->component)
-		return 0;
-
-	/*
-	 * The pipelines need to be torn down only if the DSP hardware is
-	 * active. If it is already suspended there is nothing to free up.
-	 */
-	if (sdev->dsp_power_state.state != SOF_DSP_PM_D0)
-		return 0;
-
-	instance = snd_sof_component_get_audio_instance(pdata->component);
-	if (!instance)
-		return 0;
-
-	tplg_ops = instance->tplg_ops;
-	if (!tplg_ops || !tplg_ops->tear_down_all_pipelines)
-		return 0;
-
-	ret = tplg_ops->tear_down_all_pipelines(pdata->component, false);
-	if (ret < 0)
-		return ret;
-
-	instance->pipelines_set_up = false;
-
-	return 0;
-}
-EXPORT_SYMBOL_NS_GPL(sof_client_audio_suspend, "SND_SOC_SOF_CLIENT");
-
-/*
- * Set up the static topology pipelines owned by this audio client.
- *
- * The audio clients are children of the SOF device, so the PM core invokes
- * their resume callbacks after the SOF device has been resumed. If the DSP was
- * powered down the firmware boot has already restored all instances, this only
- * covers the case when the instance was suspended while the DSP remained in D0.
- */
-int sof_client_audio_resume(struct sof_client_dev *cdev)
-{
-	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct snd_sof_audio_instance *instance;
-
-	if (!pdata || !pdata->component)
-		return 0;
-
-	/*
-	 * With on-demand DSP boot the firmware is not running at this point,
-	 * the pipelines are set up when the DSP is booted.
-	 */
-	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
-		return 0;
-
-	instance = snd_sof_component_get_audio_instance(pdata->component);
-	if (!instance)
-		return 0;
-
-	return sof_instance_set_up_pipelines(instance);
-}
-EXPORT_SYMBOL_NS_GPL(sof_client_audio_resume, "SND_SOC_SOF_CLIENT");
 
 void sof_audio_client_init_pdata(struct snd_sof_dev *sdev,
 				 struct sof_audio_client_pdata *pdata)
