@@ -12,6 +12,7 @@
 #define __SOUND_SOC_SOF_PRIV_H
 
 #include <linux/device.h>
+#include <linux/srcu.h>
 #include <sound/hdaudio.h>
 #include <sound/sof.h>
 #include <sound/sof/info.h>
@@ -704,8 +705,17 @@ struct snd_sof_dev {
 	/* list of clients that registered event ops via sof_client_register_ops() */
 	struct list_head client_ops_list;
 
-	/* to protect client_ops_list */
+	/* serializes the writers of client_ops_list */
 	struct mutex client_ops_mutex;
+
+	/*
+	 * Readers of client_ops_list. The callbacks are dispatched from within
+	 * the read side critical section and are allowed to sleep, so they must
+	 * not be serialized by client_ops_mutex: a client callback waiting for
+	 * an IPC reply would block the IPC IRQ thread in the notification
+	 * dispatcher and the reply could never be delivered.
+	 */
+	struct srcu_struct client_ops_srcu;
 
 	/* quirks to override topology values */
 	bool mclk_id_override;

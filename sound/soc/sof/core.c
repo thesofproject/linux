@@ -626,6 +626,13 @@ sof_apply_profile_override(struct sof_loadable_file_profile *path_override,
 	}
 }
 
+static void sof_cleanup_client_ops_srcu(void *data)
+{
+	struct snd_sof_dev *sdev = data;
+
+	cleanup_srcu_struct(&sdev->client_ops_srcu);
+}
+
 int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 {
 	struct snd_sof_dev *sdev;
@@ -666,6 +673,15 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	INIT_LIST_HEAD(&sdev->audio_instance_list);
 	INIT_LIST_HEAD(&sdev->ipc_client_list);
 	INIT_LIST_HEAD(&sdev->client_ops_list);
+
+	ret = init_srcu_struct(&sdev->client_ops_srcu);
+	if (ret)
+		return ret;
+
+	ret = devm_add_action_or_reset(dev, sof_cleanup_client_ops_srcu, sdev);
+	if (ret)
+		return ret;
+
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 	spin_lock_init(&sdev->audio_instance_list_lock);

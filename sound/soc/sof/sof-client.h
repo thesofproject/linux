@@ -130,6 +130,9 @@ typedef int (*sof_client_module_name_callback)(struct sof_client_dev *cdev,
  * this structure with sof_client_register_ops() from its probe and drops it
  * with sof_client_unregister_ops() from its remove. All callbacks are optional
  * and are invoked for every client that registered ops.
+ *
+ * The callbacks are invoked from an SRCU read side critical section, so they
+ * may sleep and may send IPC messages to the DSP.
  */
 struct sof_client_ops {
 	sof_client_event_callback ipc_rx_handler;

@@ -12,7 +12,9 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
+#include <linux/rculist.h>
 #include <linux/slab.h>
+#include <linux/srcu.h>
 #include <sound/sof/ipc4/header.h>
 #include "ops.h"
 #include "sof-audio.h"
@@ -415,8 +417,9 @@ int sof_client_ipc4_get_module_name(struct sof_client_dev *cdev, u32 module_id,
 	}
 
 	/* The module can be in the topology of any of the audio clients */
-	guard(mutex)(&sdev->client_ops_mutex);
-	list_for_each_entry(client, &sdev->client_ops_list, ops_node) {
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(client, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
 		if (!client->ops->get_module_name)
 			continue;
 
@@ -703,8 +706,9 @@ void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *msg_buf)
 {
 	struct sof_client_dev *cdev;
 
-	guard(mutex)(&sdev->client_ops_mutex);
-	list_for_each_entry(cdev, &sdev->client_ops_list, ops_node) {
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
 		if (cdev->ops->ipc_rx_handler)
 			cdev->ops->ipc_rx_handler(cdev, msg_buf);
 	}
@@ -715,8 +719,9 @@ void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev)
 {
 	struct sof_client_dev *cdev;
 
-	guard(mutex)(&sdev->client_ops_mutex);
-	list_for_each_entry(cdev, &sdev->client_ops_list, ops_node) {
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
 		if (cdev->ops->fw_state_handler)
 			cdev->ops->fw_state_handler(cdev, sdev->fw_state);
 	}
@@ -734,8 +739,9 @@ enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)
 	enum sof_d0i3_vote result = SOF_D0I3_NO_ACTIVITY;
 	struct sof_client_dev *cdev;
 
-	guard(mutex)(&sdev->client_ops_mutex);
-	list_for_each_entry(cdev, &sdev->client_ops_list, ops_node) {
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
 		if (!cdev->ops->d0i3_vote)
 			continue;
 
@@ -764,7 +770,7 @@ int sof_client_register_ops(struct sof_client_dev *cdev,
 
 	guard(mutex)(&sdev->client_ops_mutex);
 	cdev->ops = ops;
-	list_add(&cdev->ops_node, &sdev->client_ops_list);
+	list_add_rcu(&cdev->ops_node, &sdev->client_ops_list);
 
 	return 0;
 }
@@ -775,10 +781,15 @@ void sof_client_unregister_ops(struct sof_client_dev *cdev)
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 
 	guard(mutex)(&sdev->client_ops_mutex);
-	if (cdev->ops) {
-		list_del(&cdev->ops_node);
-		cdev->ops = NULL;
-	}
+	if (!cdev->ops)
+		return;
+
+	list_del_rcu(&cdev->ops_node);
+
+	/* a dispatcher may still be executing a callback of this client */
+	synchronize_srcu(&sdev->client_ops_srcu);
+
+	cdev->ops = NULL;
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_unregister_ops, "SND_SOC_SOF_CLIENT");
 
