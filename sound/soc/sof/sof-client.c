@@ -12,7 +12,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
-#include <linux/rcupdate.h>
 #include <linux/slab.h>
 #include <sound/sof/ipc4/header.h>
 #include "ops.h"
@@ -404,31 +403,31 @@ struct sof_ipc4_fw_module *sof_client_ipc4_find_module(struct sof_client_dev *c,
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_find_module, "SND_SOC_SOF_CLIENT");
 
-struct snd_sof_widget *sof_client_ipc4_find_swidget_by_id(struct sof_client_dev *cdev,
-							  u32 module_id, int instance_id)
+int sof_client_ipc4_get_module_name(struct sof_client_dev *cdev, u32 module_id,
+				    int instance_id, char *name, size_t size)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct snd_sof_audio_instance *instance;
+	struct sof_client_dev *client;
 
 	if (sdev->pdata->ipc_type != SOF_IPC_TYPE_4) {
 		dev_err(sdev->dev, "Only supported with IPC4\n");
-		return NULL;
+		return -EOPNOTSUPP;
 	}
 
-	/* The module can be in the topology of any of the audio instances */
-	guard(rcu)();
-	list_for_each_entry_rcu(instance, &sdev->audio_instance_list, list) {
-		struct snd_sof_widget *swidget;
+	/* The module can be in the topology of any of the audio clients */
+	guard(mutex)(&sdev->client_ops_mutex);
+	list_for_each_entry(client, &sdev->client_ops_list, ops_node) {
+		if (!client->ops->get_module_name)
+			continue;
 
-		swidget = sof_ipc4_find_swidget_by_ids(instance->component,
-						       module_id, instance_id);
-		if (swidget)
-			return swidget;
+		if (!client->ops->get_module_name(client, module_id, instance_id,
+						  name, size))
+			return 0;
 	}
 
-	return NULL;
+	return -ENOENT;
 }
-EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_find_swidget_by_id, "SND_SOC_SOF_CLIENT");
+EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_get_module_name, "SND_SOC_SOF_CLIENT");
 
 ssize_t sof_client_ipc4_find_debug_slot_offset_by_type(struct sof_client_dev *cdev,
 						       u32 type)

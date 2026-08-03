@@ -58,8 +58,22 @@ static void sof_audio_client_ipc_rx_handler(struct sof_client_dev *cdev, void *m
 		pdata->ipc_ops->rx_notification(cdev, msg_buf);
 }
 
+static int sof_audio_client_get_module_name(struct sof_client_dev *cdev,
+					    u32 module_id, int instance_id,
+					    char *name, size_t size)
+{
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	if (!pdata->ipc_ops || !pdata->ipc_ops->get_module_name)
+		return -EOPNOTSUPP;
+
+	return pdata->ipc_ops->get_module_name(cdev, module_id, instance_id,
+					       name, size);
+}
+
 static const struct sof_client_ops sof_audio_client_ops = {
 	.ipc_rx_handler = sof_audio_client_ipc_rx_handler,
+	.get_module_name = sof_audio_client_get_module_name,
 };
 
 static const struct sof_audio_client_ipc_ops *

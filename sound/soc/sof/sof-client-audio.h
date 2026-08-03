@@ -13,12 +13,17 @@ struct sof_client_dev;
  * @rx_notification:	Handle a firmware initiated notification. The message and
  *			its payload is owned by the SOF core, it must not be
  *			modified or freed by the client.
+ * @get_module_name:	Copy the topology name of a module instance owned by this
+ *			audio client. Returns -ENOENT if the module is not part of
+ *			the topology of this client.
  *
  * Collects the IPC version specific glue of the audio client, most notably the
  * demultiplexing of the firmware notifications the client is interested in.
  */
 struct sof_audio_client_ipc_ops {
 	void (*rx_notification)(struct sof_client_dev *cdev, void *msg_buf);
+	int (*get_module_name)(struct sof_client_dev *cdev, u32 module_id,
+			       int instance_id, char *name, size_t size);
 };
 
 /**

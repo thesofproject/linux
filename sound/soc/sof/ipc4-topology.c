@@ -242,6 +242,7 @@ struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_soc_component *sc
 
 	return NULL;
 }
+EXPORT_SYMBOL(sof_ipc4_find_swidget_by_ids);
 
 static u32 sof_ipc4_fmt_cfg_to_type(u32 fmt_cfg)
 {

@@ -62,6 +62,33 @@ static void sof_audio_client_ipc4_rx_notification(struct sof_client_dev *cdev,
 	}
 }
 
+/*
+ * Look up a module instance in the topology of this audio client and copy its
+ * widget name out. The name is copied rather than returned by reference so
+ * that the caller does not need to hold a reference on the topology.
+ */
+static int sof_audio_client_ipc4_get_module_name(struct sof_client_dev *cdev,
+						 u32 module_id, int instance_id,
+						 char *name, size_t size)
+{
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+	struct snd_sof_widget *swidget;
+
+	/* The component is only available while the sound card is bound */
+	if (!pdata->component)
+		return -ENOENT;
+
+	swidget = sof_ipc4_find_swidget_by_ids(pdata->component, module_id,
+					       instance_id);
+	if (!swidget)
+		return -ENOENT;
+
+	strscpy(name, swidget->widget->name, size);
+
+	return 0;
+}
+
 const struct sof_audio_client_ipc_ops sof_audio_client_ipc4_ops = {
 	.rx_notification = sof_audio_client_ipc4_rx_notification,
+	.get_module_name = sof_audio_client_ipc4_get_module_name,
 };

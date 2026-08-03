@@ -51,8 +51,16 @@ int sof_client_ipc_msg_data(struct sof_client_dev *cdev,
 			    struct snd_sof_pcm_stream *sps, void *p, size_t sz);
 
 struct sof_ipc4_fw_module *sof_client_ipc4_find_module(struct sof_client_dev *c, const guid_t *u);
-struct snd_sof_widget *sof_client_ipc4_find_swidget_by_id(struct sof_client_dev *cdev,
-							  u32 module_id, int instance_id);
+
+/*
+ * The name is copied out of the topology of the owning client, which can be
+ * removed as soon as the lookup returns. Widget names are bound by the
+ * topology ABI, a truncated name would only affect diagnostic output.
+ */
+#define SOF_CLIENT_MODULE_NAME_MAX	SNDRV_CTL_ELEM_ID_NAME_MAXLEN
+
+int sof_client_ipc4_get_module_name(struct sof_client_dev *cdev, u32 module_id,
+				    int instance_id, char *name, size_t size);
 
 struct dentry *sof_client_get_debugfs_root(struct sof_client_dev *cdev);
 struct device *sof_client_get_dma_dev(struct sof_client_dev *cdev);
@@ -101,6 +109,11 @@ enum sof_d0i3_vote {
 
 typedef enum sof_d0i3_vote (*sof_client_d0i3_vote_callback)(struct sof_client_dev *cdev);
 
+/* IPC4 module instance name lookup */
+typedef int (*sof_client_module_name_callback)(struct sof_client_dev *cdev,
+					       u32 module_id, int instance_id,
+					       char *name, size_t size);
+
 /**
  * struct sof_client_ops - SOF client event callbacks
  * @ipc_rx_handler:	Called for every DSP-initiated IPC notification. The
@@ -109,6 +122,9 @@ typedef enum sof_d0i3_vote (*sof_client_d0i3_vote_callback)(struct sof_client_de
  * @fw_state_handler:	Called on every DSP firmware state change.
  * @d0i3_vote:		Returns the client's D0i3 compatibility vote, see
  *			enum sof_d0i3_vote.
+ * @get_module_name:	Copies the topology name of a module instance owned by
+ *			the client. Returns -ENOENT if the client does not own
+ *			the module.
  *
  * A client that wants to receive notifications registers a static instance of
  * this structure with sof_client_register_ops() from its probe and drops it
@@ -119,6 +135,7 @@ struct sof_client_ops {
 	sof_client_event_callback ipc_rx_handler;
 	sof_client_fw_state_callback fw_state_handler;
 	sof_client_d0i3_vote_callback d0i3_vote;
+	sof_client_module_name_callback get_module_name;
 };
 
 int sof_client_register_ops(struct sof_client_dev *cdev,
