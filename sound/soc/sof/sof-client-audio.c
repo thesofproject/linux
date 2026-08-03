@@ -94,6 +94,8 @@ static int sof_audio_client_probe(struct auxiliary_device *auxdev,
 	if (ret < 0)
 		return ret;
 
+	snd_sof_new_platform_drv(cdev, &pdata->plat_drv);
+
 	ret = snd_soc_register_component(&auxdev->dev, &pdata->plat_drv,
 					 pdata->drv, pdata->num_drv);
 	if (ret < 0) {

@@ -736,9 +736,6 @@ int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
 int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev);
 
-void snd_sof_new_platform_drv(struct snd_sof_dev *sdev,
-			      struct snd_soc_component_driver * const pd);
-
 /*
  * Compress support
  */

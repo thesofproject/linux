@@ -19,6 +19,7 @@
 #include "sof-audio.h"
 #include "sof-client.h"
 #include "sof-client-audio.h"
+#include "sof-of-dev.h"
 #include "sof-priv.h"
 #include "ipc3-priv.h"
 #include "ipc4-priv.h"
@@ -621,6 +622,25 @@ const struct snd_soc_acpi_mach *sof_client_get_machine(struct sof_client_dev *cd
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_machine, "SND_SOC_SOF_CLIENT");
 
+/*
+ * The machine driver is described either by an ACPI or by an OF descriptor,
+ * depending on the platform. Hide the difference from the clients.
+ */
+const char *sof_client_get_machine_drv_name(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct snd_sof_pdata *plat_data = sdev->pdata;
+
+	if (plat_data->machine)
+		return plat_data->machine->drv_name;
+
+	if (plat_data->of_machine)
+		return plat_data->of_machine->drv_name;
+
+	return NULL;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_machine_drv_name, "SND_SOC_SOF_CLIENT");
+
 /**
  * sof_client_get_ssp_mclk_id_quirk - get the platform SSP MCLK ID quirk
  * @cdev:	SOF client device
@@ -904,7 +924,6 @@ void sof_audio_client_init_pdata(struct snd_sof_dev *sdev,
 				 struct sof_audio_client_pdata *pdata)
 {
 	memset(pdata, 0, sizeof(*pdata));
-	snd_sof_new_platform_drv(sdev, &pdata->plat_drv);
 	pdata->drv = sdev->audio_ops->drv;
 	pdata->num_drv = sdev->audio_ops->num_drv;
 }
