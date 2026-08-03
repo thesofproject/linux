@@ -122,13 +122,10 @@ int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev)
 			 __func__, ret);
 	}
 
-	/* restore the pipelines of all audio instances backed by this DSP */
-	ret = sof_restore_pipelines(sdev);
-	if (ret < 0) {
-		dev_err(sdev->dev, "%s: failed to restore pipeline: %d\n",
-			__func__, ret);
+	/* let the clients rebuild the state they had in the DSP */
+	ret = sof_client_fw_booted_dispatcher(sdev);
+	if (ret < 0)
 		goto setup_fail;
-	}
 
 	/* Notify clients not managed by pm framework about core resume */
 	sof_resume_clients(sdev);

@@ -71,8 +71,19 @@ static int sof_audio_client_get_module_name(struct sof_client_dev *cdev,
 					       name, size);
 }
 
+static int sof_audio_client_fw_booted(struct sof_client_dev *cdev)
+{
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	if (!pdata->component)
+		return 0;
+
+	return sof_audio_instance_restore(pdata->component);
+}
+
 static const struct sof_client_ops sof_audio_client_ops = {
 	.ipc_rx_handler = sof_audio_client_ipc_rx_handler,
+	.fw_booted = sof_audio_client_fw_booted,
 	.get_module_name = sof_audio_client_get_module_name,
 };
 

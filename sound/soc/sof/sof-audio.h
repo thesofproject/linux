@@ -653,7 +653,6 @@ const struct sof_ipc_pcm_ops *snd_sof_sdev_get_pcm_ops(struct snd_sof_dev *sdev)
 const struct sof_ipc_tplg_ops *snd_sof_component_get_tplg_ops(struct snd_soc_component *component);
 const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_component *component);
 int sof_instance_set_up_pipelines(struct snd_sof_audio_instance *instance);
-int sof_restore_pipelines(struct snd_sof_dev *sdev);
 
 static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,

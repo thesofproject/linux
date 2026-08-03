@@ -727,6 +727,29 @@ void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev)
 	}
 }
 
+/* Let the clients rebuild the state they had in the DSP before the boot */
+int sof_client_fw_booted_dispatcher(struct snd_sof_dev *sdev)
+{
+	struct sof_client_dev *cdev;
+	int ret;
+
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (!cdev->ops->fw_booted)
+			continue;
+
+		ret = cdev->ops->fw_booted(cdev);
+		if (ret < 0) {
+			dev_err(&cdev->auxdev.dev,
+				"failed to handle the firmware boot: %d\n", ret);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+
 /*
  * Fold the D0i3 votes of every client that implements the d0i3_vote callback:
  *   - any SOF_D0I3_INCOMPATIBLE           -> SOF_D0I3_INCOMPATIBLE (veto)

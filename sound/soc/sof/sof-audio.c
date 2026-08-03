@@ -204,26 +204,21 @@ int sof_audio_instance_resume(struct snd_soc_component *component)
 EXPORT_SYMBOL(sof_audio_instance_resume);
 
 /*
- * Set up the static pipelines of every audio instance. Called after the DSP
- * firmware has been (re)booted, which invalidates the state of all instances
- * backed by that DSP.
+ * Set up the topology pipelines owned by a single audio instance after a DSP
+ * firmware (re)boot, which left nothing of the previous state in the DSP.
  */
-int sof_restore_pipelines(struct snd_sof_dev *sdev)
+int sof_audio_instance_restore(struct snd_soc_component *component)
 {
-	struct snd_sof_audio_instance *instance;
-	int ret;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
 
-	list_for_each_entry(instance, &sdev->audio_instance_list, list) {
-		/* nothing of the previous state is left in the DSP */
-		instance->pipelines_set_up = false;
+	if (!instance)
+		return 0;
 
-		ret = sof_instance_set_up_pipelines(instance);
-		if (ret < 0)
-			return ret;
-	}
+	instance->pipelines_set_up = false;
 
-	return 0;
+	return sof_instance_set_up_pipelines(instance);
 }
+EXPORT_SYMBOL(sof_audio_instance_restore);
 
 /*
  * Check if a DAI widget is an aggregated DAI. Aggregated DAI's have names ending in numbers

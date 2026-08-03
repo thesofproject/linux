@@ -114,12 +114,18 @@ typedef int (*sof_client_module_name_callback)(struct sof_client_dev *cdev,
 					       u32 module_id, int instance_id,
 					       char *name, size_t size);
 
+typedef int (*sof_client_fw_booted_callback)(struct sof_client_dev *cdev);
+
 /**
  * struct sof_client_ops - SOF client event callbacks
  * @ipc_rx_handler:	Called for every DSP-initiated IPC notification. The
  *			client is responsible for filtering the message types it
  *			is interested in.
  * @fw_state_handler:	Called on every DSP firmware state change.
+ * @fw_booted:		Called after the DSP firmware has been (re)booted and
+ *			before the firmware context is restored. Nothing of the
+ *			state the client had in the DSP survived the boot. A
+ *			non zero return aborts the boot.
  * @d0i3_vote:		Returns the client's D0i3 compatibility vote, see
  *			enum sof_d0i3_vote.
  * @get_module_name:	Copies the topology name of a module instance owned by
@@ -137,6 +143,7 @@ typedef int (*sof_client_module_name_callback)(struct sof_client_dev *cdev,
 struct sof_client_ops {
 	sof_client_event_callback ipc_rx_handler;
 	sof_client_fw_state_callback fw_state_handler;
+	sof_client_fw_booted_callback fw_booted;
 	sof_client_d0i3_vote_callback d0i3_vote;
 	sof_client_module_name_callback get_module_name;
 };
