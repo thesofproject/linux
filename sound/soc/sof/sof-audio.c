@@ -103,30 +103,6 @@ snd_sof_component_get_audio_instance(struct snd_soc_component *component)
 }
 EXPORT_SYMBOL(snd_sof_component_get_audio_instance);
 
-const struct sof_ipc_tplg_ops *snd_sof_sdev_get_tplg_ops(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_audio_instance *instance;
-
-	guard(rcu)();
-	list_for_each_entry_rcu(instance, &sdev->audio_instance_list, list)
-		return instance->tplg_ops;
-
-	return NULL;
-}
-EXPORT_SYMBOL(snd_sof_sdev_get_tplg_ops);
-
-const struct sof_ipc_pcm_ops *snd_sof_sdev_get_pcm_ops(struct snd_sof_dev *sdev)
-{
-	struct snd_sof_audio_instance *instance;
-
-	guard(rcu)();
-	list_for_each_entry_rcu(instance, &sdev->audio_instance_list, list)
-		return instance->pcm_ops;
-
-	return NULL;
-}
-EXPORT_SYMBOL(snd_sof_sdev_get_pcm_ops);
-
 const struct sof_ipc_tplg_ops *snd_sof_component_get_tplg_ops(struct snd_soc_component *component)
 {
 	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);

@@ -648,8 +648,6 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance);
 struct snd_sof_audio_instance *
 snd_sof_component_get_audio_instance(struct snd_soc_component *component);
-const struct sof_ipc_tplg_ops *snd_sof_sdev_get_tplg_ops(struct snd_sof_dev *sdev);
-const struct sof_ipc_pcm_ops *snd_sof_sdev_get_pcm_ops(struct snd_sof_dev *sdev);
 const struct sof_ipc_tplg_ops *snd_sof_component_get_tplg_ops(struct snd_soc_component *component);
 const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_component *component);
 int sof_instance_set_up_pipelines(struct snd_sof_audio_instance *instance);
