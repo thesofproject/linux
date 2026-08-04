@@ -18,6 +18,16 @@ module_param_named(on_demand_boot, override_on_demand_boot, int, 0444);
 MODULE_PARM_DESC(on_demand_boot, "Force on-demand DSP boot: 0 - disabled, 1 - enabled");
 
 /*
+ * D0i3 is only entered if at least one client has an active stream and all
+ * of the active streams tolerate the DSP being in the low power substate.
+ */
+bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
+{
+	return sof_client_get_d0i3_vote(sdev) == SOF_D0I3_COMPATIBLE_ACTIVE;
+}
+EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_compatible);
+
+/*
  * Helper function to determine the target DSP state during
  * system suspend. This function only cares about the device
  * D-states. Platform-specific substates, if any, should be

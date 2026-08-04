@@ -1110,15 +1110,18 @@ int sof_widget_list_free(struct snd_soc_component *component, struct snd_sof_pcm
  * helper to determine if there are only D0i3 compatible
  * streams active
  */
-bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
+enum sof_d0i3_vote sof_audio_instance_d0i3_vote(struct snd_soc_component *component)
 {
-	struct snd_sof_audio_instance *instance;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
 	struct snd_pcm_substream *substream;
+	enum sof_d0i3_vote vote = SOF_D0I3_NO_ACTIVITY;
 	struct snd_sof_pcm *spcm;
-	bool d0i3_compatible_active = false;
 	int dir;
 
-	for_each_spcm_in_instances(spcm, sdev, instance) {
+	if (!instance)
+		return vote;
+
+	list_for_each_entry(spcm, &instance->pcm_list, list) {
 		for_each_pcm_streams(dir) {
 			substream = spcm->stream[dir].substream;
 			if (!substream || !substream->runtime)
@@ -1130,30 +1133,15 @@ bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
 			 * stream state.
 			 */
 			if (!spcm->stream[dir].d0i3_compatible)
-				return false;
+				return SOF_D0I3_INCOMPATIBLE;
 
-			d0i3_compatible_active = true;
+			vote = SOF_D0I3_COMPATIBLE_ACTIVE;
 		}
 	}
 
-	/*
-	 * Fold in the votes of any sof-client that participates in the D0i3
-	 * decision: an incompatible client stream vetoes D0i3, a compatible
-	 * active client stream counts as compatible activity.
-	 */
-	switch (sof_client_get_d0i3_vote(sdev)) {
-	case SOF_D0I3_INCOMPATIBLE:
-		return false;
-	case SOF_D0I3_COMPATIBLE_ACTIVE:
-		d0i3_compatible_active = true;
-		break;
-	case SOF_D0I3_NO_ACTIVITY:
-		break;
-	}
-
-	return d0i3_compatible_active;
+	return vote;
 }
-EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_compatible);
+EXPORT_SYMBOL(sof_audio_instance_d0i3_vote);
 
 bool sof_audio_instance_suspend_ignored(struct snd_soc_component *component)
 {

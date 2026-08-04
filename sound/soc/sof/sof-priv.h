@@ -881,6 +881,8 @@ int sof_stream_pcm_open(struct snd_soc_component *component,
 int sof_stream_pcm_close(struct snd_soc_component *component,
 			 struct snd_pcm_substream *substream);
 
+bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev);
+
 /* SOF client support */
 struct sof_client_dev;
 
