@@ -332,7 +332,8 @@ int acp_dsp_stream_put(struct snd_sof_dev *sdev, struct acp_dsp_stream *acp_stre
 /*
  * DSP PCM Operations.
  */
-int acp_pcm_open(struct snd_soc_component *component, struct snd_pcm_substream *substream);
+int acp_pcm_open(struct snd_soc_component *component, struct snd_sof_pcm *spcm,
+		 struct snd_pcm_substream *substream);
 int acp_pcm_close(struct snd_soc_component *component, struct snd_pcm_substream *substream);
 int acp_pcm_hw_params(struct snd_soc_component *component, struct snd_pcm_substream *substream,
 		      struct snd_pcm_hw_params *params,

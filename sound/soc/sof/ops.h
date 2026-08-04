@@ -417,13 +417,14 @@ static inline int snd_sof_dsp_send_msg(struct snd_sof_dev *sdev,
 /* host PCM ops */
 static inline int
 snd_sof_pcm_platform_open(struct snd_soc_component *component,
+			  struct snd_sof_pcm *spcm,
 			  struct snd_pcm_substream *substream)
 {
 	struct snd_sof_audio_instance *ins =
 		snd_sof_component_get_audio_instance(component);
 
 	if (ins && ins->audio_ops->pcm_open)
-		return ins->audio_ops->pcm_open(component, substream);
+		return ins->audio_ops->pcm_open(component, spcm, substream);
 
 	return 0;
 }

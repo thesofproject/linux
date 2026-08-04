@@ -305,22 +305,15 @@ int hda_dsp_compr_pointer(struct snd_soc_component *component,
 EXPORT_SYMBOL_NS(hda_dsp_compr_pointer, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_dsp_pcm_open(struct snd_soc_component *component,
+		     struct snd_sof_pcm *spcm,
 		     struct snd_pcm_substream *substream)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	const struct sof_intel_dsp_desc *chip_info = get_chip_info(sdev->pdata);
-	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct hdac_ext_stream *dsp_stream;
-	struct snd_sof_pcm *spcm;
 	int direction = substream->stream;
 	u32 flags = 0;
-
-	spcm = snd_sof_find_spcm_dai(component, rtd);
-	if (!spcm) {
-		dev_err(sdev->dev, "error: can't find PCM with DAI ID %d\n", rtd->dai_link->id);
-		return -EINVAL;
-	}
 
 	/*
 	 * if we want the .ack to work, we need to prevent the control from being mapped.

@@ -603,7 +603,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	spcm->stream[substream->stream].substream = substream;
 	spcm->prepared[substream->stream] = false;
 
-	ret = snd_sof_pcm_platform_open(component, substream);
+	ret = snd_sof_pcm_platform_open(component, spcm, substream);
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
 			 "platform pcm open failed %d\n", ret);

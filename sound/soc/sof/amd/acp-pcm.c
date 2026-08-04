@@ -56,7 +56,7 @@ int acp_pcm_hw_params(struct snd_soc_component *component,
 }
 EXPORT_SYMBOL_NS(acp_pcm_hw_params, "SND_SOC_SOF_AMD_COMMON");
 
-int acp_pcm_open(struct snd_soc_component *component,
+int acp_pcm_open(struct snd_soc_component *component, struct snd_sof_pcm *spcm,
 		 struct snd_pcm_substream *substream)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
