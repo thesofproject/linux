@@ -59,6 +59,7 @@ extern const struct sof_audio_client_ipc_ops sof_audio_client_ipc4_ops;
 int sof_audio_instance_suspend(struct snd_soc_component *component);
 int sof_audio_instance_resume(struct snd_soc_component *component);
 int sof_audio_instance_restore(struct snd_soc_component *component);
+bool sof_audio_instance_suspend_ignored(struct snd_soc_component *component);
 
 void snd_sof_new_platform_drv(struct sof_client_dev *cdev,
 			      struct snd_soc_component_driver * const pd);

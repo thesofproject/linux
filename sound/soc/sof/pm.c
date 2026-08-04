@@ -38,11 +38,11 @@ static u32 snd_sof_dsp_power_target(struct snd_sof_dev *sdev)
 	case SOF_SUSPEND_S0IX:
 		/*
 		 * Currently, the only criterion for retaining the DSP in D0
-		 * is that there are streams that ignored the suspend trigger.
+		 * is that a client left something running in it on purpose.
 		 * Additional criteria such Soundwire clock-stop mode and
 		 * device suspend latency considerations will be added later.
 		 */
-		if (snd_sof_stream_suspend_ignored(sdev))
+		if (sof_client_keep_dsp_in_d0(sdev))
 			target_dsp_state = SOF_DSP_PM_D0;
 		else
 			target_dsp_state = SOF_DSP_PM_D3;

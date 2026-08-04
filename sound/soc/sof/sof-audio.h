@@ -720,7 +720,6 @@ static inline void snd_sof_compr_init_elapsed_work(struct work_struct *work) { }
 int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_params *params);
 
 /* PM */
-bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev);
 bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev);
 
 /* Machine driver enumeration */

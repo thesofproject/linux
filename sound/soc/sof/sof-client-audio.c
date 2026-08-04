@@ -81,9 +81,21 @@ static int sof_audio_client_fw_booted(struct sof_client_dev *cdev)
 	return sof_audio_instance_restore(pdata->component);
 }
 
+/* Streams which ignored the suspend trigger are left running in the DSP */
+static bool sof_audio_client_keep_dsp_in_d0(struct sof_client_dev *cdev)
+{
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	if (!pdata->component)
+		return false;
+
+	return sof_audio_instance_suspend_ignored(pdata->component);
+}
+
 static const struct sof_client_ops sof_audio_client_ops = {
 	.ipc_rx_handler = sof_audio_client_ipc_rx_handler,
 	.fw_booted = sof_audio_client_fw_booted,
+	.keep_dsp_in_d0 = sof_audio_client_keep_dsp_in_d0,
 	.get_module_name = sof_audio_client_get_module_name,
 };
 

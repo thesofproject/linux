@@ -1179,12 +1179,15 @@ bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_compatible);
 
-bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev)
+bool sof_audio_instance_suspend_ignored(struct snd_soc_component *component)
 {
-	struct snd_sof_audio_instance *instance;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
 	struct snd_sof_pcm *spcm;
 
-	for_each_spcm_in_instances(spcm, sdev, instance) {
+	if (!instance)
+		return false;
+
+	list_for_each_entry(spcm, &instance->pcm_list, list) {
 		if (spcm->stream[SNDRV_PCM_STREAM_PLAYBACK].suspend_ignored ||
 		    spcm->stream[SNDRV_PCM_STREAM_CAPTURE].suspend_ignored)
 			return true;
@@ -1192,6 +1195,7 @@ bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev)
 
 	return false;
 }
+EXPORT_SYMBOL(sof_audio_instance_suspend_ignored);
 
 /*
  * Generic object lookup APIs.

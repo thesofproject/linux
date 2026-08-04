@@ -891,6 +891,7 @@ void sof_unregister_clients(struct snd_sof_dev *sdev);
 void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *msg_buf);
 void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev);
 int sof_client_fw_booted_dispatcher(struct snd_sof_dev *sdev);
+bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev);
 enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev);
 int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state);
 int sof_resume_clients(struct snd_sof_dev *sdev);
@@ -931,6 +932,11 @@ static inline void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev)
 static inline int sof_client_fw_booted_dispatcher(struct snd_sof_dev *sdev)
 {
 	return 0;
+}
+
+static inline bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev)
+{
+	return false;
 }
 
 static inline enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)

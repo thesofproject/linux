@@ -751,6 +751,25 @@ int sof_client_fw_booted_dispatcher(struct snd_sof_dev *sdev)
 }
 
 /*
+ * Any client which left state running in the DSP on purpose keeps it powered
+ * over the system suspend. Clients without the callback do not participate.
+ */
+bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev)
+{
+	struct sof_client_dev *cdev;
+
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (cdev->ops->keep_dsp_in_d0 && cdev->ops->keep_dsp_in_d0(cdev))
+			return true;
+	}
+
+	return false;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_keep_dsp_in_d0, "SND_SOC_SOF_CLIENT");
+
+/*
  * Fold the D0i3 votes of every client that implements the d0i3_vote callback:
  *   - any SOF_D0I3_INCOMPATIBLE           -> SOF_D0I3_INCOMPATIBLE (veto)
  *   - else any SOF_D0I3_COMPATIBLE_ACTIVE -> SOF_D0I3_COMPATIBLE_ACTIVE

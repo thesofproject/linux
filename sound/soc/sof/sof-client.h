@@ -116,6 +116,8 @@ typedef int (*sof_client_module_name_callback)(struct sof_client_dev *cdev,
 
 typedef int (*sof_client_fw_booted_callback)(struct sof_client_dev *cdev);
 
+typedef bool (*sof_client_keep_dsp_in_d0_callback)(struct sof_client_dev *cdev);
+
 /**
  * struct sof_client_ops - SOF client event callbacks
  * @ipc_rx_handler:	Called for every DSP-initiated IPC notification. The
@@ -126,6 +128,10 @@ typedef int (*sof_client_fw_booted_callback)(struct sof_client_dev *cdev);
  *			before the firmware context is restored. Nothing of the
  *			state the client had in the DSP survived the boot. A
  *			non zero return aborts the boot.
+ * @keep_dsp_in_d0:	Returns true if the client left something running in
+ *			the DSP on purpose which would not survive powering it
+ *			down. The DSP is kept in D0 over the system suspend if
+ *			any client asks for it.
  * @d0i3_vote:		Returns the client's D0i3 compatibility vote, see
  *			enum sof_d0i3_vote.
  * @get_module_name:	Copies the topology name of a module instance owned by
@@ -144,6 +150,7 @@ struct sof_client_ops {
 	sof_client_event_callback ipc_rx_handler;
 	sof_client_fw_state_callback fw_state_handler;
 	sof_client_fw_booted_callback fw_booted;
+	sof_client_keep_dsp_in_d0_callback keep_dsp_in_d0;
 	sof_client_d0i3_vote_callback d0i3_vote;
 	sof_client_module_name_callback get_module_name;
 };
