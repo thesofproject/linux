@@ -434,17 +434,8 @@ int hda_dsp_compr_open(struct snd_soc_component *component,
 		       struct snd_compr_stream *cstream)
 {
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct hdac_ext_stream *dsp_stream;
-	struct snd_sof_pcm *spcm;
 	int direction = cstream->direction;
-
-	spcm = snd_sof_find_spcm_dai(component, rtd);
-	if (!spcm) {
-		dev_err(sdev->dev, "%s: can't find PCM with DAI ID %d\n",
-			__func__, rtd->dai_link->id);
-		return -EINVAL;
-	}
 
 	dsp_stream = hda_dsp_stream_get(sdev, direction, 0);
 	if (!dsp_stream) {
