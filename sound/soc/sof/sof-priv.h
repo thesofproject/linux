@@ -899,6 +899,8 @@ void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev);
 int sof_client_fw_booted_dispatcher(struct snd_sof_dev *sdev);
 bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev);
 enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev);
+void sof_client_period_elapsed(struct snd_sof_dev *sdev,
+			       struct snd_pcm_substream *substream);
 int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state);
 int sof_resume_clients(struct snd_sof_dev *sdev);
 #else /* CONFIG_SND_SOC_SOF_CLIENT */
@@ -948,6 +950,11 @@ static inline bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev)
 static inline enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)
 {
 	return SOF_D0I3_NO_ACTIVITY;
+}
+
+static inline void sof_client_period_elapsed(struct snd_sof_dev *sdev,
+					     struct snd_pcm_substream *substream)
+{
 }
 
 static inline int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state)

@@ -52,7 +52,7 @@ static void sof_audio_client_ipc3_period_elapsed(struct sof_client_dev *cdev,
 	else if (stream->substream->runtime &&
 		 !stream->substream->runtime->no_period_wakeup)
 		/* only inform ALSA for period_wakeup mode */
-		snd_sof_pcm_period_elapsed(stream->substream);
+		queue_work(system_highpri_wq, &stream->period_elapsed_work);
 }
 
 /* DSP notifies host of an XRUN within FW */

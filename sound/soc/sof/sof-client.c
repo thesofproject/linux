@@ -802,6 +802,25 @@ enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_d0i3_vote, "SND_SOC_SOF_CLIENT");
 
+void sof_client_period_elapsed(struct snd_sof_dev *sdev,
+			       struct snd_pcm_substream *substream)
+{
+	struct sof_client_dev *cdev;
+
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (!cdev->ops->period_elapsed)
+			continue;
+
+		if (cdev->ops->period_elapsed(cdev, substream))
+			return;
+	}
+
+	dev_warn_ratelimited(sdev->dev, "period elapsed for unknown stream\n");
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_period_elapsed, "SND_SOC_SOF_CLIENT");
+
 int sof_client_register_ops(struct sof_client_dev *cdev,
 			    const struct sof_client_ops *ops)
 {

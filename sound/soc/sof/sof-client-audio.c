@@ -102,11 +102,23 @@ static enum sof_d0i3_vote sof_audio_client_d0i3_vote(struct sof_client_dev *cdev
 	return sof_audio_instance_d0i3_vote(pdata->component);
 }
 
+static bool sof_audio_client_period_elapsed(struct sof_client_dev *cdev,
+					    struct snd_pcm_substream *substream)
+{
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	if (!pdata->component)
+		return false;
+
+	return sof_audio_instance_period_elapsed(pdata->component, substream);
+}
+
 static const struct sof_client_ops sof_audio_client_ops = {
 	.ipc_rx_handler = sof_audio_client_ipc_rx_handler,
 	.fw_booted = sof_audio_client_fw_booted,
 	.keep_dsp_in_d0 = sof_audio_client_keep_dsp_in_d0,
 	.d0i3_vote = sof_audio_client_d0i3_vote,
+	.period_elapsed = sof_audio_client_period_elapsed,
 	.get_module_name = sof_audio_client_get_module_name,
 };
 

@@ -40,33 +40,33 @@ void snd_sof_pcm_init_elapsed_work(struct work_struct *work)
 }
 
 /*
- * sof pcm period elapse, this could be called at irq thread context.
+ * Called from atomic context, the platform interrupt handler may hold its
+ * own locks, so only queue the work here.
  */
-void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
+bool sof_audio_instance_period_elapsed(struct snd_soc_component *component,
+				       struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_soc_component *component =
-		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
 	struct snd_sof_pcm *spcm;
 
+	/* dai_link ids are only unique within a card, match the component first */
+	if (component != snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME))
+		return false;
+
 	spcm = snd_sof_find_spcm_dai(component, rtd);
-	if (!spcm) {
-		dev_err(component->dev,
-			"error: period elapsed for unknown stream!\n");
-		return;
-	}
+	if (!spcm)
+		return false;
 
 	/*
-	 * snd_pcm_period_elapsed() can be called in interrupt context
-	 * before IRQ_HANDLED is returned. Inside snd_pcm_period_elapsed(),
-	 * when the PCM is done draining or xrun happened, a STOP IPC will
-	 * then be sent and this IPC will hit IPC timeout.
-	 * To avoid sending IPC before the previous IPC is handled, we
-	 * schedule delayed work here to call the snd_pcm_period_elapsed().
+	 * snd_pcm_period_elapsed() sends a STOP IPC when the PCM is done
+	 * draining or an xrun happened, which would hit an IPC timeout if it
+	 * was sent before the previous IPC is handled.
 	 */
 	queue_work(system_highpri_wq, &spcm->stream[substream->stream].period_elapsed_work);
+
+	return true;
 }
-EXPORT_SYMBOL(snd_sof_pcm_period_elapsed);
+EXPORT_SYMBOL(sof_audio_instance_period_elapsed);
 
 int
 sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,

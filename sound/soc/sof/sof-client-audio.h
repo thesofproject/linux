@@ -61,6 +61,8 @@ int sof_audio_instance_resume(struct snd_soc_component *component);
 int sof_audio_instance_restore(struct snd_soc_component *component);
 bool sof_audio_instance_suspend_ignored(struct snd_soc_component *component);
 enum sof_d0i3_vote sof_audio_instance_d0i3_vote(struct snd_soc_component *component);
+bool sof_audio_instance_period_elapsed(struct snd_soc_component *component,
+				       struct snd_pcm_substream *substream);
 
 void snd_sof_new_platform_drv(struct sof_client_dev *cdev,
 			      struct snd_soc_component_driver * const pd);

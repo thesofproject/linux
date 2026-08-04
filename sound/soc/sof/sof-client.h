@@ -118,6 +118,9 @@ typedef int (*sof_client_fw_booted_callback)(struct sof_client_dev *cdev);
 
 typedef bool (*sof_client_keep_dsp_in_d0_callback)(struct sof_client_dev *cdev);
 
+typedef bool (*sof_client_period_elapsed_callback)(struct sof_client_dev *cdev,
+						  struct snd_pcm_substream *substream);
+
 /**
  * struct sof_client_ops - SOF client event callbacks
  * @ipc_rx_handler:	Called for every DSP-initiated IPC notification. The
@@ -134,6 +137,11 @@ typedef bool (*sof_client_keep_dsp_in_d0_callback)(struct sof_client_dev *cdev);
  *			any client asks for it.
  * @d0i3_vote:		Returns the client's D0i3 compatibility vote, see
  *			enum sof_d0i3_vote.
+ * @period_elapsed:	Called when the platform completed a period of a DMA
+ *			stream. Returns true if the substream belongs to the
+ *			client, which ends the search. Unlike the other
+ *			callbacks this one is invoked from atomic context and
+ *			must not sleep.
  * @get_module_name:	Copies the topology name of a module instance owned by
  *			the client. Returns -ENOENT if the client does not own
  *			the module.
@@ -144,7 +152,7 @@ typedef bool (*sof_client_keep_dsp_in_d0_callback)(struct sof_client_dev *cdev);
  * and are invoked for every client that registered ops.
  *
  * The callbacks are invoked from an SRCU read side critical section, so they
- * may sleep and may send IPC messages to the DSP.
+ * may sleep and may send IPC messages to the DSP, unless noted otherwise.
  */
 struct sof_client_ops {
 	sof_client_event_callback ipc_rx_handler;
@@ -152,6 +160,7 @@ struct sof_client_ops {
 	sof_client_fw_booted_callback fw_booted;
 	sof_client_keep_dsp_in_d0_callback keep_dsp_in_d0;
 	sof_client_d0i3_vote_callback d0i3_vote;
+	sof_client_period_elapsed_callback period_elapsed;
 	sof_client_module_name_callback get_module_name;
 };
 

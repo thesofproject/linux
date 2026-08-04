@@ -859,8 +859,9 @@ hda_dsp_compr_bytes_transferred(struct hdac_stream *hstream, int direction)
 	hstream->curr_pos += num_bytes;
 }
 
-static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
+static bool hda_dsp_stream_check(struct snd_sof_dev *sdev, u32 status)
 {
+	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
 	struct hdac_stream *s;
 	bool active = false;
@@ -897,7 +898,7 @@ static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 
 			/* Inform ALSA only if the IPC position is not used */
 			if (s->substream && sof_hda->no_ipc_position) {
-				snd_sof_pcm_period_elapsed(s->substream);
+				sof_client_period_elapsed(sdev, s->substream);
 			} else if (s->cstream) {
 				hda_dsp_compr_bytes_transferred(s, s->cstream->direction);
 				snd_compr_fragment_elapsed(s->cstream);
@@ -926,7 +927,7 @@ irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 		status = snd_sof_dsp_read(sdev, HDA_DSP_HDA_BAR, SOF_HDA_INTSTS);
 
 		/* check streams */
-		active = hda_dsp_stream_check(bus, status);
+		active = hda_dsp_stream_check(sdev, status);
 
 		/* check and clear RIRB interrupt */
 		if (status & AZX_INT_CTRL_EN) {
