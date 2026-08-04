@@ -283,6 +283,26 @@ const char *sof_ipc4_pipeline_state_str(enum sof_ipc4_pipeline_state state)
 }
 #endif
 
+int sof_ipc4_set_pipeline_state(struct sof_client_dev *cdev, u32 instance_id, u32 state)
+{
+	struct sof_ipc4_msg msg = {{ 0 }};
+	u32 primary;
+
+	dev_dbg(&cdev->auxdev.dev, "Set pipeline %d to state %d%s", instance_id, state,
+		sof_ipc4_pipeline_state_str(state));
+
+	primary = state;
+	primary |= SOF_IPC4_GLB_PIPE_STATE_ID(instance_id);
+	primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_SET_PIPELINE_STATE);
+	primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
+
+	msg.primary = primary;
+
+	return sof_client_ipc_tx_message_no_reply(cdev, &msg);
+}
+EXPORT_SYMBOL(sof_ipc4_set_pipeline_state);
+
 static void sof_ipc4_dump_payload(struct snd_sof_dev *sdev,
 				  void *ipc_data, size_t size)
 {

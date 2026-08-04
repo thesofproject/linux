@@ -76,7 +76,7 @@ static int sof_ipc4_set_multi_pipeline_state(struct snd_soc_component *component
 
 	/* trigger a single pipeline */
 	if (trigger_list->count == 1)
-		return sof_ipc4_set_pipeline_state(component,
+		return sof_ipc4_set_pipeline_state(cdev,
 						   trigger_list->pipeline_instance_ids[0],
 						   state);
 
@@ -101,27 +101,6 @@ static int sof_ipc4_set_multi_pipeline_state(struct snd_soc_component *component
 
 	return sof_client_ipc_tx_message_no_reply(cdev, &msg);
 }
-
-int sof_ipc4_set_pipeline_state(struct snd_soc_component *component, u32 instance_id, u32 state)
-{
-	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
-	struct sof_ipc4_msg msg = {{ 0 }};
-	u32 primary;
-
-	dev_dbg(component->dev, "Set pipeline %d to state %d%s", instance_id, state,
-		sof_ipc4_pipeline_state_str(state));
-
-	primary = state;
-	primary |= SOF_IPC4_GLB_PIPE_STATE_ID(instance_id);
-	primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_GLB_SET_PIPELINE_STATE);
-	primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
-	primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_FW_GEN_MSG);
-
-	msg.primary = primary;
-
-	return sof_client_ipc_tx_message_no_reply(cdev, &msg);
-}
-EXPORT_SYMBOL(sof_ipc4_set_pipeline_state);
 
 static void sof_ipc4_add_pipeline_by_priority(struct ipc4_pipeline_set_state_data *trigger_list,
 					      struct snd_sof_widget *pipe_widget,
