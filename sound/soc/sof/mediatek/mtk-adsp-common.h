@@ -18,5 +18,6 @@ int mtk_adsp_stream_pcm_hw_params(struct snd_soc_component *component,
 				  struct snd_pcm_hw_params *params,
 				  struct snd_sof_platform_stream_params *platform_params);
 snd_pcm_uframes_t mtk_adsp_stream_pcm_pointer(struct snd_soc_component *component,
+					      struct snd_sof_pcm *spcm,
 					      struct snd_pcm_substream *substream);
 #endif

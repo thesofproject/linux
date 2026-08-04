@@ -615,20 +615,6 @@ snd_sof_set_stream_data_offset(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-/* host stream pointer */
-static inline snd_pcm_uframes_t
-snd_sof_pcm_platform_pointer(struct snd_soc_component *component,
-			     struct snd_pcm_substream *substream)
-{
-	struct snd_sof_audio_instance *ins =
-		snd_sof_component_get_audio_instance(component);
-
-	if (ins && ins->audio_ops->pcm_pointer)
-		return ins->audio_ops->pcm_pointer(component, substream);
-
-	return 0;
-}
-
 /* pcm ack */
 static inline int snd_sof_pcm_platform_ack(struct snd_soc_component *component,
 					   struct snd_pcm_substream *substream)

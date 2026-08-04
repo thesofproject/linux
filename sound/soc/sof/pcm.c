@@ -532,13 +532,13 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 	if (ret != -EOPNOTSUPP)
 		return ret ? ret : host;
 
-	/* use dsp ops pointer callback directly if set */
-	if (ins && ins->audio_ops->pcm_pointer)
-		return ins->audio_ops->pcm_pointer(component, substream);
-
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)
 		return -EINVAL;
+
+	/* use dsp ops pointer callback directly if set */
+	if (ins && ins->audio_ops->pcm_pointer)
+		return ins->audio_ops->pcm_pointer(component, spcm, substream);
 
 	/* read position from DSP */
 	host = bytes_to_frames(substream->runtime,

@@ -266,21 +266,13 @@ int hda_dsp_compr_trigger(struct snd_soc_component *component,
 EXPORT_SYMBOL_NS(hda_dsp_compr_trigger, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_soc_component *component,
+				      struct snd_sof_pcm *spcm,
 				      struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct hdac_stream *hstream = substream->runtime->private_data;
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
-	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t pos;
-
-	spcm = snd_sof_find_spcm_dai(component, rtd);
-	if (!spcm) {
-		dev_warn_ratelimited(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
-				     rtd->dai_link->id);
-		return 0;
-	}
 
 	if (hda && !hda->no_ipc_position) {
 		/* read position from IPC position */

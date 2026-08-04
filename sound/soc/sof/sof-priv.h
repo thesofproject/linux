@@ -128,6 +128,7 @@ struct snd_sof_ipc;
 struct snd_sof_debugfs_map;
 struct snd_soc_tplg_ops;
 struct snd_soc_component;
+struct snd_sof_pcm;
 struct snd_sof_pdata;
 struct snd_sof_platform_stream_params;
 
@@ -154,6 +155,7 @@ struct sof_audio_ops {
 	int (*pcm_trigger)(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream, int cmd);
 	snd_pcm_uframes_t (*pcm_pointer)(struct snd_soc_component *component,
+					 struct snd_sof_pcm *spcm,
 					 struct snd_pcm_substream *substream);
 	int (*pcm_ack)(struct snd_soc_component *component,
 		       struct snd_pcm_substream *substream);
