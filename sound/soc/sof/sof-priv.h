@@ -225,7 +225,6 @@ struct snd_sof_audio_instance {
 	struct list_head widget_list;
 	bool led_present;
 	bool pipelines_set_up;
-	struct list_head list;
 };
 
 /**
@@ -667,8 +666,6 @@ struct snd_sof_dev {
 	/* topology */
 	struct snd_soc_tplg_ops *tplg_ops;
 	const struct sof_audio_ops *audio_ops;
-	struct list_head audio_instance_list;
-	spinlock_t audio_instance_list_lock;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 
 	/* FW configuration */
@@ -882,6 +879,7 @@ int sof_stream_pcm_close(struct snd_soc_component *component,
 			 struct snd_pcm_substream *substream);
 
 bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev);
+bool snd_sof_dsp_state_is_d0i3_streaming(struct snd_sof_dev *sdev);
 
 /* SOF client support */
 struct sof_client_dev;

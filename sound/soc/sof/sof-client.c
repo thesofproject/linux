@@ -770,10 +770,8 @@ bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev)
 EXPORT_SYMBOL_NS_GPL(sof_client_keep_dsp_in_d0, "SND_SOC_SOF_CLIENT");
 
 /*
- * Fold the D0i3 votes of every client that implements the d0i3_vote callback:
- *   - any SOF_D0I3_INCOMPATIBLE           -> SOF_D0I3_INCOMPATIBLE (veto)
- *   - else any SOF_D0I3_COMPATIBLE_ACTIVE -> SOF_D0I3_COMPATIBLE_ACTIVE
- *   - else                                -> SOF_D0I3_NO_ACTIVITY
+ * Fold the D0i3 votes of every client that implements the d0i3_vote callback by
+ * taking the highest one, SOF_D0I3_INCOMPATIBLE being a veto.
  * Clients without the callback do not participate in the vote.
  */
 enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)
@@ -784,18 +782,16 @@ enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)
 	guard(srcu)(&sdev->client_ops_srcu);
 	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
 				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		enum sof_d0i3_vote vote;
+
 		if (!cdev->ops->d0i3_vote)
 			continue;
 
-		switch (cdev->ops->d0i3_vote(cdev)) {
-		case SOF_D0I3_INCOMPATIBLE:
-			return SOF_D0I3_INCOMPATIBLE;
-		case SOF_D0I3_COMPATIBLE_ACTIVE:
-			result = SOF_D0I3_COMPATIBLE_ACTIVE;
-			break;
-		case SOF_D0I3_NO_ACTIVITY:
-			break;
-		}
+		vote = cdev->ops->d0i3_vote(cdev);
+		if (vote == SOF_D0I3_INCOMPATIBLE)
+			return vote;
+
+		result = max(result, vote);
 	}
 
 	return result;

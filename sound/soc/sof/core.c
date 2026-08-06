@@ -670,7 +670,6 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	if (ret)
 		return ret;
 
-	INIT_LIST_HEAD(&sdev->audio_instance_list);
 	INIT_LIST_HEAD(&sdev->ipc_client_list);
 	INIT_LIST_HEAD(&sdev->client_ops_list);
 
@@ -684,7 +683,6 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
-	spin_lock_init(&sdev->audio_instance_list_lock);
 	mutex_init(&sdev->power_state_access);
 	mutex_init(&sdev->ipc_client_mutex);
 	mutex_init(&sdev->client_ops_mutex);

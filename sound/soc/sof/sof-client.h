@@ -94,16 +94,14 @@ typedef void (*sof_client_fw_state_callback)(struct sof_client_dev *cdev,
  * enum sof_d0i3_vote - a client's vote on DSP D0i3 low-power entry
  *
  * A client reports whether its currently active streams permit the DSP to
- * enter the low-power D0i3 substate. The core folds the votes of all clients
- * that implement the d0i3_vote callback:
- *   - any SOF_D0I3_INCOMPATIBLE           -> D0i3 denied
- *   - else any SOF_D0I3_COMPATIBLE_ACTIVE -> D0i3 allowed
- *   - else (all SOF_D0I3_NO_ACTIVITY)     -> D0i3 denied, nothing to keep it up
- * Clients without the callback do not participate in the vote.
+ * enter the low-power D0i3 substate. The values are ordered by precedence, the
+ * core folds the votes of all clients that implement the d0i3_vote callback by
+ * taking the highest one. Clients without the callback do not participate.
  */
 enum sof_d0i3_vote {
 	SOF_D0I3_NO_ACTIVITY = 0,	/* no active stream; does not affect the vote */
 	SOF_D0I3_COMPATIBLE_ACTIVE,	/* active streams, all D0i3-compatible */
+	SOF_D0I3_COMPATIBLE_PLAYBACK,	/* the above and at least one is playback */
 	SOF_D0I3_INCOMPATIBLE,		/* an active stream requires the DSP in D0i0 */
 };
 

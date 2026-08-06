@@ -71,9 +71,6 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 	INIT_LIST_HEAD(&instance->kcontrol_list);
 	INIT_LIST_HEAD(&instance->widget_list);
 
-	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
-		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);
-
 	pdata->instance = instance;
 
 	return instance;
@@ -83,13 +80,8 @@ void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance)
 {
 	struct sof_client_dev *cdev = snd_sof_component_get_cdev(instance->component);
 	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
-	struct snd_sof_dev *sdev = instance->sdev;
 
 	pdata->instance = NULL;
-
-	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
-		list_del_rcu(&instance->list);
-	synchronize_rcu();
 }
 
 /*
@@ -1108,7 +1100,10 @@ enum sof_d0i3_vote sof_audio_instance_d0i3_vote(struct snd_soc_component *compon
 			if (!spcm->stream[dir].d0i3_compatible)
 				return SOF_D0I3_INCOMPATIBLE;
 
-			vote = SOF_D0I3_COMPATIBLE_ACTIVE;
+			if (dir == SNDRV_PCM_STREAM_PLAYBACK)
+				vote = SOF_D0I3_COMPATIBLE_PLAYBACK;
+			else
+				vote = max(vote, SOF_D0I3_COMPATIBLE_ACTIVE);
 		}
 	}
 

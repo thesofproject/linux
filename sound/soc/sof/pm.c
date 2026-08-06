@@ -23,9 +23,18 @@ MODULE_PARM_DESC(on_demand_boot, "Force on-demand DSP boot: 0 - disabled, 1 - en
  */
 bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
 {
-	return sof_client_get_d0i3_vote(sdev) == SOF_D0I3_COMPATIBLE_ACTIVE;
+	enum sof_d0i3_vote vote = sof_client_get_d0i3_vote(sdev);
+
+	return vote == SOF_D0I3_COMPATIBLE_ACTIVE || vote == SOF_D0I3_COMPATIBLE_PLAYBACK;
 }
 EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_compatible);
+
+/* Streaming power gating additionally requires an active playback stream. */
+bool snd_sof_dsp_state_is_d0i3_streaming(struct snd_sof_dev *sdev)
+{
+	return sof_client_get_d0i3_vote(sdev) == SOF_D0I3_COMPATIBLE_PLAYBACK;
+}
+EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_streaming);
 
 /*
  * Helper function to determine the target DSP state during
