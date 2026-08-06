@@ -10,7 +10,7 @@
 #include <sound/soc.h>
 #include <sound/sof/header.h>
 #include <sound/sof/stream.h>
-#include <trace/events/sof.h>
+#include <trace/events/sof_audio.h>
 
 #include "sof-audio.h"
 #include "sof-client.h"

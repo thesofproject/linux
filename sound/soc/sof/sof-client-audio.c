@@ -15,6 +15,9 @@
 #include "sof-client.h"
 #include "sof-client-audio.h"
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/sof_audio.h>
+
 #define SOF_AUDIO_SUSPEND_DELAY_MS 3000
 
 static void sof_audio_client_init_debugfs(struct sof_client_dev *cdev,

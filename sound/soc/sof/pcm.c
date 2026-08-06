@@ -13,7 +13,7 @@
 #include <linux/pm_runtime.h>
 #include <sound/pcm_params.h>
 #include <sound/sof.h>
-#include <trace/events/sof.h>
+#include <trace/events/sof_audio.h>
 #include "sof-of-dev.h"
 #include "sof-priv.h"
 #include "sof-audio.h"
