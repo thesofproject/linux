@@ -66,7 +66,6 @@ bool sof_audio_instance_period_elapsed(struct snd_soc_component *component,
 
 	return true;
 }
-EXPORT_SYMBOL(sof_audio_instance_period_elapsed);
 
 int
 sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
@@ -938,4 +937,3 @@ void snd_sof_new_platform_drv(struct sof_client_dev *cdev,
 	if (!sof_client_is_dspless(cdev))
 		pd->be_hw_params_fixup = sof_pcm_dai_link_fixup;
 }
-EXPORT_SYMBOL(snd_sof_new_platform_drv);

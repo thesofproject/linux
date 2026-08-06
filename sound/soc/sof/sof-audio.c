@@ -131,7 +131,6 @@ int sof_audio_instance_suspend(struct snd_soc_component *component)
 
 	return 0;
 }
-EXPORT_SYMBOL(sof_audio_instance_suspend);
 
 /*
  * Set up the topology pipelines owned by a single audio instance.
@@ -142,7 +141,6 @@ int sof_audio_instance_resume(struct snd_soc_component *component)
 
 	return instance ? sof_instance_set_up_pipelines(instance) : 0;
 }
-EXPORT_SYMBOL(sof_audio_instance_resume);
 
 /*
  * Set up the topology pipelines owned by a single audio instance after a DSP
@@ -159,7 +157,6 @@ int sof_audio_instance_restore(struct snd_soc_component *component)
 
 	return sof_instance_set_up_pipelines(instance);
 }
-EXPORT_SYMBOL(sof_audio_instance_restore);
 
 /*
  * Check if a DAI widget is an aggregated DAI. Aggregated DAI's have names ending in numbers
@@ -296,7 +293,6 @@ int sof_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 	guard(mutex)(&swidget->setup_mutex);
 	return sof_widget_free_unlocked(sdev, swidget->scomp, swidget);
 }
-EXPORT_SYMBOL(sof_widget_free);
 
 static int sof_widget_setup_unlocked(struct snd_sof_dev *sdev,
 				     struct snd_soc_component *scomp,
@@ -412,7 +408,6 @@ int sof_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 	guard(mutex)(&swidget->setup_mutex);
 	return sof_widget_setup_unlocked(sdev, swidget->scomp, swidget);
 }
-EXPORT_SYMBOL(sof_widget_setup);
 
 int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsource,
 		    struct snd_soc_dapm_widget *wsink)
@@ -1109,7 +1104,6 @@ enum sof_d0i3_vote sof_audio_instance_d0i3_vote(struct snd_soc_component *compon
 
 	return vote;
 }
-EXPORT_SYMBOL(sof_audio_instance_d0i3_vote);
 
 bool sof_audio_instance_suspend_ignored(struct snd_soc_component *component)
 {
@@ -1127,7 +1121,6 @@ bool sof_audio_instance_suspend_ignored(struct snd_soc_component *component)
 
 	return false;
 }
-EXPORT_SYMBOL(sof_audio_instance_suspend_ignored);
 
 /*
  * Generic object lookup APIs.
@@ -1180,7 +1173,6 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 
 	return NULL;
 }
-EXPORT_SYMBOL(snd_sof_find_spcm_comp);
 
 struct snd_sof_widget *snd_sof_find_swidget(struct snd_soc_component *scomp,
 					    const char *name)
@@ -1343,7 +1335,6 @@ void snd_sof_compr_fragment_elapsed(struct snd_compr_stream *cstream)
 	/* use the same workqueue-based solution as for PCM, cf. snd_sof_pcm_elapsed */
 	schedule_work(&spcm->stream[cstream->direction].period_elapsed_work);
 }
-EXPORT_SYMBOL(snd_sof_compr_fragment_elapsed);
 
 int snd_sof_compr_create_page_table(struct snd_soc_component *component,
 				    struct snd_compr_stream *cstream,
