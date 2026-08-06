@@ -1,19 +1,14 @@
 # SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
 
-snd-sof-y := core.o ops.o loader.o ipc.o pcm.o pm.o debug.o topology.o\
-		control.o trace.o iomem-utils.o sof-audio.o stream-ipc.o\
-		fw-file-profile.o debug-dsp-ops.o
+snd-sof-y := core.o ops.o loader.o ipc.o pm.o debug.o trace.o iomem-utils.o\
+		stream-ipc.o fw-file-profile.o debug-dsp-ops.o
 
 # IPC implementations
 ifneq ($(CONFIG_SND_SOC_SOF_IPC3),)
-snd-sof-y +=	ipc3.o ipc3-loader.o ipc3-topology.o ipc3-control.o ipc3-pcm.o\
-		ipc3-dtrace.o
-snd-sof-$(CONFIG_SND_SOC_SOF_COMPRESS) += ipc3-compress.o
+snd-sof-y +=	ipc3.o ipc3-loader.o ipc3-dtrace.o
 endif
 ifneq ($(CONFIG_SND_SOC_SOF_IPC4),)
-snd-sof-y += ipc4.o ipc4-loader.o ipc4-topology.o ipc4-control.o ipc4-pcm.o\
-		ipc4-mtrace.o ipc4-telemetry.o
-snd-sof-$(CONFIG_SND_SOC_SOF_COMPRESS) += ipc4-compress.o
+snd-sof-y += ipc4.o ipc4-loader.o ipc4-mtrace.o ipc4-telemetry.o
 endif
 
 # SOF client support
@@ -28,12 +23,16 @@ snd-sof-of-y := sof-of-dev.o
 snd-sof-ipc-flood-test-y := sof-client-ipc-flood-test.o
 snd-sof-ipc-msg-injector-y := sof-client-ipc-msg-injector.o
 snd-sof-ipc-kernel-injector-y := sof-client-ipc-kernel-injector.o
-snd-sof-audio-y := sof-client-audio.o
+snd-sof-audio-y := sof-client-audio.o pcm.o topology.o control.o sof-audio.o
 ifneq ($(CONFIG_SND_SOC_SOF_IPC3),)
-snd-sof-audio-y += sof-client-audio-ipc3.o
+snd-sof-audio-y += sof-client-audio-ipc3.o ipc3-topology.o ipc3-control.o\
+		ipc3-pcm.o
+snd-sof-audio-$(CONFIG_SND_SOC_SOF_COMPRESS) += ipc3-compress.o
 endif
 ifneq ($(CONFIG_SND_SOC_SOF_IPC4),)
-snd-sof-audio-y += sof-client-audio-ipc4.o
+snd-sof-audio-y += sof-client-audio-ipc4.o ipc4-topology.o ipc4-control.o\
+		ipc4-pcm.o
+snd-sof-audio-$(CONFIG_SND_SOC_SOF_COMPRESS) += ipc4-compress.o
 endif
 snd-sof-probes-y := sof-client-probes.o
 ifneq ($(CONFIG_SND_SOC_SOF_IPC3),)

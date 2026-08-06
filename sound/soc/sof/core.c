@@ -19,8 +19,11 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/sof.h>
 
-/* used by the audio client for the IPC3 stream position notification */
+/* used by the audio client */
 EXPORT_TRACEPOINT_SYMBOL_GPL(sof_ipc3_period_elapsed_position);
+EXPORT_TRACEPOINT_SYMBOL_GPL(sof_pcm_pointer_position);
+EXPORT_TRACEPOINT_SYMBOL_GPL(sof_widget_setup);
+EXPORT_TRACEPOINT_SYMBOL_GPL(sof_widget_free);
 
 /* Module parameters for firmware, topology and IPC type override */
 static char *override_fw_path;

@@ -395,6 +395,7 @@ struct sof_ipc4_fw_module *sof_ipc4_find_module_by_uuid(struct snd_sof_dev *sdev
 
 	return NULL;
 }
+EXPORT_SYMBOL(sof_ipc4_find_module_by_uuid);
 
 static int sof_ipc4_validate_firmware(struct snd_sof_dev *sdev)
 {
@@ -669,6 +670,7 @@ no_cpc:
 		&fw_module->man4_module_entry.uuid, msg, basecfg->ibs,
 		basecfg->obs);
 }
+EXPORT_SYMBOL(sof_ipc4_update_cpc_from_manifest);
 
 const struct sof_ipc_fw_loader_ops ipc4_loader_ops = {
 	.validate = sof_ipc4_validate_firmware,

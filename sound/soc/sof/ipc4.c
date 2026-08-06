@@ -259,6 +259,7 @@ const char *sof_ipc4_pipeline_state_str(enum sof_ipc4_pipeline_state state)
 		return " (<unknown>)";
 	}
 }
+EXPORT_SYMBOL(sof_ipc4_pipeline_state_str);
 #else /* CONFIG_SND_SOC_SOF_DEBUG_VERBOSE_IPC */
 static void sof_ipc4_log_header(struct device *dev, u8 *text, struct sof_ipc4_msg *msg,
 				bool data_size_valid)
@@ -281,6 +282,7 @@ const char *sof_ipc4_pipeline_state_str(enum sof_ipc4_pipeline_state state)
 {
 	return "";
 }
+EXPORT_SYMBOL(sof_ipc4_pipeline_state_str);
 #endif
 
 int sof_ipc4_set_pipeline_state(struct sof_client_dev *cdev, u32 instance_id, u32 state)
