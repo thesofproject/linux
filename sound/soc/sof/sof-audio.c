@@ -19,6 +19,8 @@ struct snd_sof_audio_instance *
 snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 				struct snd_soc_component *component)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
 	struct snd_sof_audio_instance *instance;
 	const struct sof_ipc_tplg_ops *tplg_ops;
 	const struct sof_ipc_pcm_ops *pcm_ops;
@@ -72,52 +74,23 @@ snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
 		list_add_tail_rcu(&instance->list, &sdev->audio_instance_list);
 
+	pdata->instance = instance;
+
 	return instance;
 }
 
 void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(instance->component);
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
 	struct snd_sof_dev *sdev = instance->sdev;
+
+	pdata->instance = NULL;
 
 	scoped_guard(spinlock, &sdev->audio_instance_list_lock)
 		list_del_rcu(&instance->list);
 	synchronize_rcu();
 }
-
-struct snd_sof_audio_instance *
-snd_sof_component_get_audio_instance(struct snd_soc_component *component)
-{
-	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
-	struct snd_sof_audio_instance *instance;
-
-	if (!sdev)
-		return NULL;
-
-	guard(rcu)();
-	list_for_each_entry_rcu(instance, &sdev->audio_instance_list, list) {
-		if (instance->component == component)
-			return instance;
-	}
-
-	return NULL;
-}
-EXPORT_SYMBOL(snd_sof_component_get_audio_instance);
-
-const struct sof_ipc_tplg_ops *snd_sof_component_get_tplg_ops(struct snd_soc_component *component)
-{
-	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
-
-	return instance ? instance->tplg_ops : NULL;
-}
-EXPORT_SYMBOL(snd_sof_component_get_tplg_ops);
-
-const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_component *component)
-{
-	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
-
-	return instance ? instance->pcm_ops : NULL;
-}
-EXPORT_SYMBOL(snd_sof_component_get_pcm_ops);
 
 /*
  * Set up the static pipelines of a single audio instance. The pipelines are

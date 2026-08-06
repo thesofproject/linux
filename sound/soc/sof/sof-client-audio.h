@@ -7,6 +7,7 @@
 
 struct dentry;
 struct sof_client_dev;
+struct snd_sof_audio_instance;
 
 /**
  * struct sof_audio_client_ipc_ops - IPC version specific ops of the audio client
@@ -33,6 +34,7 @@ struct sof_audio_client_ipc_ops {
  * @num_drv:	Number of DAI drivers
  * @machine:	Per-instance copy of the machine descriptor
  * @component:	The ASoC component registered by this audio client instance
+ * @instance:	The audio instance backing @component
  * @ipc_ops:	IPC version specific ops of this audio client instance
  * @debugfs_root:	Per-audio-client debugfs directory
  * @debug_topology_name:	Topology loaded by this audio client
@@ -45,6 +47,7 @@ struct sof_audio_client_pdata {
 	int num_drv;
 	struct snd_soc_acpi_mach machine;
 	struct snd_soc_component *component;
+	struct snd_sof_audio_instance *instance;
 	const struct sof_audio_client_ipc_ops *ipc_ops;
 	struct dentry *debugfs_root;
 	const char *debug_topology_name;

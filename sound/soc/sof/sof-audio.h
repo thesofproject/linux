@@ -20,6 +20,7 @@
 #include <sound/sof/dai.h>
 #include <sound/sof/topology.h>
 #include "sof-priv.h"
+#include "sof-client-audio.h"
 
 #define SOF_AUDIO_PCM_DRV_NAME	"sof-audio-component"
 
@@ -646,10 +647,37 @@ struct snd_sof_audio_instance *
 snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
 				struct snd_soc_component *component);
 void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance);
-struct snd_sof_audio_instance *
-snd_sof_component_get_audio_instance(struct snd_soc_component *component);
-const struct sof_ipc_tplg_ops *snd_sof_component_get_tplg_ops(struct snd_soc_component *component);
-const struct sof_ipc_pcm_ops *snd_sof_component_get_pcm_ops(struct snd_soc_component *component);
+
+static inline struct snd_sof_audio_instance *
+snd_sof_component_get_audio_instance(struct snd_soc_component *scomp)
+{
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
+	struct sof_audio_client_pdata *pdata;
+
+	if (!cdev)
+		return NULL;
+
+	pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	return pdata->instance;
+}
+
+static inline const struct sof_ipc_tplg_ops *
+snd_sof_component_get_tplg_ops(struct snd_soc_component *scomp)
+{
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
+
+	return instance ? instance->tplg_ops : NULL;
+}
+
+static inline const struct sof_ipc_pcm_ops *
+snd_sof_component_get_pcm_ops(struct snd_soc_component *scomp)
+{
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
+
+	return instance ? instance->pcm_ops : NULL;
+}
+
 int sof_instance_set_up_pipelines(struct snd_sof_audio_instance *instance);
 
 static inline
