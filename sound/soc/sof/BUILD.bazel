@@ -24,7 +24,7 @@ ddk_headers(
 ddk_module(
     name = "snd-sof",
     srcs = [
-        "compress.c",
+        "ipc3-compress.c",
         "control.c",
         "core.c",
         "debug.c",
@@ -67,8 +67,12 @@ ddk_module(
     ],
     out = "snd-sof.ko",
     copts = [
+        "-Iprivate/desktop-google/include",
         "-DCONFIG_SND_SOC_COMPRESS=1",
         "-DCONFIG_SND_SOC_SOF_COMPRESS=1",
+        "-Ddomain_id=dp_domain_id",
+        "-Dstack_bytes=dp_stack_bytes",
+        "-Dheap_bytes=dp_heap_bytes",
     ],
     defconfig = _AUDIO_DEFCONFIG,
     kconfig = "Kconfig",
