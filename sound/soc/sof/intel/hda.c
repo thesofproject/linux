@@ -500,6 +500,10 @@ static int bt_link_mask_override = -1;
 module_param_named(bt_link_mask, bt_link_mask_override, int, 0444);
 MODULE_PARM_DESC(bt_link_mask, "SOF BT offload link mask");
 
+static int uaol_link_mask_override = -1;
+module_param_named(uaol_link_mask, uaol_link_mask_override, int, 0444);
+MODULE_PARM_DESC(uaol_link_mask, "SOF USB audio offload link mask");
+
 static int hda_init(struct snd_sof_dev *sdev)
 {
 	struct hda_bus *hbus;
@@ -637,6 +641,16 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 		dev_err(bus->dev, "error: init chip failed with ret: %d\n",
 			ret);
 		return ret;
+	}
+
+	/* the UAOL links have been enumerated by hda_bus_ml_init() */
+	hdev->uaol_link_count = hdac_bus_eml_get_count(bus, true,
+						       AZX_REG_ML_LEPTR_ID_INTEL_UAOL);
+	if (hdev->uaol_link_count) {
+		/* hda-mlink has no UAOL instance offset, the sublinks all alias to sublink 0 */
+		dev_dbg(sdev->dev, "UAOL links on the controller: %d (usable: 1)\n",
+			hdev->uaol_link_count);
+		hdev->uaol_link_count = 1;
 	}
 
 	/* Skip SoundWire if it is not supported */
@@ -1537,6 +1551,7 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 	u32 interface_mask = hda_get_interface_mask(sdev);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct snd_soc_acpi_mach *mach = NULL;
 	enum snd_soc_acpi_intel_codec codec_type, amp_type;
@@ -1591,6 +1606,20 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		dev_warn(sdev->dev, "invalid BT link mask %#x found, reset the mask\n",
 			mach->mach_params.bt_link_mask);
 		mach->mach_params.bt_link_mask = 0;
+	}
+
+	/* report the USB audio offload links enumerated on the controller */
+	if (hdev->uaol_link_count)
+		mach->mach_params.uaol_link_mask = GENMASK(hdev->uaol_link_count - 1, 0);
+
+	/* allow for module parameter override */
+	if (uaol_link_mask_override != -1) {
+		dev_dbg(sdev->dev, "overriding UAOL link mask %#x by kernel param %#x\n",
+			mach->mach_params.uaol_link_mask, uaol_link_mask_override);
+		if (uaol_link_mask_override & ~mach->mach_params.uaol_link_mask)
+			dev_warn(sdev->dev, "UAOL link mask %#x exceeds the links on the controller %#x\n",
+				 uaol_link_mask_override, mach->mach_params.uaol_link_mask);
+		mach->mach_params.uaol_link_mask = uaol_link_mask_override;
 	}
 
 	/*
