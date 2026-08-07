@@ -523,6 +523,9 @@ struct sof_intel_hda_dev {
 	/* the maximum number of streams (playback + capture) supported */
 	u32 stream_max;
 
+	/* USB Audio Offload links on the controller, 0 if UAOL is not present */
+	int uaol_link_count;
+
 	/*
 	 * ACE2+ link DMA stream allocation constraints (stream index =
 	 * stream_tag - 1, shared between input and output directions). All
