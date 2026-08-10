@@ -468,8 +468,8 @@ int hda_sdw_bpt_close(struct device *dev, int link_id, struct hdac_ext_stream *b
 			__func__, ret);
 
 	ret1 = hdac_bus_eml_sdw_map_stream_ch(sof_to_bus(sdev), link_id,
-					     1, /* PDI1 */
-					     0, 0, SNDRV_PCM_STREAM_CAPTURE);
+					      1, /* PDI1 */
+					      0, 0, SNDRV_PCM_STREAM_CAPTURE);
 	if (ret1 < 0) {
 		dev_err(dev, "%s: hdac_bus_eml_sdw_map_stream_ch failed %d for PDI1\n",
 			__func__, ret1);

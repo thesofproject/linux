@@ -2314,6 +2314,8 @@ static const struct snd_pci_quirk power_save_denylist[] = {
 	SND_PCI_QUIRK(0x1028, 0x0962, "Dell ALC3271", 0),
 	/* https://bugzilla.kernel.org/show_bug.cgi?id=220210 */
 	SND_PCI_QUIRK(0x17aa, 0x5079, "Lenovo Thinkpad E15", 0),
+	/* https://bugzilla.kernel.org/show_bug.cgi?id=220694 */
+	SND_PCI_QUIRK(0x103c, 0x8a6b, "HP 89E9", 0),
 	{}
 };
 
@@ -2387,7 +2389,7 @@ static int azx_probe_continue(struct azx *chip)
 
 #ifdef CONFIG_SND_HDA_PATCH_LOADER
 	if (patch[dev] && *patch[dev]) {
-		const struct firmware *fw = NULL;
+		const struct firmware *fw __free(firmware) = NULL;
 
 		dev_info(&pci->dev, "Applying patch firmware '%s'\n",
 			 patch[dev]);
@@ -2396,7 +2398,6 @@ static int azx_probe_continue(struct azx *chip)
 				"Cannot load firmware, continue without patching\n");
 		} else {
 			err = snd_hda_load_patch(&chip->bus, fw->size, fw->data);
-			release_firmware(fw);
 			if (err < 0)
 				goto out_free;
 		}

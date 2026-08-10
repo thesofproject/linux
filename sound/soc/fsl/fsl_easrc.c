@@ -1703,12 +1703,12 @@ static const struct reg_default fsl_easrc_reg_defaults[] = {
 	{REG_EASRC_SFS(2),	0x00000000},
 	{REG_EASRC_SFS(3),	0x00000000},
 	{REG_EASRC_RRL(0),	0x00000000},
-	{REG_EASRC_RRL(1),	0x00000000},
-	{REG_EASRC_RRL(2),	0x00000000},
-	{REG_EASRC_RRL(3),	0x00000000},
 	{REG_EASRC_RRH(0),	0x00000000},
+	{REG_EASRC_RRL(1),	0x00000000},
 	{REG_EASRC_RRH(1),	0x00000000},
+	{REG_EASRC_RRL(2),	0x00000000},
 	{REG_EASRC_RRH(2),	0x00000000},
+	{REG_EASRC_RRL(3),	0x00000000},
 	{REG_EASRC_RRH(3),	0x00000000},
 	{REG_EASRC_RUC(0),	0x00000000},
 	{REG_EASRC_RUC(1),	0x00000000},
@@ -2364,6 +2364,7 @@ static int fsl_easrc_runtime_resume(struct device *dev)
 			goto disable_mem_clk;
 	}
 
+	return 0;
 disable_mem_clk:
 	clk_disable_unprepare(easrc->mem_clk);
 	return ret;

@@ -1168,10 +1168,12 @@ static int data_ep_set_params(struct snd_usb_endpoint *ep)
 				<< (16 - ep->datainterval);
 	}
 
-	if (ep->fill_max)
+	if (ep->fill_max) {
 		ep->curpacksize = ep->maxpacksize;
-	else
+		maxsize = ep->curpacksize;
+	} else {
 		ep->curpacksize = maxsize;
+	}
 
 	if (snd_usb_get_speed(chip->dev) != USB_SPEED_FULL) {
 		packs_per_ms = 8 >> ep->datainterval;
@@ -1232,7 +1234,10 @@ static int data_ep_set_params(struct snd_usb_endpoint *ep)
 		/* try to use enough URBs to contain an entire ALSA buffer */
 		max_urbs = min((unsigned) MAX_URBS,
 				MAX_QUEUE * packs_per_ms / urb_packs);
-		ep->nurbs = min(max_urbs, urbs_per_period * ep->cur_buffer_periods);
+		if (chip->quirk_flags & QUIRK_FLAG_PLAYBACK_URB_FIXUP)
+			ep->nurbs = MAX_URBS;
+		else
+			ep->nurbs = min(max_urbs, urbs_per_period * ep->cur_buffer_periods);
 	}
 
 	/* allocate and initialize data urbs */
@@ -1256,6 +1261,8 @@ static int data_ep_set_params(struct snd_usb_endpoint *ep)
 			goto out_of_memory;
 		u->urb->pipe = ep->pipe;
 		u->urb->transfer_flags = URB_NO_TRANSFER_DMA_MAP;
+		if (chip->quirk_flags & QUIRK_FLAG_PLAYBACK_URB_FIXUP)
+			u->urb->transfer_flags |= URB_ISO_ASAP;
 		u->urb->interval = 1 << ep->datainterval;
 		u->urb->context = u;
 		u->urb->complete = snd_complete_urb;
@@ -1817,11 +1824,13 @@ static void snd_usb_handle_sync_urb(struct snd_usb_endpoint *ep,
 
 		out_packet->packets = in_ctx->packets;
 		for (i = 0; i < in_ctx->packets; i++) {
-			if (urb->iso_frame_desc[i].status == 0)
-				out_packet->packet_size[i] =
+			if (urb->iso_frame_desc[i].status == 0) {
+				unsigned int frames =
 					urb->iso_frame_desc[i].actual_length / sender->stride;
-			else
+				out_packet->packet_size[i] = min(frames, ep->maxframesize);
+			} else {
 				out_packet->packet_size[i] = 0;
+			}
 		}
 
 		spin_unlock_irqrestore(&ep->lock, flags);
