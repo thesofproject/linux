@@ -62,7 +62,10 @@ Structures
 The snd_soc_usb structure can be referenced using the ASoC platform card
 device, or a USB device (udev->dev).  This is created by the ASoC BE DAI
 link, and the USB sound entity will be able to pass information to the
-ASoC BE DAI link using this structure.
+ASoC BE DAI link using this structure.  On device tree platforms the USB
+device is tied to the port through the ``usb-soc-be`` phandle; without a
+device tree node the port is found by the device its component was
+registered with, so the caller passes that device.
 
 ``struct snd_soc_usb_device``
 

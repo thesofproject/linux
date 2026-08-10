@@ -24,7 +24,7 @@ static struct device_node *snd_soc_find_phandle(struct device *dev)
 	return node;
 }
 
-static struct snd_soc_usb *snd_soc_usb_ctx_lookup(struct device_node *node)
+static struct snd_soc_usb *snd_soc_usb_ctx_lookup_node(struct device_node *node)
 {
 	struct snd_soc_usb *ctx;
 
@@ -39,6 +39,25 @@ static struct snd_soc_usb *snd_soc_usb_ctx_lookup(struct device_node *node)
 	return NULL;
 }
 
+static struct snd_soc_usb *snd_soc_usb_ctx_lookup(struct device *dev)
+{
+	struct snd_soc_usb *ctx;
+
+	if (!dev)
+		return NULL;
+
+	if (dev->of_node)
+		return snd_soc_usb_ctx_lookup_node(dev->of_node);
+
+	/* ACPI/PCI platforms have no of_node, match on the device itself */
+	list_for_each_entry(ctx, &usb_ctx_list, list) {
+		if (ctx->component->dev == dev)
+			return ctx;
+	}
+
+	return NULL;
+}
+
 static struct snd_soc_usb *snd_soc_find_usb_ctx(struct device *dev)
 {
 	struct snd_soc_usb *ctx;
@@ -46,13 +65,13 @@ static struct snd_soc_usb *snd_soc_find_usb_ctx(struct device *dev)
 
 	node = snd_soc_find_phandle(dev);
 	if (!IS_ERR(node)) {
-		ctx = snd_soc_usb_ctx_lookup(node);
+		ctx = snd_soc_usb_ctx_lookup_node(node);
 		of_node_put(node);
-	} else {
-		ctx = snd_soc_usb_ctx_lookup(dev->of_node);
+
+		return ctx;
 	}
 
-	return ctx ? ctx : NULL;
+	return snd_soc_usb_ctx_lookup(dev);
 }
 
 /* SOC USB sound kcontrols */
