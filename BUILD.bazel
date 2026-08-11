@@ -3674,6 +3674,7 @@ ddk_headers(
     name = "sof_api_header",
     hdrs = [
         "include/sound/sof.h",
+        "include/sound/sof/ipc4/header.h",
     ],
     linux_includes = [
         "include",

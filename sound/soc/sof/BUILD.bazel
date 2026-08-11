@@ -25,6 +25,7 @@ ddk_module(
     name = "snd-sof",
     srcs = [
         "ipc3-compress.c",
+        "ipc4-compress.c",
         "control.c",
         "core.c",
         "debug.c",
