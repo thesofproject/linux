@@ -4134,6 +4134,9 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	case SOF_DAI_INTEL_SSP:
 		/* nothing to do for SSP/DMIC */
 		break;
+	case SOF_DAI_INTEL_UAOL:
+		/* the node index is the link stream, set when the endpoint is known */
+		break;
 	default:
 		dev_err(sdev->dev, "%s: unsupported dai type %d\n", __func__,
 			ipc4_copier->dai_type);
