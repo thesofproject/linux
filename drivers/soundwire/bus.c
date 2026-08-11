@@ -957,17 +957,26 @@ static void sdw_modify_slave_status(struct sdw_slave *slave,
 
 static enum sdw_clk_stop_mode sdw_get_clk_stop_mode(struct sdw_slave *slave)
 {
-	struct device *dev = &slave->dev;
-	struct sdw_driver *drv = drv_to_sdw_driver(dev->driver);
+	enum sdw_clk_stop_mode mode;
+
+	mode = slave->prop.clk_stop_mode1 ? SDW_CLK_STOP_MODE1 : SDW_CLK_STOP_MODE0;
+
+	mutex_lock(&slave->sdw_dev_lock);
 
 	/*
 	 * Query for clock stop mode if Slave implements
 	 * ops->get_clk_stop_mode, else read from property.
 	 */
-	if (drv->ops && drv->ops->get_clk_stop_mode)
-		return drv->ops->get_clk_stop_mode(slave);
+	if (slave->probed) {
+		struct sdw_driver *drv = drv_to_sdw_driver(slave->dev.driver);
 
-	return slave->prop.clk_stop_mode1 ? SDW_CLK_STOP_MODE1 : SDW_CLK_STOP_MODE0;
+		if (drv->ops && drv->ops->get_clk_stop_mode)
+			mode = drv->ops->get_clk_stop_mode(slave);
+	}
+
+	mutex_unlock(&slave->sdw_dev_lock);
+
+	return mode;
 }
 
 static int sdw_slave_clk_stop_callback(struct sdw_slave *slave,
