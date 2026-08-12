@@ -14,6 +14,7 @@
 #include <sound/intel-nhlt.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
 #include "ipc4-priv.h"
 #include "ipc4-topology.h"
 #include "ops.h"
@@ -218,12 +219,16 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_ASRC_TOKENS] = {"ASRC tokens", asrc_tokens, ARRAY_SIZE(asrc_tokens)},
 };
 
-struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_sof_dev *sdev,
+struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_soc_component *scomp,
 						    u32 module_id, int instance_id)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_widget *swidget;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	if (!instance)
+		return NULL;
+
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 
 		/* Only active module instances have valid instance_id */
@@ -560,14 +565,14 @@ static void sof_ipc4_widget_free_comp_pipeline(struct snd_sof_widget *swidget)
 static int sof_ipc4_widget_set_module_info(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 
 	swidget->module_info = sof_ipc4_find_module_by_uuid(sdev, &swidget->uuid);
 
 	if (swidget->module_info)
 		return 0;
 
-	dev_err(sdev->dev, "failed to find module info for widget %s with UUID %pUL\n",
+	dev_err(scomp->dev, "failed to find module info for widget %s with UUID %pUL\n",
 		swidget->widget->name, &swidget->uuid);
 	return -EINVAL;
 }
@@ -610,12 +615,12 @@ static int sof_ipc4_widget_setup_msg(struct snd_sof_widget *swidget, struct sof_
 static void sof_ipc4_widget_update_kcontrol_module_id(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	struct snd_sof_control *scontrol;
 
 	/* update module ID for all kcontrols for this widget */
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	list_for_each_entry(scontrol, &instance->kcontrol_list, list) {
 		if (scontrol->comp_id == swidget->comp_id) {
 			struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 			struct sof_ipc4_msg *msg = &cdata->msg;
@@ -809,7 +814,8 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_dai *dai = swidget->private;
 	struct sof_ipc4_copier *ipc4_copier;
 	struct snd_sof_widget *pipe_widget;
@@ -893,7 +899,7 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 			goto free_available_fmt;
 		}
 
-		list_for_each_entry(w, &sdev->widget_list, list) {
+		list_for_each_entry(w, &instance->widget_list, list) {
 			struct snd_sof_dai *alh_dai;
 
 			if (!WIDGET_IS_DAI(w->id) || !w->widget->sname ||
@@ -989,7 +995,7 @@ static void sof_ipc4_widget_free_comp_dai(struct snd_sof_widget *swidget)
 static int sof_ipc4_widget_setup_comp_pipeline(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_pipeline *pipeline;
 	struct snd_sof_pipeline *spipe = swidget->spipe;
 	int ret;
@@ -1382,9 +1388,11 @@ static void sof_ipc4_widget_free_comp_process(struct snd_sof_widget *swidget)
 }
 
 static void
-sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
+sof_ipc4_update_resource_usage(struct snd_sof_widget *swidget,
 			       struct sof_ipc4_base_module_cfg *base_config)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
@@ -1426,7 +1434,7 @@ sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *
 		if (pipe_widget->stack_bytes < swidget->stack_bytes)
 			pipe_widget->stack_bytes = swidget->stack_bytes;
 
-		dev_dbg(sdev->dev, "%s mem reqs to %s heap %u stack %u",
+		dev_dbg(scomp->dev, "%s mem reqs to %s heap %u stack %u",
 			swidget->widget->name, pipe_widget->widget->name,
 			pipe_widget->heap_bytes, pipe_widget->stack_bytes);
 	}
@@ -1435,26 +1443,26 @@ sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	sof_ipc4_update_cpc_from_manifest(sdev, fw_module, base_config);
 
 	if (ignore_cpc) {
-		dev_dbg(sdev->dev, "%s: ibs / obs: %u / %u, forcing cpc to 0 from %u\n",
+		dev_dbg(scomp->dev, "%s: ibs / obs: %u / %u, forcing cpc to 0 from %u\n",
 			swidget->widget->name, base_config->ibs, base_config->obs,
 			base_config->cpc);
 		base_config->cpc = 0;
 	} else {
-		dev_dbg(sdev->dev, "%s: ibs / obs / cpc: %u / %u / %u\n",
+		dev_dbg(scomp->dev, "%s: ibs / obs / cpc: %u / %u / %u\n",
 			swidget->widget->name, base_config->ibs, base_config->obs,
 			base_config->cpc);
 	}
 }
 
-static int sof_ipc4_widget_assign_instance_id(struct snd_sof_dev *sdev,
-					      struct snd_sof_widget *swidget)
+static int sof_ipc4_widget_assign_instance_id(struct snd_sof_widget *swidget)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	int max_instances = fw_module->man4_module_entry.instance_max_count;
 
 	swidget->instance_id = ida_alloc_max(&fw_module->m_ida, max_instances, GFP_KERNEL);
 	if (swidget->instance_id < 0) {
-		dev_err(sdev->dev, "failed to assign instance id for widget %s",
+		dev_err(scomp->dev, "failed to assign instance id for widget %s",
 			swidget->widget->name);
 		return swidget->instance_id;
 	}
@@ -1463,7 +1471,8 @@ static int sof_ipc4_widget_assign_instance_id(struct snd_sof_dev *sdev,
 }
 
 /* update hw_params based on the audio stream format */
-static int sof_ipc4_update_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw_params *params,
+static int sof_ipc4_update_hw_params(struct snd_soc_component *scomp,
+				     struct snd_pcm_hw_params *params,
 				     struct sof_ipc4_audio_format *fmt, u32 param_to_update)
 {
 	struct snd_interval *i;
@@ -1487,7 +1496,7 @@ static int sof_ipc4_update_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw
 				snd_fmt = SNDRV_PCM_FORMAT_U8;
 				break;
 			default:
-				dev_err(sdev->dev, "Unsupported PCM 8-bit IPC4 type %d\n", type);
+				dev_err(scomp->dev, "Unsupported PCM 8-bit IPC4 type %d\n", type);
 				return -EINVAL;
 			}
 			break;
@@ -1506,12 +1515,12 @@ static int sof_ipc4_update_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw
 				snd_fmt = SNDRV_PCM_FORMAT_FLOAT_LE;
 				break;
 			default:
-				dev_err(sdev->dev, "Unsupported PCM 32-bit IPC4 type %d\n", type);
+				dev_err(scomp->dev, "Unsupported PCM 32-bit IPC4 type %d\n", type);
 				return -EINVAL;
 			}
 			break;
 		default:
-			dev_err(sdev->dev, "invalid PCM valid_bits %d\n", valid_bits);
+			dev_err(scomp->dev, "invalid PCM valid_bits %d\n", valid_bits);
 			return -EINVAL;
 		}
 
@@ -1539,8 +1548,8 @@ static int sof_ipc4_update_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw
 	return 0;
 }
 
-static bool sof_ipc4_is_single_format(struct snd_sof_dev *sdev,
-				      struct sof_ipc4_pin_format *pin_fmts, u32 pin_fmts_size)
+static bool sof_ipc4_is_single_format(struct sof_ipc4_pin_format *pin_fmts,
+				      u32 pin_fmts_size)
 {
 	struct sof_ipc4_audio_format *fmt;
 	u32 rate, channels, valid_bits;
@@ -1567,25 +1576,25 @@ static bool sof_ipc4_is_single_format(struct snd_sof_dev *sdev,
 	return true;
 }
 
-static int sof_ipc4_init_output_audio_fmt(struct snd_sof_dev *sdev,
-					  struct snd_sof_widget *swidget,
+static int sof_ipc4_init_output_audio_fmt(struct snd_sof_widget *swidget,
 					  struct sof_ipc4_base_module_cfg *base_config,
 					  struct sof_ipc4_available_audio_format *available_fmt,
 					  u32 out_ref_rate, u32 out_ref_channels,
 					  u32 out_ref_valid_bits, u32 out_ref_type)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
 	struct sof_ipc4_pin_format *pin_fmts = available_fmt->output_pin_fmts;
 	u32 pin_fmts_size = available_fmt->num_output_formats;
 	bool single_format;
 	int i = 0;
 
 	if (!pin_fmts_size) {
-		dev_err(sdev->dev, "no output formats for %s\n",
+		dev_err(scomp->dev, "no output formats for %s\n",
 			swidget->widget->name);
 		return -EINVAL;
 	}
 
-	single_format = sof_ipc4_is_single_format(sdev, pin_fmts, pin_fmts_size);
+	single_format = sof_ipc4_is_single_format(pin_fmts, pin_fmts_size);
 
 	/* pick the first format if there's only one available or if all formats are the same */
 	if (single_format)
@@ -1610,7 +1619,7 @@ static int sof_ipc4_init_output_audio_fmt(struct snd_sof_dev *sdev,
 			goto out_fmt;
 	}
 
-	dev_err(sdev->dev,
+	dev_err(scomp->dev,
 		"%s: Unsupported audio format: %uHz, %ubit, %u channels, type: %d\n",
 		__func__, out_ref_rate, out_ref_valid_bits, out_ref_channels,
 		out_ref_type);
@@ -1623,7 +1632,8 @@ out_fmt:
 	return i;
 }
 
-static int sof_ipc4_get_valid_bits(struct snd_sof_dev *sdev, struct snd_pcm_hw_params *params)
+static int sof_ipc4_get_valid_bits(struct snd_soc_component *scomp,
+				   struct snd_pcm_hw_params *params)
 {
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_U8:
@@ -1639,12 +1649,13 @@ static int sof_ipc4_get_valid_bits(struct snd_sof_dev *sdev, struct snd_pcm_hw_p
 	case SNDRV_PCM_FORMAT_FLOAT_LE:
 		return 32;
 	default:
-		dev_err(sdev->dev, "invalid pcm frame format %d\n", params_format(params));
+		dev_err(scomp->dev, "invalid pcm frame format %d\n", params_format(params));
 		return -EINVAL;
 	}
 }
 
-static int sof_ipc4_get_sample_type(struct snd_sof_dev *sdev, struct snd_pcm_hw_params *params)
+static int sof_ipc4_get_sample_type(struct snd_soc_component *scomp,
+				    struct snd_pcm_hw_params *params)
 {
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_A_LAW:
@@ -1661,17 +1672,17 @@ static int sof_ipc4_get_sample_type(struct snd_sof_dev *sdev, struct snd_pcm_hw_
 	case SNDRV_PCM_FORMAT_FLOAT_LE:
 		return SOF_IPC4_TYPE_FLOAT;
 	default:
-		dev_err(sdev->dev, "invalid pcm sample type %d\n", params_format(params));
+		dev_err(scomp->dev, "invalid pcm sample type %d\n", params_format(params));
 		return -EINVAL;
 	}
 }
 
-static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
-					 struct snd_sof_widget *swidget,
+static int sof_ipc4_init_input_audio_fmt(struct snd_sof_widget *swidget,
 					 struct sof_ipc4_base_module_cfg *base_config,
 					 struct snd_pcm_hw_params *params,
 					 struct sof_ipc4_available_audio_format *available_fmt)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
 	struct sof_ipc4_pin_format *pin_fmts = available_fmt->input_pin_fmts;
 	u32 pin_fmts_size = available_fmt->num_input_formats;
 	u32 valid_bits;
@@ -1684,19 +1695,19 @@ static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 	int i = 0;
 
 	if (!pin_fmts_size) {
-		dev_err(sdev->dev, "no input formats for %s\n", swidget->widget->name);
+		dev_err(scomp->dev, "no input formats for %s\n", swidget->widget->name);
 		return -EINVAL;
 	}
 
-	single_format = sof_ipc4_is_single_format(sdev, pin_fmts, pin_fmts_size);
+	single_format = sof_ipc4_is_single_format(pin_fmts, pin_fmts_size);
 	if (single_format)
 		goto in_fmt;
 
-	sample_valid_bits = sof_ipc4_get_valid_bits(sdev, params);
+	sample_valid_bits = sof_ipc4_get_valid_bits(scomp, params);
 	if (sample_valid_bits < 0)
 		return sample_valid_bits;
 
-	sample_type = sof_ipc4_get_sample_type(sdev, params);
+	sample_type = sof_ipc4_get_sample_type(scomp, params);
 	if (sample_type < 0)
 		return sample_type;
 
@@ -1720,7 +1731,7 @@ static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 	}
 
 	if (i == pin_fmts_size) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"%s: Unsupported audio format: %uHz, %ubit, %u channels, type: %d\n",
 			__func__, params_rate(params), sample_valid_bits,
 			params_channels(params), sample_type);
@@ -1794,9 +1805,11 @@ static void sof_ipc4_unprepare_copier_module(struct snd_sof_widget *swidget)
 }
 
 #if IS_ENABLED(CONFIG_ACPI) && IS_ENABLED(CONFIG_SND_INTEL_NHLT)
-static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+static int snd_sof_get_hw_config_params(struct snd_sof_dai *dai,
 					int *sample_rate, int *channel_count, int *bit_depth)
 {
+	struct snd_soc_component *scomp = dai->scomp;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_soc_tplg_hw_config *hw_config;
 	struct snd_sof_dai_link *slink;
 	bool dai_link_found = false;
@@ -1804,7 +1817,7 @@ static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof
 	int i;
 
 	/* get current hw_config from link */
-	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+	list_for_each_entry(slink, &instance->dai_link_list, list) {
 		if (!strcmp(slink->link->name, dai->name)) {
 			dai_link_found = true;
 			break;
@@ -1812,7 +1825,7 @@ static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof
 	}
 
 	if (!dai_link_found) {
-		dev_err(sdev->dev, "%s: no DAI link found for DAI %s\n", __func__, dai->name);
+		dev_err(scomp->dev, "%s: no DAI link found for DAI %s\n", __func__, dai->name);
 		return -EINVAL;
 	}
 
@@ -1825,7 +1838,7 @@ static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof
 	}
 
 	if (!hw_cfg_found) {
-		dev_err(sdev->dev, "%s: no matching hw_config found for DAI %s\n", __func__,
+		dev_err(scomp->dev, "%s: no matching hw_config found for DAI %s\n", __func__,
 			dai->name);
 		return -EINVAL;
 	}
@@ -1834,18 +1847,20 @@ static int snd_sof_get_hw_config_params(struct snd_sof_dev *sdev, struct snd_sof
 	*channel_count = le32_to_cpu(hw_config->tdm_slots);
 	*sample_rate = le32_to_cpu(hw_config->fsync_rate);
 
-	dev_dbg(sdev->dev, "sample rate: %d sample width: %d channels: %d\n",
+	dev_dbg(scomp->dev, "sample rate: %d sample width: %d channels: %d\n",
 		*sample_rate, *bit_depth, *channel_count);
 
 	return 0;
 }
 
 static int
-snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+snd_sof_get_nhlt_endpoint_data(struct snd_sof_dai *dai,
 			       bool single_bitdepth,
 			       struct snd_pcm_hw_params *params, u32 dai_index,
 			       u32 linktype, u8 dir, u32 **dst, u32 *len)
 {
+	struct snd_soc_component *scomp = dai->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct nhlt_specific_cfg *cfg = NULL;
 	struct snd_ipc4_nhlt *entry = NULL;
@@ -1865,14 +1880,14 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 
 		/* Prefer 32-bit blob if copier supports multiple formats */
 		if (bit_depth <= 16 && !single_bitdepth) {
-			dev_dbg(sdev->dev, "Looking for 32-bit blob first for DMIC\n");
+			dev_dbg(scomp->dev, "Looking for 32-bit blob first for DMIC\n");
 			format_change = true;
 			bit_depth = 32;
 		}
 		break;
 	case SOF_DAI_INTEL_SSP:
 		nhlt_type = NHLT_LINK_SSP;
-		ret = snd_sof_get_hw_config_params(sdev, dai, &sample_rate, &channel_count,
+		ret = snd_sof_get_hw_config_params(dai, &sample_rate, &channel_count,
 						   &bit_depth);
 		if (ret < 0)
 			return ret;
@@ -1891,16 +1906,22 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 				break;
 		}
 		if (dev_type < 0) {
-			dev_err(sdev->dev, "%s: No match for SSP%d in NHLT table\n",
+			dev_err(scomp->dev, "%s: No match for SSP%d in NHLT table\n",
 				__func__, dai_index);
 			return dev_type;
+		}
+
+		if (params_width(params) != bit_depth) {
+			format_change = true;
+			dev_dbg(scomp->dev, "SSP sample width change from %d to %d\n",
+				params_width(params), bit_depth);
 		}
 		break;
 	default:
 		return 0;
 	}
 
-	dev_dbg(sdev->dev, "dai index %d nhlt type %d direction %d dev type %d\n",
+	dev_dbg(scomp->dev, "dai index %d nhlt type %d direction %d dev type %d\n",
 		dai_index, nhlt_type, dir, dev_type);
 
 	/* find NHLT blob with matching params */
@@ -1956,7 +1977,7 @@ snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai
 			}
 		}
 
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"no matching blob for sample rate: %d sample width: %d channels: %d\n",
 			sample_rate, bit_depth, channel_count);
 		return -EINVAL;
@@ -1989,7 +2010,7 @@ out:
 }
 #else
 static int
-snd_sof_get_nhlt_endpoint_data(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+snd_sof_get_nhlt_endpoint_data(struct snd_sof_dai *dai,
 			       bool single_bitdepth,
 			       struct snd_pcm_hw_params *params, u32 dai_index,
 			       u32 linktype, u8 dir, u32 **dst, u32 *len)
@@ -2024,7 +2045,7 @@ bool sof_ipc4_copier_is_single_bitdepth(struct snd_sof_dev *sdev,
 }
 
 static int
-sof_ipc4_adjust_params_to_dai_format(struct snd_sof_dev *sdev,
+sof_ipc4_adjust_params_to_dai_format(struct snd_soc_component *scomp,
 				     struct snd_pcm_hw_params *params,
 				     struct sof_ipc4_pin_format *pin_fmts,
 				     u32 pin_fmts_size)
@@ -2065,7 +2086,7 @@ sof_ipc4_adjust_params_to_dai_format(struct snd_sof_dev *sdev,
 	}
 
 	if (params_mask)
-		return sof_ipc4_update_hw_params(sdev, params,
+		return sof_ipc4_update_hw_params(scomp, params,
 						 &pin_fmts[0].audio_fmt,
 						 params_mask);
 
@@ -2073,9 +2094,11 @@ sof_ipc4_adjust_params_to_dai_format(struct snd_sof_dev *sdev,
 }
 
 static int
-sof_ipc4_prepare_dai_copier(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+sof_ipc4_prepare_dai_copier(struct snd_sof_dai *dai,
 			    struct snd_pcm_hw_params *params, int dir)
 {
+	struct snd_soc_component *scomp = dai->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_pcm_hw_params dai_params = *params;
 	struct sof_ipc4_copier_data *copier_data;
@@ -2102,14 +2125,14 @@ sof_ipc4_prepare_dai_copier(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
 		num_pin_fmts = available_fmt->num_input_formats;
 	}
 
-	ret = sof_ipc4_adjust_params_to_dai_format(sdev, &dai_params, pin_fmts,
+	ret = sof_ipc4_adjust_params_to_dai_format(dai->scomp, &dai_params, pin_fmts,
 						   num_pin_fmts);
 	if (ret)
 		return ret;
 
 	single_bitdepth = sof_ipc4_copier_is_single_bitdepth(sdev, pin_fmts,
 							     num_pin_fmts);
-	ret = snd_sof_get_nhlt_endpoint_data(sdev, dai, single_bitdepth,
+	ret = snd_sof_get_nhlt_endpoint_data(dai, single_bitdepth,
 					     &dai_params,
 					     ipc4_copier->dai_index,
 					     ipc4_copier->dai_type, dir,
@@ -2122,14 +2145,20 @@ sof_ipc4_prepare_dai_copier(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
 	return ret;
 }
 
-static void sof_ipc4_host_config(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
+static void sof_ipc4_host_config(struct snd_sof_dev *sdev,
+				 struct snd_sof_widget *swidget,
 				 struct snd_sof_platform_stream_params *platform_params)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
 	struct sof_ipc4_copier *ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
 	struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 	struct sof_ipc4_copier_data *copier_data = &ipc4_copier->data;
 	struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 	u32 host_dma_id = platform_params->stream_tag - 1;
+
+	dev_dbg(scomp->dev, "Host copier %s, type %d, ChainDMA: %s, stream_tag: %d\n",
+		swidget->widget->name, swidget->id, str_yes_no(pipeline->use_chain_dma),
+		platform_params->stream_tag);
 
 	if (pipeline->use_chain_dma) {
 		pipeline->msg.primary &= ~SOF_IPC4_GLB_CHAIN_DMA_HOST_ID_MASK;
@@ -2146,7 +2175,6 @@ sof_ipc4_copier_module_update_params(struct snd_sof_widget *swidget,
 				     struct snd_pcm_hw_params *pipeline_params)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_copier_data *copier_data;
 	struct sof_ipc4_copier *ipc4_copier;
 
@@ -2175,13 +2203,13 @@ sof_ipc4_copier_module_update_params(struct snd_sof_widget *swidget,
 		break;
 	}
 	default:
-		dev_err(sdev->dev, "unsupported type %d for copier %s",
+		dev_err(scomp->dev, "unsupported type %d for copier %s",
 			swidget->id, swidget->widget->name);
 		return -EINVAL;
 	}
 
 	/* modify the input params for the next widget */
-	return sof_ipc4_update_hw_params(sdev, pipeline_params,
+	return sof_ipc4_update_hw_params(scomp, pipeline_params,
 					 &copier_data->out_format,
 					 BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
 					 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
@@ -2196,7 +2224,8 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_copier_data *copier_data;
 	int input_fmt_index, output_fmt_index;
 	struct sof_ipc4_copier *ipc4_copier;
@@ -2221,7 +2250,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 		struct sof_ipc4_gtw_attributes *gtw_attr;
 
-		dev_dbg(sdev->dev,
+		dev_dbg(scomp->dev,
 			"Host copier %s, type %d, ChainDMA: %s, stream_tag: %d\n",
 			swidget->widget->name, swidget->id,
 			str_yes_no(pipeline->use_chain_dma),
@@ -2300,7 +2329,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 
-		dev_dbg(sdev->dev, "Dai copier %s, type %d, ChainDMA: %s\n",
+		dev_dbg(scomp->dev, "Dai copier %s, type %d, ChainDMA: %s\n",
 			swidget->widget->name, swidget->id,
 			str_yes_no(pipeline->use_chain_dma));
 
@@ -2313,34 +2342,38 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		copier_data = &ipc4_copier->data;
 		available_fmt = &ipc4_copier->available_fmt;
 
-		/*
-		 * Use the fe_params as a base for the copier configuration.
-		 * The ref_params might get updated to reflect what format is
-		 * supported by the copier on the DAI side.
-		 *
-		 * In case of capture the ref_params returned will be used to
-		 * find the input configuration of the copier.
-		 */
-		ref_params = kmemdup(fe_params, sizeof(*ref_params), GFP_KERNEL);
-		if (!ref_params)
-			return -ENOMEM;
+		if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+			/*
+			 * For playback the pipeline_params needs to be used to
+			 * find the input configuration of the copier.
+			 */
+			ref_params = kmemdup(pipeline_params, sizeof(*ref_params),
+					     GFP_KERNEL);
+			if (!ref_params)
+				return -ENOMEM;
+		} else {
+			/*
+			 * For capture the adjusted fe_params needs to be used
+			 * to find the input configuration of the copier.
+			 *
+			 * The params might be updated in
+			 * sof_ipc4_prepare_dai_copier() to reflect the supported
+			 * input formats by the copier/dai.
+			 */
+			ref_params = kmemdup(fe_params, sizeof(*ref_params), GFP_KERNEL);
+			if (!ref_params)
+				return -ENOMEM;
 
-		ret = sof_ipc4_prepare_dai_copier(sdev, dai, ref_params, dir);
-		if (ret < 0)
-			return ret;
-
-		/*
-		 * For playback the pipeline_params needs to be used to find the
-		 * input configuration of the copier.
-		 */
-		if (dir == SNDRV_PCM_STREAM_PLAYBACK)
-			memcpy(ref_params, pipeline_params, sizeof(*ref_params));
+			ret = sof_ipc4_prepare_dai_copier(dai, ref_params, dir);
+			if (ret < 0)
+				return ret;
+		}
 
 		break;
 	}
 	case snd_soc_dapm_buffer:
 	{
-		dev_dbg(sdev->dev, "Module copier %s, type %d\n",
+		dev_dbg(scomp->dev, "Module copier %s, type %d\n",
 			swidget->widget->name, swidget->id);
 
 		ipc4_copier = (struct sof_ipc4_copier *)swidget->private;
@@ -2354,13 +2387,13 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		break;
 	}
 	default:
-		dev_err(sdev->dev, "unsupported type %d for copier %s",
+		dev_err(scomp->dev, "unsupported type %d for copier %s",
 			swidget->id, swidget->widget->name);
 		return -EINVAL;
 	}
 
 	/* set input and output audio formats */
-	input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
+	input_fmt_index = sof_ipc4_init_input_audio_fmt(swidget,
 							&copier_data->base_config,
 							ref_params, available_fmt);
 	if (input_fmt_index < 0)
@@ -2389,15 +2422,34 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	}
 	case snd_soc_dapm_aif_out:
 	case snd_soc_dapm_dai_in:
-		out_ref_rate = params_rate(fe_params);
-		out_ref_channels = params_channels(fe_params);
-		ret = sof_ipc4_get_sample_type(sdev, fe_params);
+		/*
+		 * For capture the fe_params needs to be used to find the output
+		 * configuration of the copier.
+		 *
+		 * For playback the adjusted fe_params needs to be used
+		 * to find the output configuration of the copier.
+		 *
+		 * The params might be updated in
+		 * sof_ipc4_prepare_dai_copier() to reflect the supported
+		 * output formats by the copier/dai.
+		 */
+		memcpy(ref_params, fe_params, sizeof(*ref_params));
+		if (dir == SNDRV_PCM_STREAM_PLAYBACK &&
+ 		    swidget->id == snd_soc_dapm_dai_in) {
+			ret = sof_ipc4_prepare_dai_copier(dai, ref_params, dir);
+			if (ret < 0)
+				return ret;
+		}
+
+		out_ref_rate = params_rate(ref_params);
+		out_ref_channels = params_channels(ref_params);
+		ret = sof_ipc4_get_sample_type(scomp, ref_params);
 		if (ret < 0)
 			return ret;
 		out_ref_type = (u32)ret;
 
 		if (!single_output_bitdepth) {
-			out_ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
+			out_ref_valid_bits = sof_ipc4_get_valid_bits(scomp, ref_params);
 			if (out_ref_valid_bits < 0)
 				return out_ref_valid_bits;
 		}
@@ -2423,7 +2475,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		out_ref_type = sof_ipc4_fmt_cfg_to_type(out_fmt->fmt_cfg);
 	}
 
-	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
+	output_fmt_index = sof_ipc4_init_output_audio_fmt(swidget,
 							  &copier_data->base_config,
 							  available_fmt, out_ref_rate,
 							  out_ref_channels, out_ref_valid_bits,
@@ -2494,7 +2546,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			 * for all widgets with the same stream name
 			 */
 			i = 0;
-			list_for_each_entry(w, &sdev->widget_list, list) {
+			list_for_each_entry(w, &instance->widget_list, list) {
 				u32 node_type;
 
 				if (!WIDGET_IS_DAI(w->id) || !w->widget->sname ||
@@ -2557,7 +2609,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	}
 
 	/* modify the input params for the next widget */
-	ret = sof_ipc4_update_hw_params(sdev, pipeline_params,
+	ret = sof_ipc4_update_hw_params(scomp, pipeline_params,
 					&copier_data->out_format,
 					BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
 					BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
@@ -2579,7 +2631,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		copier_data->gtw_cfg.dma_buffer_size =
 			max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms) *
 				copier_data->base_config.ibs;
-		dev_dbg(sdev->dev, "copier %s, dma buffer%s: %u ms (%u bytes)",
+		dev_dbg(scomp->dev, "copier %s, dma buffer%s: %u ms (%u bytes)",
 			swidget->widget->name,
 			deep_buffer_dma_ms ? " (using Deep Buffer)" : "",
 			max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms),
@@ -2593,7 +2645,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		copier_data->gtw_cfg.dma_buffer_size =
 			max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms) *
 				copier_data->base_config.obs;
-		dev_dbg(sdev->dev, "copier %s, dma buffer%s: %u ms (%u bytes)",
+		dev_dbg(scomp->dev, "copier %s, dma buffer%s: %u ms (%u bytes)",
 			swidget->widget->name,
 			deep_buffer_dma_ms ? " (using Deep Buffer)" : "",
 			max((u32)SOF_IPC4_MIN_DMA_BUFFER_SIZE, deep_buffer_dma_ms),
@@ -2629,7 +2681,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		copier_data->gtw_cfg.config_length += dma_config_tlv_size / 4;
 	}
 
-	dev_dbg(sdev->dev, "copier %s, IPC size is %d", swidget->widget->name, ipc_size);
+	dev_dbg(scomp->dev, "copier %s, IPC size is %d", swidget->widget->name, ipc_size);
 
 	*ipc_config_data = kzalloc(ipc_size, GFP_KERNEL);
 	if (!*ipc_config_data)
@@ -2637,11 +2689,11 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 
 	*ipc_config_size = ipc_size;
 
-	sof_ipc4_dbg_module_audio_format(sdev->dev, swidget, available_fmt,
+	sof_ipc4_dbg_module_audio_format(scomp->dev, swidget, available_fmt,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &copier_data->base_config);
+	sof_ipc4_update_resource_usage(swidget, &copier_data->base_config);
 
 	/* copy IPC data */
 	memcpy(*ipc_config_data, (void *)copier_data, sizeof(*copier_data));
@@ -2685,7 +2737,6 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 					struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_gain *gain = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &gain->available_fmt;
 	struct sof_ipc4_audio_format *in_fmt;
@@ -2696,7 +2747,7 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	if (unlikely(swidget->prepared))
 		return 0;
 
-	input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
+	input_fmt_index = sof_ipc4_init_input_audio_fmt(swidget,
 							&gain->data.base_config,
 							pipeline_params,
 							available_fmt);
@@ -2709,7 +2760,7 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
 	out_ref_type = sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg);
 
-	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
+	output_fmt_index = sof_ipc4_init_output_audio_fmt(swidget,
 							  &gain->data.base_config,
 							  available_fmt,
 							  out_ref_rate,
@@ -2719,11 +2770,11 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	if (output_fmt_index < 0)
 		return output_fmt_index;
 
-	sof_ipc4_dbg_module_audio_format(sdev->dev, swidget, available_fmt,
+	sof_ipc4_dbg_module_audio_format(scomp->dev, swidget, available_fmt,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &gain->data.base_config);
+	sof_ipc4_update_resource_usage(swidget, &gain->data.base_config);
 
 	return 0;
 }
@@ -2734,7 +2785,6 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 					 struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_mixer *mixer = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &mixer->available_fmt;
 	struct sof_ipc4_audio_format *in_fmt;
@@ -2745,7 +2795,7 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	if (swidget->prepared)
 		return 0;
 
-	input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
+	input_fmt_index = sof_ipc4_init_input_audio_fmt(swidget,
 							&mixer->base_config,
 							pipeline_params,
 							available_fmt);
@@ -2758,7 +2808,7 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
 	out_ref_type = sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg);
 
-	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
+	output_fmt_index = sof_ipc4_init_output_audio_fmt(swidget,
 							  &mixer->base_config,
 							  available_fmt,
 							  out_ref_rate,
@@ -2768,11 +2818,11 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	if (output_fmt_index < 0)
 		return output_fmt_index;
 
-	sof_ipc4_dbg_module_audio_format(sdev->dev, swidget, available_fmt,
+	sof_ipc4_dbg_module_audio_format(scomp->dev, swidget, available_fmt,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &mixer->base_config);
+	sof_ipc4_update_resource_usage(swidget, &mixer->base_config);
 
 	return 0;
 }
@@ -2783,7 +2833,6 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 				       struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_src *src = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &src->available_fmt;
 	struct sof_ipc4_audio_format *out_audio_fmt;
@@ -2795,7 +2844,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	if (unlikely(swidget->prepared))
 		return 0;
 
-	input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
+	input_fmt_index = sof_ipc4_init_input_audio_fmt(swidget,
 							&src->data.base_config,
 							pipeline_params,
 							available_fmt);
@@ -2834,7 +2883,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 		for (i = 1; i < available_fmt->num_output_formats; i++) {
 			out_audio_fmt = &available_fmt->output_pin_fmts[i].audio_fmt;
 			if (out_ref_rate != out_audio_fmt->sampling_frequency) {
-				dev_err(sdev->dev,
+				dev_err(scomp->dev,
 					"Cannot determine the output rate for SRC: %s\n",
 					swidget->widget->name);
 				return -EINVAL;
@@ -2842,7 +2891,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 		}
 	}
 
-	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
+	output_fmt_index = sof_ipc4_init_output_audio_fmt(swidget,
 							  &src->data.base_config,
 							  available_fmt,
 							  out_ref_rate,
@@ -2852,17 +2901,17 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	if (output_fmt_index < 0)
 		return output_fmt_index;
 
-	sof_ipc4_dbg_module_audio_format(sdev->dev, swidget, available_fmt,
+	sof_ipc4_dbg_module_audio_format(scomp->dev, swidget, available_fmt,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &src->data.base_config);
+	sof_ipc4_update_resource_usage(swidget, &src->data.base_config);
 
 	out_audio_fmt = &available_fmt->output_pin_fmts[output_fmt_index].audio_fmt;
 	src->data.sink_rate = out_audio_fmt->sampling_frequency;
 
 	/* update pipeline_params for sink widgets */
-	return sof_ipc4_update_hw_params(sdev, pipeline_params, out_audio_fmt,
+	return sof_ipc4_update_hw_params(scomp, pipeline_params, out_audio_fmt,
 					 BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
 					 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
 					 BIT(SNDRV_PCM_HW_PARAM_RATE));
@@ -2952,7 +3001,6 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 					   struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_process *process = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &process->available_fmt;
 	void *cfg = process->ipc_config_data;
@@ -2966,14 +3014,14 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 				return 0;
 
 			/* modify the pipeline params with the output format */
-			return sof_ipc4_update_hw_params(sdev, pipeline_params,
+			return sof_ipc4_update_hw_params(scomp, pipeline_params,
 							&process->output_format,
 							BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
 							BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
 							BIT(SNDRV_PCM_HW_PARAM_RATE));
 		}
 
-		input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
+		input_fmt_index = sof_ipc4_init_input_audio_fmt(swidget,
 								&process->base_config,
 								pipeline_params,
 								available_fmt);
@@ -3016,12 +3064,12 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 			/* for modules without input formats, use FE params as reference */
 			ref_rate = params_rate(fe_params);
 			ref_channels = params_channels(fe_params);
-			ret = sof_ipc4_get_sample_type(sdev, fe_params);
+			ret = sof_ipc4_get_sample_type(scomp, fe_params);
 			if (ret < 0)
 				return ret;
 			ref_type = (u32)ret;
 
-			ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
+			ref_valid_bits = sof_ipc4_get_valid_bits(scomp, fe_params);
 			if (ref_valid_bits < 0)
 				return ref_valid_bits;
 		}
@@ -3032,16 +3080,16 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 			if (available_fmt->changed_params & BIT(SNDRV_PCM_HW_PARAM_CHANNELS))
 				ref_channels = params_channels(fe_params);
 			if (available_fmt->changed_params & BIT(SNDRV_PCM_HW_PARAM_FORMAT)) {
-				ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
+				ref_valid_bits = sof_ipc4_get_valid_bits(scomp, fe_params);
 				if (ref_valid_bits < 0)
 					return ref_valid_bits;
 
-				ref_type = sof_ipc4_get_sample_type(sdev, fe_params);
+				ref_type = sof_ipc4_get_sample_type(scomp, fe_params);
 				if (ref_type < 0)
 					return ref_type;
 			}
 		}
-		output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
+		output_fmt_index = sof_ipc4_init_output_audio_fmt(swidget,
 								  &process->base_config,
 								  available_fmt,
 								  ref_rate,
@@ -3059,7 +3107,7 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 			       sizeof(struct sof_ipc4_audio_format));
 
 			/* modify the pipeline params with the output format */
-			ret = sof_ipc4_update_hw_params(sdev, pipeline_params,
+			ret = sof_ipc4_update_hw_params(scomp, pipeline_params,
 							&process->output_format,
 							available_fmt->changed_params);
 			if (ret)
@@ -3077,11 +3125,11 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 		}
 	}
 
-	sof_ipc4_dbg_module_audio_format(sdev->dev, swidget, available_fmt,
+	sof_ipc4_dbg_module_audio_format(scomp->dev, swidget, available_fmt,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &process->base_config);
+	sof_ipc4_update_resource_usage(swidget, &process->base_config);
 
 	/* ipc_config_data is composed of the base_config followed by an optional extension */
 	memcpy(cfg, &process->base_config, sizeof(struct sof_ipc4_base_module_cfg));
@@ -3172,8 +3220,9 @@ static int sof_ipc4_control_load_enum(struct snd_sof_dev *sdev, struct snd_sof_c
 	return 0;
 }
 
-static int sof_ipc4_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
+static int sof_ipc4_control_load_bytes(struct snd_sof_control *scontrol)
 {
+	struct snd_soc_component *scomp = scontrol->scomp;
 	struct sof_ipc4_control_data *control_data;
 	struct sof_ipc4_msg *msg;
 	int ret;
@@ -3184,21 +3233,21 @@ static int sof_ipc4_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_
 	 * 'struct sof_ipc4_control_data'
 	 */
 	if (scontrol->max_size < sizeof(struct sof_abi_hdr)) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"insufficient maximum size for a bytes control %s: %zu.\n",
 			scontrol->name, scontrol->max_size);
 		return -EINVAL;
 	}
 
 	if (scontrol->priv_size > scontrol->max_size) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"bytes control %s initial data size %zu exceeds max %zu.\n",
 			scontrol->name, scontrol->priv_size, scontrol->max_size);
 		return -EINVAL;
 	}
 
 	if (scontrol->priv_size && scontrol->priv_size < sizeof(struct sof_abi_hdr)) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"bytes control %s initial data size %zu is insufficient.\n",
 			scontrol->name, scontrol->priv_size);
 		return -EINVAL;
@@ -3224,7 +3273,7 @@ static int sof_ipc4_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_
 		scontrol->priv = NULL;
 
 		if (control_data->data->magic != SOF_IPC4_ABI_MAGIC) {
-			dev_err(sdev->dev, "Wrong ABI magic (%#x) for control: %s\n",
+			dev_err(scomp->dev, "Wrong ABI magic (%#x) for control: %s\n",
 				control_data->data->magic, scontrol->name);
 			ret = -EINVAL;
 			goto err;
@@ -3234,7 +3283,7 @@ static int sof_ipc4_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_
 
 		if (control_data->data->size + sizeof(struct sof_abi_hdr) !=
 		    scontrol->priv_size) {
-			dev_err(sdev->dev, "Control %s conflict in bytes %zu vs. priv size %zu.\n",
+			dev_err(scomp->dev, "Control %s conflict in bytes %zu vs. priv size %zu.\n",
 				scontrol->name,
 				control_data->data->size + sizeof(struct sof_abi_hdr),
 				scontrol->priv_size);
@@ -3265,7 +3314,7 @@ static int sof_ipc4_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 	case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
 		return sof_ipc4_control_load_volume(sdev, scontrol);
 	case SND_SOC_TPLG_CTL_BYTES:
-		return sof_ipc4_control_load_bytes(sdev, scontrol);
+		return sof_ipc4_control_load_bytes(scontrol);
 	case SND_SOC_TPLG_CTL_ENUM:
 	case SND_SOC_TPLG_CTL_ENUM_VALUE:
 		return sof_ipc4_control_load_enum(sdev, scontrol);
@@ -3276,8 +3325,7 @@ static int sof_ipc4_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 	return 0;
 }
 
-static void sof_ipc4_add_init_ext_dp_memory_data(struct snd_sof_dev *sdev,
-						 struct snd_sof_widget *swidget,
+static void sof_ipc4_add_init_ext_dp_memory_data(struct snd_sof_widget *swidget,
 						 u32 *payload, u32 *ext_pos,
 						 struct sof_ipc4_module_init_ext_object **hdr)
 {
@@ -3315,14 +3363,15 @@ sof_ipc4_add_init_ext_module_data(struct snd_sof_dev *sdev,
 	*ext_pos += DIV_ROUND_UP(data_size, sizeof(u32));
 }
 
-static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
-						struct snd_sof_widget *swidget,
+static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_widget *swidget,
 						struct sof_ipc4_msg *msg,
 						void *ipc_data, u32 ipc_size,
 						void **new_data)
 {
 	struct sof_ipc4_process *process = swidget->private;
 	struct sof_ipc4_module_init_ext_object *hdr = NULL;
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_module_init_ext_init *ext_init;
 	bool in_dp_domain = swidget->comp_domain == SOF_COMP_DOMAIN_DP;
 	bool has_ext_data = WIDGET_IS_PROCESS(swidget->id) && process->init_ext_module_size;
@@ -3344,7 +3393,7 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 
 	/* Add object array objects after ext_init */
 	if (in_dp_domain)
-		sof_ipc4_add_init_ext_dp_memory_data(sdev, swidget, payload,
+		sof_ipc4_add_init_ext_dp_memory_data(swidget, payload,
 						     &ext_pos, &hdr);
 
 	if (has_ext_data)
@@ -3357,7 +3406,7 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 	/* Calculate final size and check that it fits to max payload size */
 	new_size = ext_pos * sizeof(u32) + ipc_size;
 	if (new_size > sdev->ipc->max_payload_size) {
-		dev_err(sdev->dev, "Max ipc payload size %zu exceeded: %u",
+		dev_err(scomp->dev, "Max ipc payload size %zu exceeded: %u",
 			sdev->ipc->max_payload_size, new_size);
 		kfree(payload);
 		return -EINVAL;
@@ -3375,12 +3424,12 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 	return new_size;
 }
 
-static void sof_ipc4_widget_pipe_ext_obj_memory_data(struct snd_sof_dev *sdev,
-						     struct snd_sof_widget *swidget,
+static void sof_ipc4_widget_pipe_ext_obj_memory_data(struct snd_sof_widget *swidget,
 						     u32 *payload, u32 *ext_pos,
 						     struct sof_ipc4_glb_pipe_ext_object **hdr)
 {
 	struct sof_ipc4_glb_pipe_ext_obj_memory_data *mem_data;
+	struct snd_soc_component *scomp = swidget->scomp;
 
 	*hdr = (struct sof_ipc4_glb_pipe_ext_object *)&payload[*ext_pos];
 	(*hdr)->header =
@@ -3394,17 +3443,18 @@ static void sof_ipc4_widget_pipe_ext_obj_memory_data(struct snd_sof_dev *sdev,
 	mem_data->heap_bytes = swidget->heap_bytes;
 	*ext_pos += DIV_ROUND_UP(sizeof(*mem_data), sizeof(u32));
 
-	dev_dbg(sdev->dev,
+	dev_dbg(scomp->dev,
 		"%s; domain_id %u stack %u heap %u bytes",
 		swidget->widget->name, mem_data->domain_id, mem_data->stack_bytes,
 		mem_data->heap_bytes);
 }
 
-static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_dev *sdev,
-						   struct snd_sof_widget *swidget,
+static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_widget *swidget,
 						   struct sof_ipc4_msg *msg,
 						   void **new_data)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_glb_pipe_payload *payload_hdr;
 	struct sof_ipc4_glb_pipe_ext_object *hdr = NULL;
 	u32 *payload;
@@ -3419,7 +3469,7 @@ static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_dev *sdev,
 	payload_hdr->word0 |= SOF_IPC4_GLB_PIPE_EXT_OBJ_ARRAY_MASK;
 	ext_pos = DIV_ROUND_UP(sizeof(*payload_hdr), sizeof(u32));
 
-	sof_ipc4_widget_pipe_ext_obj_memory_data(sdev, swidget, payload, &ext_pos, &hdr);
+	sof_ipc4_widget_pipe_ext_obj_memory_data(swidget, payload, &ext_pos, &hdr);
 	/* Add following array objects here */
 
 	/* Mark end of object array */
@@ -3432,7 +3482,7 @@ static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_dev *sdev,
 	/* Update msg extension bits according to the payload changes */
 	msg->extension |= SOF_IPC4_GLB_PIPE_PAYLOAD_MASK;
 
-	dev_dbg(sdev->dev, "%s: payload word0 %#x", swidget->widget->name,
+	dev_dbg(scomp->dev, "%s: payload word0 %#x", swidget->widget->name,
 		payload_hdr->word0);
 
 	return ext_pos * sizeof(int32_t);
@@ -3440,6 +3490,8 @@ static int sof_ipc4_widget_pipe_create_msg_payload(struct snd_sof_dev *sdev,
 
 static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_pipeline *pipeline;
@@ -3454,12 +3506,12 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		pipeline = swidget->private;
 
 		if (pipeline->use_chain_dma) {
-			dev_warn(sdev->dev, "use_chain_dma set for scheduler %s",
+			dev_warn(scomp->dev, "use_chain_dma set for scheduler %s",
 				 swidget->widget->name);
 			return 0;
 		}
 
-		dev_dbg(sdev->dev, "pipeline: %d memory pages: %d\n", swidget->pipeline_id,
+		dev_dbg(scomp->dev, "pipeline: %d memory pages: %d\n", swidget->pipeline_id,
 			pipeline->mem_usage);
 
 		msg = &pipeline->msg;
@@ -3468,7 +3520,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		swidget->instance_id = ida_alloc_max(&pipeline_ida, ipc4_data->max_num_pipelines,
 						     GFP_KERNEL);
 		if (swidget->instance_id < 0) {
-			dev_err(sdev->dev, "failed to assign pipeline id for %s: %d\n",
+			dev_err(scomp->dev, "failed to assign pipeline id for %s: %d\n",
 				swidget->widget->name, swidget->instance_id);
 			return swidget->instance_id;
 		}
@@ -3587,7 +3639,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		struct sof_ipc4_process *process = swidget->private;
 
 		if (!process->ipc_config_size) {
-			dev_err(sdev->dev, "module %s has no config data!\n",
+			dev_err(scomp->dev, "module %s has no config data!\n",
 				swidget->widget->name);
 			return -EINVAL;
 		}
@@ -3599,16 +3651,16 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		break;
 	}
 	default:
-		dev_err(sdev->dev, "widget type %d not supported", swidget->id);
+		dev_err(scomp->dev, "widget type %d not supported", swidget->id);
 		return -EINVAL;
 	}
 
 	if (swidget->id != snd_soc_dapm_scheduler) {
 		int module_id = msg->primary & SOF_IPC4_MOD_ID_MASK;
 
-		ret = sof_ipc4_widget_assign_instance_id(sdev, swidget);
+		ret = sof_ipc4_widget_assign_instance_id(swidget);
 		if (ret < 0) {
-			dev_err(sdev->dev, "failed to assign instance id for %s\n",
+			dev_err(scomp->dev, "failed to assign instance id for %s\n",
 				swidget->widget->name);
 			return ret;
 		}
@@ -3622,11 +3674,11 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		msg->extension &= ~SOF_IPC4_MOD_EXT_PPL_ID_MASK;
 		msg->extension |= SOF_IPC4_MOD_EXT_PPL_ID(pipe_widget->instance_id);
 
-		dev_dbg(sdev->dev, "Create widget %s (pipe %d) - ID %d, instance %d, core %d\n",
+		dev_dbg(scomp->dev, "Create widget %s (pipe %d) - ID %d, instance %d, core %d\n",
 			swidget->widget->name, swidget->pipeline_id, module_id,
 			swidget->instance_id, swidget->core);
 
-		ret = sof_ipc4_widget_mod_init_msg_payload(sdev, swidget, msg, ipc_data, ipc_size,
+		ret = sof_ipc4_widget_mod_init_msg_payload(swidget, msg, ipc_data, ipc_size,
 							   &ext_data);
 		if (ret < 0)
 			goto fail;
@@ -3636,12 +3688,12 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 			ipc_data = ext_data;
 		}
 	} else {
-		dev_dbg(sdev->dev, "Create pipeline %s (pipe %d) - instance %d, core %d\n",
+		dev_dbg(scomp->dev, "Create pipeline %s (pipe %d) - instance %d, core %d\n",
 			swidget->widget->name, swidget->pipeline_id,
 			swidget->instance_id, swidget->core);
 
 		msg->extension &= ~SOF_IPC4_GLB_PIPE_PAYLOAD_MASK;
-		ret = sof_ipc4_widget_pipe_create_msg_payload(sdev, swidget, msg,
+		ret = sof_ipc4_widget_pipe_create_msg_payload(swidget, msg,
 							      &ext_data);
 		if (ret < 0)
 			goto fail;
@@ -3655,11 +3707,11 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 	msg->data_size = ipc_size;
 	msg->data_ptr = ipc_data;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, msg, ipc_size);
+	ret = sof_client_ipc_tx_message_no_reply(cdev, msg);
 
 fail:
 	if (ret < 0) {
-		dev_err(sdev->dev, "failed to create module %s\n", swidget->widget->name);
+		dev_err(scomp->dev, "failed to create module %s\n", swidget->widget->name);
 
 		if (swidget->id != snd_soc_dapm_scheduler) {
 			struct sof_ipc4_fw_module *fw_module = swidget->module_info;
@@ -3676,6 +3728,8 @@ fail:
 
 static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	int ret = 0;
@@ -3689,7 +3743,7 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 		u32 header;
 
 		if (pipeline->use_chain_dma) {
-			dev_warn(sdev->dev, "use_chain_dma set for scheduler %s",
+			dev_warn(scomp->dev, "use_chain_dma set for scheduler %s",
 				 swidget->widget->name);
 			return 0;
 		}
@@ -3701,9 +3755,9 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 
 		msg.primary = header;
 
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+		ret = sof_client_ipc_tx_message_no_reply(cdev, &msg);
 		if (ret < 0)
-			dev_err(sdev->dev, "failed to free pipeline widget %s\n",
+			dev_err(scomp->dev, "failed to free pipeline widget %s\n",
 				swidget->widget->name);
 
 		pipeline->mem_usage = 0;
@@ -3810,8 +3864,9 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 					   struct snd_sof_widget *sink_widget,
 					   struct snd_sof_route *sroute)
 {
+	struct snd_soc_component *scomp = sroute->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc4_copier_config_set_sink_format format;
-	const struct sof_ipc_ops *iops = sdev->ipc->ops;
 	struct sof_ipc4_base_module_cfg *src_config;
 	const struct sof_ipc4_audio_format *pin_fmt;
 	struct sof_ipc4_fw_module *fw_module;
@@ -3832,7 +3887,7 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 
 	pin_fmt = sof_ipc4_get_input_pin_audio_fmt(sink_widget, sroute->dst_queue_id);
 	if (!pin_fmt) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"Failed to get input audio format of %s:%d for output of %s:%d\n",
 			sink_widget->widget->name, sroute->dst_queue_id,
 			src_widget->widget->name, sroute->src_queue_id);
@@ -3852,11 +3907,13 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 	msg.extension =
 		SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_COPIER_MODULE_CFG_PARAM_SET_SINK_FORMAT);
 
-	return iops->set_get_data(sdev, &msg, msg.data_size, true);
+	return sof_client_ipc_set_get_data(cdev, &msg, true);
 }
 
 static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
 {
+	struct snd_soc_component *scomp = sroute->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_sof_widget *src_widget = sroute->src_widget;
 	struct snd_sof_widget *sink_widget = sroute->sink_widget;
 	struct snd_sof_widget *src_pipe_widget = src_widget->spipe->pipe_widget;
@@ -3872,7 +3929,7 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	/* no route set up if chain DMA is used */
 	if (src_pipeline->use_chain_dma || sink_pipeline->use_chain_dma) {
 		if (!src_pipeline->use_chain_dma || !sink_pipeline->use_chain_dma) {
-			dev_err(sdev->dev,
+			dev_err(scomp->dev,
 				"use_chain_dma must be set for both src %s and sink %s pipelines\n",
 				src_widget->widget->name, sink_widget->widget->name);
 			return -EINVAL;
@@ -3881,7 +3938,7 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	}
 
 	if (!src_fw_module || !sink_fw_module) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"cannot bind %s -> %s, no firmware module for: %s%s\n",
 			src_widget->widget->name, sink_widget->widget->name,
 			src_fw_module ? "" : " source",
@@ -3893,7 +3950,7 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	sroute->src_queue_id = sof_ipc4_get_queue_id(src_widget, sink_widget,
 						     SOF_PIN_TYPE_OUTPUT);
 	if (sroute->src_queue_id < 0) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"failed to get src_queue_id ID from source widget %s\n",
 			src_widget->widget->name);
 		return sroute->src_queue_id;
@@ -3902,7 +3959,7 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	sroute->dst_queue_id = sof_ipc4_get_queue_id(src_widget, sink_widget,
 						     SOF_PIN_TYPE_INPUT);
 	if (sroute->dst_queue_id < 0) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"failed to get dst_queue_id ID from sink widget %s\n",
 			sink_widget->widget->name);
 		sof_ipc4_put_queue_id(src_widget, sroute->src_queue_id,
@@ -3915,14 +3972,14 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 		ret = sof_ipc4_set_copier_sink_format(sdev, src_widget,
 						      sink_widget, sroute);
 		if (ret < 0) {
-			dev_err(sdev->dev,
+			dev_err(scomp->dev,
 				"failed to set sink format for source %s:%d\n",
 				src_widget->widget->name, sroute->src_queue_id);
 			goto out;
 		}
 	}
 
-	dev_dbg(sdev->dev, "bind %s:%d -> %s:%d\n",
+	dev_dbg(scomp->dev, "bind %s:%d -> %s:%d\n",
 		src_widget->widget->name, sroute->src_queue_id,
 		sink_widget->widget->name, sroute->dst_queue_id);
 
@@ -3940,9 +3997,9 @@ static int sof_ipc4_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	msg.primary = header;
 	msg.extension = extension;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &msg);
 	if (ret < 0) {
-		dev_err(sdev->dev, "failed to bind modules %s:%d -> %s:%d\n",
+		dev_err(scomp->dev, "failed to bind modules %s:%d -> %s:%d\n",
 			src_widget->widget->name, sroute->src_queue_id,
 			sink_widget->widget->name, sroute->dst_queue_id);
 		goto out;
@@ -3958,6 +4015,8 @@ out:
 
 static int sof_ipc4_route_free(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
 {
+	struct snd_soc_component *scomp = sroute->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_sof_widget *src_widget = sroute->src_widget;
 	struct snd_sof_widget *sink_widget = sroute->sink_widget;
 	struct sof_ipc4_fw_module *src_fw_module = src_widget->module_info;
@@ -3974,7 +4033,7 @@ static int sof_ipc4_route_free(struct snd_sof_dev *sdev, struct snd_sof_route *s
 	if (src_pipeline->use_chain_dma || sink_pipeline->use_chain_dma)
 		return 0;
 
-	dev_dbg(sdev->dev, "unbind modules %s:%d -> %s:%d\n",
+	dev_dbg(scomp->dev, "unbind modules %s:%d -> %s:%d\n",
 		src_widget->widget->name, sroute->src_queue_id,
 		sink_widget->widget->name, sroute->dst_queue_id);
 
@@ -3999,9 +4058,9 @@ static int sof_ipc4_route_free(struct snd_sof_dev *sdev, struct snd_sof_route *s
 	msg.primary = header;
 	msg.extension = extension;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &msg, 0);
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &msg);
 	if (ret < 0)
-		dev_err(sdev->dev, "failed to unbind modules %s:%d -> %s:%d\n",
+		dev_err(scomp->dev, "failed to unbind modules %s:%d -> %s:%d\n",
 			src_widget->widget->name, sroute->src_queue_id,
 			sink_widget->widget->name, sroute->dst_queue_id);
 out:
@@ -4014,6 +4073,7 @@ out:
 static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
 			       unsigned int flags, struct snd_sof_dai_config_data *data)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 	struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 	struct snd_sof_dai *dai = swidget->private;
@@ -4022,7 +4082,7 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	struct sof_ipc4_copier *ipc4_copier;
 
 	if (!dai || !dai->private) {
-		dev_err(sdev->dev, "Invalid DAI or DAI private data for %s\n",
+		dev_err(scomp->dev, "Invalid DAI or DAI private data for %s\n",
 			swidget->widget->name);
 		return -EINVAL;
 	}
@@ -4084,7 +4144,7 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 		/* nothing to do for SSP/DMIC */
 		break;
 	default:
-		dev_err(sdev->dev, "%s: unsupported dai type %d\n", __func__,
+		dev_err(scomp->dev, "%s: unsupported dai type %d\n", __func__,
 			ipc4_copier->dai_type);
 		return -EINVAL;
 	}
@@ -4095,7 +4155,7 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 				   struct snd_soc_tplg_manifest *man)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_manifest_tlv *manifest_tlv;
 	struct snd_ipc4_nhlt *tplg_nhlt;
@@ -4163,6 +4223,8 @@ static int sof_ipc4_parse_manifest(struct snd_soc_component *scomp, int index,
 
 static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *dai, int param_type)
 {
+	struct snd_soc_component *scomp = dai->scomp;
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct sof_ipc4_copier *ipc4_copier = dai->private;
 	struct snd_soc_tplg_hw_config *hw_config;
 	struct snd_sof_dai_link *slink;
@@ -4173,7 +4235,7 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 	if (!ipc4_copier)
 		return 0;
 
-	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+	list_for_each_entry(slink, &instance->dai_link_list, list) {
 		if (!strcmp(slink->link->name, dai->name)) {
 			dai_link_found = true;
 			break;
@@ -4181,7 +4243,7 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 	}
 
 	if (!dai_link_found) {
-		dev_err(sdev->dev, "no DAI link found for DAI %s\n", dai->name);
+		dev_err(scomp->dev, "no DAI link found for DAI %s\n", dai->name);
 		return -EINVAL;
 	}
 
@@ -4194,7 +4256,7 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 	}
 
 	if (!hw_cfg_found) {
-		dev_err(sdev->dev, "no matching hw_config found for DAI %s\n", dai->name);
+		dev_err(scomp->dev, "no matching hw_config found for DAI %s\n", dai->name);
 		return -EINVAL;
 	}
 
@@ -4208,23 +4270,23 @@ static int sof_ipc4_dai_get_param(struct snd_sof_dev *sdev, struct snd_sof_dai *
 		case SOF_DAI_PARAM_INTEL_SSP_TDM_SLOTS:
 			return le32_to_cpu(hw_config->tdm_slots);
 		default:
-			dev_err(sdev->dev, "invalid SSP param %d\n", param_type);
+			dev_err(scomp->dev, "invalid SSP param %d\n", param_type);
 			break;
 		}
 		break;
 	default:
-		dev_err(sdev->dev, "DAI type %d not supported yet!\n", ipc4_copier->dai_type);
+		dev_err(scomp->dev, "DAI type %d not supported yet!\n", ipc4_copier->dai_type);
 		break;
 	}
 
 	return -EINVAL;
 }
 
-static int sof_ipc4_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verify)
+static int sof_ipc4_tear_down_all_pipelines(struct snd_soc_component *component, bool verify)
 {
 	/*
 	 * This function is called during system suspend, we need to make sure
-	 * that all streams have been freed up.
+	 * that all streams of this audio instance have been freed up.
 	 * Freeing might have been skipped when xrun happened just at the start
 	 * of the suspend and it sent a SNDRV_PCM_TRIGGER_STOP to the active
 	 * stream. This will call sof_pcm_stream_free() with
@@ -4234,7 +4296,7 @@ static int sof_ipc4_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 * This will also make sure that paused streams handled correctly.
 	 */
 
-	return sof_pcm_free_all_streams(sdev);
+	return sof_pcm_free_all_streams(component);
 }
 
 static int sof_ipc4_link_setup(struct snd_sof_dev *sdev, struct snd_soc_dai_link *link)

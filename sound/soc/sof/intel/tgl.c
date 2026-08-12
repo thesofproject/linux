@@ -121,7 +121,7 @@ int sof_tgl_ops_init(struct snd_sof_dev *sdev)
 	}
 
 	/* set DAI driver ops */
-	hda_set_dai_drv_ops(sdev, &sof_tgl_ops);
+	hda_set_dai_drv_ops(sdev);
 
 	/* pre/post fw run */
 	sof_tgl_ops.post_fw_run = hda_dsp_post_fw_run;

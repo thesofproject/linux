@@ -580,6 +580,9 @@ struct sof_intel_hda_dev {
 	 * is received from the DSP for the previous message)
 	 */
 	struct snd_sof_ipc_msg *delayed_ipc_tx_msg;
+
+	/* number of audio client devices registered in multi-card mode */
+	int num_audio_clients;
 };
 
 static inline struct hdac_bus *sof_to_bus(struct snd_sof_dev *s)
@@ -667,35 +670,41 @@ u32 hda_get_interface_mask(struct snd_sof_dev *sdev);
  */
 u32 hda_dsp_get_mult_div(struct snd_sof_dev *sdev, int rate);
 u32 hda_dsp_get_bits(struct snd_sof_dev *sdev, int sample_bits);
-int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_open(struct snd_soc_component *component,
+		     struct snd_sof_pcm *spcm,
 		     struct snd_pcm_substream *substream);
-int hda_dsp_pcm_close(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_close(struct snd_soc_component *component,
 		      struct snd_pcm_substream *substream);
-int hda_dsp_pcm_hw_params(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_hw_params(struct snd_soc_component *component,
 			  struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,
 			  struct snd_sof_platform_stream_params *platform_params);
-int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
+int hda_dsp_stream_hw_free(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream);
-int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
+int hda_dsp_pcm_trigger(struct snd_soc_component *component,
 			struct snd_pcm_substream *substream, int cmd);
-snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
+snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_soc_component *component,
+				      struct snd_sof_pcm *spcm,
 				      struct snd_pcm_substream *substream);
-int hda_dsp_pcm_ack(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream);
+int hda_dsp_pcm_ack(struct snd_soc_component *component,
+		    struct snd_pcm_substream *substream);
 
-int hda_dsp_compr_open(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);
-int hda_dsp_compr_close(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);
-int hda_dsp_compr_hw_params(struct snd_sof_dev *sdev,
+int hda_dsp_compr_open(struct snd_soc_component *component,
+		       struct snd_compr_stream *cstream);
+int hda_dsp_compr_close(struct snd_soc_component *component,
+			struct snd_compr_stream *cstream);
+int hda_dsp_compr_hw_params(struct snd_soc_component *component,
 			    struct snd_compr_stream *cstream,
 			    struct snd_compr_params *params,
 			    struct snd_sof_platform_stream_params *platform_params);
-int hda_dsp_stream_compr_hw_free(struct snd_sof_dev *sdev,
+int hda_dsp_stream_compr_hw_free(struct snd_soc_component *component,
 				 struct snd_compr_stream *cstream);
-int hda_dsp_compr_trigger(struct snd_sof_dev *sdev,
+int hda_dsp_compr_trigger(struct snd_soc_component *component,
 			  struct snd_compr_stream *cstream, int cmd);
-int hda_dsp_compr_pointer(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream,
+int hda_dsp_compr_pointer(struct snd_soc_component *component,
+			  struct snd_compr_stream *cstream,
 			  struct snd_compr_tstamp64 *tstamp);
-u64 hda_dsp_compr_get_stream_llp(struct snd_sof_dev *sdev,
+u64 hda_dsp_compr_get_stream_llp(struct snd_soc_component *component,
 				 struct snd_compr_stream *cstream);
 
 /*
@@ -723,11 +732,9 @@ bool hda_dsp_check_stream_irq(struct snd_sof_dev *sdev);
 
 snd_pcm_uframes_t hda_dsp_stream_get_position(struct hdac_stream *hstream,
 					      int direction, bool can_sleep);
-u64 hda_dsp_get_stream_llp(struct snd_sof_dev *sdev,
-			   struct snd_soc_component *component,
+u64 hda_dsp_get_stream_llp(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream);
-u64 hda_dsp_get_stream_ldp(struct snd_sof_dev *sdev,
-			   struct snd_soc_component *component,
+u64 hda_dsp_get_stream_ldp(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream);
 
 struct hdac_ext_stream *
@@ -959,6 +966,7 @@ int hda_dsp_dais_suspend(struct snd_sof_dev *sdev);
 /*
  * Platform Specific HW abstraction Ops.
  */
+extern const struct sof_audio_ops sof_hda_audio_ops;
 extern const struct snd_sof_dsp_ops sof_hda_common_ops;
 
 extern struct snd_sof_dsp_ops sof_skl_ops;
@@ -1008,6 +1016,10 @@ static inline void hda_probes_unregister(struct snd_sof_dev *sdev)
 int hda_register_clients(struct snd_sof_dev *sdev);
 void hda_unregister_clients(struct snd_sof_dev *sdev);
 
+/* SOF audio client registration for HDA platforms (multi-card) */
+int hda_register_audio_client(struct snd_sof_dev *sdev);
+void hda_unregister_audio_client(struct snd_sof_dev *sdev);
+
 /* machine driver select */
 struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev);
 void hda_set_mach_params(struct snd_soc_acpi_mach *mach,
@@ -1025,7 +1037,7 @@ struct sof_ipc_dai_config;
 
 extern int sof_hda_position_quirk;
 
-void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops);
+void hda_set_dai_drv_ops(struct snd_sof_dev *sdev);
 void hda_ops_free(struct snd_sof_dev *sdev);
 
 /* SKL/KBL */
@@ -1102,7 +1114,7 @@ static inline struct snd_sof_dev *widget_to_sdev(struct snd_soc_dapm_widget *w)
 	struct snd_sof_widget *swidget = w->dobj.private;
 	struct snd_soc_component *component = swidget->scomp;
 
-	return snd_soc_component_get_drvdata(component);
+	return snd_sof_component_get_sdev(component);
 }
 
 #endif

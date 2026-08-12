@@ -19,6 +19,7 @@
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/intel-dsp-config.h>
 #include "../ops.h"
+#include "../sof-client.h"
 #include "shim.h"
 #include "../sof-acpi-dev.h"
 #include "../sof-audio.h"
@@ -530,8 +531,8 @@ static void bdw_set_mach_params(struct snd_soc_acpi_mach *mach,
 
 	mach_params = &mach->mach_params;
 	mach_params->platform = dev_name(sdev->dev);
-	mach_params->num_dai_drivers = desc->ops->num_drv;
-	mach_params->dai_drivers = desc->ops->drv;
+	mach_params->num_dai_drivers = desc->audio_ops->num_drv;
+	mach_params->dai_drivers = desc->audio_ops->drv;
 }
 
 /* Broadwell DAIs */
@@ -558,6 +559,20 @@ static struct snd_soc_dai_driver bdw_dai[] = {
 		.channels_max = 8,
 	},
 },
+};
+
+static const struct sof_audio_ops sof_bdw_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= bdw_dai,
+	.num_drv	= ARRAY_SIZE(bdw_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_BATCH,
 };
 
 /* broadwell ops */
@@ -593,29 +608,18 @@ static const struct snd_sof_dsp_ops sof_bdw_ops = {
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = bdw_set_mach_params,
 
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
+
 	/* debug */
 	.debug_map  = bdw_debugfs,
 	.debug_map_count    = ARRAY_SIZE(bdw_debugfs),
 	.dbg_dump   = bdw_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/*Firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
-
-	/* DAI drivers */
-	.drv = bdw_dai,
-	.num_drv = ARRAY_SIZE(bdw_dai),
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_BATCH,
 
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
 };
@@ -646,6 +650,7 @@ static const struct sof_dev_desc sof_acpi_broadwell_desc = {
 	},
 	.nocodec_tplg_filename = "sof-bdw-nocodec.tplg",
 	.ops = &sof_bdw_ops,
+	.audio_ops = &sof_bdw_audio_ops,
 };
 
 static const struct acpi_device_id sof_broadwell_match[] = {
@@ -689,5 +694,6 @@ module_platform_driver(snd_sof_acpi_intel_bdw_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF support for Broadwell platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SND_SOC_SOF_ACPI_DEV");

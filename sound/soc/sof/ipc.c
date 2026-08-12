@@ -190,16 +190,6 @@ struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev)
 		return NULL;
 	}
 
-	if (!ops->pcm) {
-		dev_err(sdev->dev, "Missing IPC PCM ops\n");
-		return NULL;
-	}
-
-	if (!ops->tplg || !ops->tplg->widget || !ops->tplg->control) {
-		dev_err(sdev->dev, "Missing IPC topology ops\n");
-		return NULL;
-	}
-
 	if (ops->fw_tracing && (!ops->fw_tracing->init || !ops->fw_tracing->suspend ||
 				!ops->fw_tracing->resume)) {
 		dev_err(sdev->dev, "Missing firmware tracing ops\n");

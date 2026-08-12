@@ -20,6 +20,7 @@
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
 #include "../../ops.h"
+#include "../../sof-client.h"
 #include "../../sof-of-dev.h"
 #include "../adsp_helper.h"
 #include "../mtk-adsp-common.h"
@@ -402,6 +403,22 @@ static struct snd_soc_dai_driver mt8195_dai[] = {
 },
 };
 
+static const struct sof_audio_ops sof_mt8195_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_hw_params	= mtk_adsp_stream_pcm_hw_params,
+	.pcm_pointer	= mtk_adsp_stream_pcm_pointer,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= mt8195_dai,
+	.num_drv	= ARRAY_SIZE(mt8195_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+};
+
 /* mt8195 ops */
 static const struct snd_sof_dsp_ops sof_mt8195_ops = {
 	/* probe and remove */
@@ -436,14 +453,12 @@ static const struct snd_sof_dsp_ops sof_mt8195_ops = {
 	/* misc */
 	.get_bar_index	= mtk_adsp_get_bar_index,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_hw_params	= mtk_adsp_stream_pcm_hw_params,
-	.pcm_pointer	= mtk_adsp_stream_pcm_pointer,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
+
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
 
 	/* Firmware ops */
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
@@ -452,20 +467,9 @@ static const struct snd_sof_dsp_ops sof_mt8195_ops = {
 	.dbg_dump = mt8195_adsp_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
-	/* DAI drivers */
-	.drv = mt8195_dai,
-	.num_drv = ARRAY_SIZE(mt8195_dai),
-
 	/* PM */
 	.suspend	= mt8195_dsp_suspend,
 	.resume		= mt8195_dsp_resume,
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 
 static struct snd_sof_of_mach sof_mt8195_machs[] = {
@@ -498,6 +502,7 @@ static const struct sof_dev_desc sof_of_mt8195_desc = {
 	},
 	.nocodec_tplg_filename = "sof-mt8195-nocodec.tplg",
 	.ops = &sof_mt8195_ops,
+	.audio_ops = &sof_mt8195_audio_ops,
 	.ipc_timeout = 1000,
 };
 
@@ -522,5 +527,6 @@ module_platform_driver(snd_sof_of_mt8195_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF support for MTL 8195 platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SND_SOC_SOF_MTK_COMMON");

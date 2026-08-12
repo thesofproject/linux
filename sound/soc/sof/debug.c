@@ -355,8 +355,6 @@ int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 			   (char **)&plat_data->tplg_filename_prefix);
 	debugfs_create_str("fw_name", 0444, fw_profile,
 			   (char **)&plat_data->fw_filename);
-	debugfs_create_str("tplg_name", 0444, fw_profile,
-			   (char **)&plat_data->tplg_filename);
 	debugfs_create_u32("ipc_type", 0444, fw_profile,
 			   (u32 *)&plat_data->ipc_type);
 

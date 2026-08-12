@@ -12,6 +12,7 @@
 #define __SOUND_SOC_SOF_PRIV_H
 
 #include <linux/device.h>
+#include <linux/srcu.h>
 #include <sound/hdaudio.h>
 #include <sound/sof.h>
 #include <sound/sof/info.h>
@@ -20,6 +21,7 @@
 #include <sound/compress_params.h>
 #include <uapi/sound/sof/fw.h>
 #include <sound/sof/ext_manifest.h>
+#include "sof-client.h"
 
 struct snd_sof_pcm_stream;
 
@@ -126,7 +128,104 @@ struct snd_sof_ipc;
 struct snd_sof_debugfs_map;
 struct snd_soc_tplg_ops;
 struct snd_soc_component;
+struct snd_sof_pcm;
 struct snd_sof_pdata;
+struct snd_sof_platform_stream_params;
+
+/*
+ * SOF platform-specific audio operations.
+ *
+ * These callbacks handle platform-specific stream management (host DMA,
+ * stream allocation, etc.) and are provided per audio instance.
+ * All callbacks receive snd_soc_component to identify the instance,
+ * platform code internally resolves to the hardware device as needed.
+ */
+struct sof_audio_ops {
+	/* host stream management */
+	int (*pcm_open)(struct snd_soc_component *component,
+			struct snd_sof_pcm *spcm,
+			struct snd_pcm_substream *substream);
+	int (*pcm_close)(struct snd_soc_component *component,
+			 struct snd_pcm_substream *substream);
+	int (*pcm_hw_params)(struct snd_soc_component *component,
+			     struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct snd_sof_platform_stream_params *platform_params);
+	int (*pcm_hw_free)(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream);
+	int (*pcm_trigger)(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream, int cmd);
+	snd_pcm_uframes_t (*pcm_pointer)(struct snd_soc_component *component,
+					 struct snd_sof_pcm *spcm,
+					 struct snd_pcm_substream *substream);
+	int (*pcm_ack)(struct snd_soc_component *component,
+		       struct snd_pcm_substream *substream);
+
+	/* compressed streams */
+	int (*compr_open)(struct snd_soc_component *component,
+			  struct snd_compr_stream *cstream);
+	int (*compr_close)(struct snd_soc_component *component,
+			   struct snd_compr_stream *cstream);
+	int (*compr_hw_params)(struct snd_soc_component *component,
+			       struct snd_compr_stream *cstream,
+			       struct snd_compr_params *params,
+			       struct snd_sof_platform_stream_params *platform_params);
+	int (*compr_hw_free)(struct snd_soc_component *component,
+			     struct snd_compr_stream *cstream);
+	int (*compr_trigger)(struct snd_soc_component *component,
+			     struct snd_compr_stream *cstream, int cmd);
+	int (*compr_pointer)(struct snd_soc_component *component,
+			     struct snd_compr_stream *cstream,
+			     struct snd_compr_tstamp64 *tstamp);
+	u64 (*compr_get_dai_frame_counter)(struct snd_soc_component *component,
+					   struct snd_compr_stream *cstream);
+
+	/*
+	 * Optional callback to retrieve the number of frames left/arrived
+	 * from/to the DSP on the DAI side (link/codec/DMIC/etc).
+	 *
+	 * The callback is used when the firmware does not provide this
+	 * information via the shared SRAM window and it can be retrieved by
+	 * host.
+	 */
+	u64 (*get_dai_frame_counter)(struct snd_soc_component *component,
+				     struct snd_pcm_substream *substream);
+
+	/*
+	 * Optional callback to retrieve the number of bytes left/arrived
+	 * from/to the DSP on the host side (bytes between host ALSA buffer and
+	 * DSP).
+	 *
+	 * The callback is needed for ALSA delay reporting.
+	 */
+	u64 (*get_host_byte_counter)(struct snd_soc_component *component,
+				     struct snd_pcm_substream *substream);
+
+	/* DAI drivers */
+	struct snd_soc_dai_driver *drv;
+	int num_drv;
+
+	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
+	u32 hw_info;
+};
+
+/* SOF audio instance container */
+struct snd_sof_audio_instance {
+	struct snd_sof_dev *sdev;
+	struct snd_soc_component *component;
+	const struct sof_audio_ops *audio_ops;
+	const struct sof_ipc_tplg_ops *tplg_ops;
+	const struct sof_ipc_pcm_ops *pcm_ops;
+	struct list_head pipeline_list;
+	struct list_head dai_list;
+	struct list_head dai_link_list;
+	struct list_head route_list;
+	struct list_head pcm_list;
+	struct list_head kcontrol_list;
+	struct list_head widget_list;
+	bool led_present;
+	bool pipelines_set_up;
+};
 
 /**
  * struct snd_sof_platform_stream_params - platform dependent stream parameters
@@ -231,68 +330,6 @@ struct snd_sof_dsp_ops {
 	int (*load_module)(struct snd_sof_dev *sof_dev,
 			   struct snd_sof_mod_hdr *hdr); /* optional */
 
-	/* connect pcm substream to a host stream */
-	int (*pcm_open)(struct snd_sof_dev *sdev,
-			struct snd_pcm_substream *substream); /* optional */
-	/* disconnect pcm substream to a host stream */
-	int (*pcm_close)(struct snd_sof_dev *sdev,
-			 struct snd_pcm_substream *substream); /* optional */
-
-	/* host stream hw params */
-	int (*pcm_hw_params)(struct snd_sof_dev *sdev,
-			     struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *params,
-			     struct snd_sof_platform_stream_params *platform_params); /* optional */
-
-	/* host stream hw_free */
-	int (*pcm_hw_free)(struct snd_sof_dev *sdev,
-			   struct snd_pcm_substream *substream); /* optional */
-
-	/* host stream trigger */
-	int (*pcm_trigger)(struct snd_sof_dev *sdev,
-			   struct snd_pcm_substream *substream,
-			   int cmd); /* optional */
-
-	/* host stream pointer */
-	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,
-					 struct snd_pcm_substream *substream); /* optional */
-
-	/* pcm ack */
-	int (*pcm_ack)(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream); /* optional */
-
-	int (*compr_open)(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);
-	int (*compr_close)(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);
-	int (*compr_hw_params)(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream,
-			       struct snd_compr_params *params,
-			       struct snd_sof_platform_stream_params *platform_params);
-	int (*compr_hw_free)(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream);
-	int (*compr_trigger)(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream,
-			     int cmd);
-	int (*compr_pointer)(struct snd_sof_dev *sdev, struct snd_compr_stream *cstream,
-			     struct snd_compr_tstamp64 *tstamp);
-	u64 (*compr_get_dai_frame_counter)(struct snd_sof_dev *sdev,
-					   struct snd_compr_stream *cstream);
-	/*
-	 * optional callback to retrieve the number of frames left/arrived from/to
-	 * the DSP on the DAI side (link/codec/DMIC/etc).
-	 *
-	 * The callback is used when the firmware does not provide this information
-	 * via the shared SRAM window and it can be retrieved by host.
-	 */
-	u64 (*get_dai_frame_counter)(struct snd_sof_dev *sdev,
-				     struct snd_soc_component *component,
-				     struct snd_pcm_substream *substream); /* optional */
-
-	/*
-	 * Optional callback to retrieve the number of bytes left/arrived from/to
-	 * the DSP on the host side (bytes between host ALSA buffer and DSP).
-	 *
-	 * The callback is needed for ALSA delay reporting.
-	 */
-	u64 (*get_host_byte_counter)(struct snd_sof_dev *sdev,
-				     struct snd_soc_component *component,
-				     struct snd_pcm_substream *substream); /* optional */
-
 	/* host read DSP stream data */
 	int (*ipc_msg_data)(struct snd_sof_dev *sdev,
 			    struct snd_sof_pcm_stream *sps,
@@ -364,14 +401,12 @@ struct snd_sof_dsp_ops {
 	int (*register_ipc_clients)(struct snd_sof_dev *sdev); /* optional */
 	void (*unregister_ipc_clients)(struct snd_sof_dev *sdev); /* optional */
 
+	/* audio client ops */
+	int (*register_audio_client)(struct snd_sof_dev *sdev); /* mandatory */
+	void (*unregister_audio_client)(struct snd_sof_dev *sdev); /* mandatory */
+
 	/* DAI ops */
-	struct snd_soc_dai_driver *drv;
-	int num_drv;
-
 	bool (*is_chain_dma_supported)(struct snd_sof_dev *sdev, u32 dai_type); /* optional */
-
-	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
-	u32 hw_info;
 
 	const struct dsp_arch_ops *dsp_arch_ops;
 };
@@ -418,12 +453,6 @@ struct snd_sof_debugfs_map {
 	 * or if it is accessible only when the DSP is in D0.
 	 */
 	enum sof_debugfs_access_type access_type;
-};
-
-/* mailbox descriptor, used for host <-> DSP IPC */
-struct snd_sof_mailbox {
-	size_t size;
-	u32 offset;
 };
 
 /* IPC message descriptor for host <-> DSP IO */
@@ -493,9 +522,7 @@ struct sof_ipc_pcm_ops;
 
 /**
  * struct sof_ipc_ops - IPC-specific ops
- * @tplg:	Pointer to IPC-specific topology ops
  * @pm:		Pointer to PM ops
- * @pcm:	Pointer to PCM ops
  * @fw_loader:	Pointer to Firmware Loader ops
  * @fw_tracing:	Optional pointer to Firmware tracing ops
  *
@@ -519,9 +546,7 @@ struct sof_ipc_pcm_ops;
  * handled with multiple chunks.
  */
 struct sof_ipc_ops {
-	const struct sof_ipc_tplg_ops *tplg;
 	const struct sof_ipc_pm_ops *pm;
-	const struct sof_ipc_pcm_ops *pcm;
 	const struct sof_ipc_fw_loader_ops *fw_loader;
 	const struct sof_ipc_fw_tracing_ops *fw_tracing;
 
@@ -587,12 +612,6 @@ struct snd_sof_dev {
 	/* Main, Base firmware image */
 	struct sof_firmware basefw;
 
-	/*
-	 * ASoC components. plat_drv fields are set dynamically so
-	 * can't use const
-	 */
-	struct snd_soc_component_driver plat_drv;
-
 	/* current DSP power state */
 	struct sof_dsp_power_state dsp_power_state;
 	/* mutex to protect the dsp_power_state access */
@@ -624,7 +643,7 @@ struct snd_sof_dev {
 	struct snd_sof_mailbox debug_box;	/* Debug info updates */
 	struct snd_sof_ipc_msg *msg;
 	int ipc_irq;
-	u32 next_comp_id; /* monotonic - reset during S3 */
+	atomic_t next_comp_id; /* monotonic comp_id allocator */
 
 	/* memory bases for mmaped DSPs - set by dsp_init() */
 	void __iomem *bar[SND_SOF_BARS];	/* DSP base address */
@@ -646,16 +665,8 @@ struct snd_sof_dev {
 
 	/* topology */
 	struct snd_soc_tplg_ops *tplg_ops;
-	struct list_head pcm_list;
-	struct list_head kcontrol_list;
-	struct list_head widget_list;
-	struct list_head pipeline_list;
-	struct list_head dai_list;
-	struct list_head dai_link_list;
-	struct list_head route_list;
-	struct snd_soc_component *component;
+	const struct sof_audio_ops *audio_ops;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
-	bool led_present;
 
 	/* FW configuration */
 	struct sof_ipc_window *info_window;
@@ -691,20 +702,20 @@ struct snd_sof_dev {
 	/* mutex to protect client list */
 	struct mutex ipc_client_mutex;
 
-	/*
-	 * Used for tracking the IPC client's RX registration for DSP initiated
-	 * message handling.
-	 */
-	struct list_head ipc_rx_handler_list;
+	/* list of clients that registered event ops via sof_client_register_ops() */
+	struct list_head client_ops_list;
+
+	/* serializes the writers of client_ops_list */
+	struct mutex client_ops_mutex;
 
 	/*
-	 * Used for tracking the IPC client's registration for DSP state change
-	 * notification
+	 * Readers of client_ops_list. The callbacks are dispatched from within
+	 * the read side critical section and are allowed to sleep, so they must
+	 * not be serialized by client_ops_mutex: a client callback waiting for
+	 * an IPC reply would block the IPC IRQ thread in the notification
+	 * dispatcher and the reply could never be delivered.
 	 */
-	struct list_head fw_state_handler_list;
-
-	/* to protect the ipc_rx_handler_list  and  dsp_state_handler_list list */
-	struct mutex client_event_handler_mutex;
+	struct srcu_struct client_ops_srcu;
 
 	/* quirks to override topology values */
 	bool mclk_id_override;
@@ -734,8 +745,6 @@ int snd_sof_dsp_power_down_notify(struct snd_sof_dev *sdev);
 int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
 int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev);
-
-void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 
 /*
  * Compress support
@@ -863,10 +872,14 @@ int sof_set_stream_data_offset(struct snd_sof_dev *sdev,
 			       struct snd_sof_pcm_stream *sps,
 			       size_t posn_offset);
 
-int sof_stream_pcm_open(struct snd_sof_dev *sdev,
+int sof_stream_pcm_open(struct snd_soc_component *component,
+			struct snd_sof_pcm *spcm,
 			struct snd_pcm_substream *substream);
-int sof_stream_pcm_close(struct snd_sof_dev *sdev,
+int sof_stream_pcm_close(struct snd_soc_component *component,
 			 struct snd_pcm_substream *substream);
+
+bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev);
+bool snd_sof_dsp_state_is_d0i3_streaming(struct snd_sof_dev *sdev);
 
 /* SOF client support */
 struct sof_client_dev;
@@ -881,6 +894,11 @@ int sof_register_clients(struct snd_sof_dev *sdev);
 void sof_unregister_clients(struct snd_sof_dev *sdev);
 void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *msg_buf);
 void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev);
+int sof_client_fw_booted_dispatcher(struct snd_sof_dev *sdev);
+bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev);
+enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev);
+void sof_client_period_elapsed(struct snd_sof_dev *sdev,
+			       struct snd_pcm_substream *substream);
 int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state);
 int sof_resume_clients(struct snd_sof_dev *sdev);
 #else /* CONFIG_SND_SOC_SOF_CLIENT */
@@ -914,6 +932,26 @@ static inline void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *
 }
 
 static inline void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev)
+{
+}
+
+static inline int sof_client_fw_booted_dispatcher(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev)
+{
+	return false;
+}
+
+static inline enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)
+{
+	return SOF_D0I3_NO_ACTIVITY;
+}
+
+static inline void sof_client_period_elapsed(struct snd_sof_dev *sdev,
+					     struct snd_pcm_substream *substream)
 {
 }
 

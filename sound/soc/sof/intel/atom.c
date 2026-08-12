@@ -407,8 +407,8 @@ void atom_set_mach_params(struct snd_soc_acpi_mach *mach,
 
 	mach_params = &mach->mach_params;
 	mach_params->platform = dev_name(sdev->dev);
-	mach_params->num_dai_drivers = desc->ops->num_drv;
-	mach_params->dai_drivers = desc->ops->drv;
+	mach_params->num_dai_drivers = desc->audio_ops->num_drv;
+	mach_params->dai_drivers = desc->audio_ops->drv;
 }
 EXPORT_SYMBOL_NS(atom_set_mach_params, "SND_SOC_SOF_INTEL_ATOM_HIFI_EP");
 

@@ -11,39 +11,19 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/platform_device.h>
+#include <linux/rculist.h>
 #include <linux/slab.h>
+#include <linux/srcu.h>
 #include <sound/sof/ipc4/header.h>
 #include "ops.h"
+#include "sof-audio.h"
 #include "sof-client.h"
+#include "sof-client-audio.h"
+#include "sof-of-dev.h"
 #include "sof-priv.h"
 #include "ipc3-priv.h"
 #include "ipc4-priv.h"
-
-/**
- * struct sof_ipc_event_entry - IPC client event description
- * @ipc_msg_type:	IPC msg type of the event the client is interested
- * @cdev:		sof_client_dev of the requesting client
- * @callback:		Callback function of the client
- * @list:		item in SOF core client event list
- */
-struct sof_ipc_event_entry {
-	u32 ipc_msg_type;
-	struct sof_client_dev *cdev;
-	sof_client_event_callback callback;
-	struct list_head list;
-};
-
-/**
- * struct sof_state_event_entry - DSP panic event subscription entry
- * @cdev:		sof_client_dev of the requesting client
- * @callback:		Callback function of the client
- * @list:		item in SOF core client event list
- */
-struct sof_state_event_entry {
-	struct sof_client_dev *cdev;
-	sof_client_fw_state_callback callback;
-	struct list_head list;
-};
 
 /**
  * struct sof_client_dev_entry - client device entry for internal management use
@@ -190,6 +170,16 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 {
 	int ret;
 
+	/* Register audio client (needed in dspless mode too) */
+	if (sof_ops(sdev) && sof_ops(sdev)->register_audio_client) {
+		ret = sof_ops(sdev)->register_audio_client(sdev);
+		if (ret < 0) {
+			dev_err(sdev->dev,
+				"audio client registration failed: %d\n", ret);
+			return ret;
+		}
+	}
+
 	if (sdev->dspless_mode_selected)
 		return 0;
 
@@ -197,7 +187,7 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 	ret = sof_register_ipc_flood_test(sdev);
 	if (ret) {
 		dev_err(sdev->dev, "IPC flood test client registration failed\n");
-		return ret;
+		goto err_audio;
 	}
 
 	ret = sof_register_ipc_msg_injector(sdev);
@@ -237,6 +227,10 @@ err_kernel_injector:
 err_msg_injector:
 	sof_unregister_ipc_flood_test(sdev);
 
+err_audio:
+	if (sof_ops(sdev) && sof_ops(sdev)->unregister_audio_client)
+		sof_ops(sdev)->unregister_audio_client(sdev);
+
 	return ret;
 }
 
@@ -249,6 +243,10 @@ void sof_unregister_clients(struct snd_sof_dev *sdev)
 	sof_unregister_ipc_msg_injector(sdev);
 	sof_unregister_ipc_flood_test(sdev);
 	sof_unregister_fw_gdb(sdev);
+
+	/* Audio client last (reverse of registration order) */
+	if (sof_ops(sdev) && sof_ops(sdev)->unregister_audio_client)
+		sof_ops(sdev)->unregister_audio_client(sdev);
 }
 
 int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id,
@@ -407,18 +405,32 @@ struct sof_ipc4_fw_module *sof_client_ipc4_find_module(struct sof_client_dev *c,
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_find_module, "SND_SOC_SOF_CLIENT");
 
-struct snd_sof_widget *sof_client_ipc4_find_swidget_by_id(struct sof_client_dev *cdev,
-							  u32 module_id, int instance_id)
+int sof_client_ipc4_get_module_name(struct sof_client_dev *cdev, u32 module_id,
+				    int instance_id, char *name, size_t size)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct sof_client_dev *client;
 
-	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4)
-		return sof_ipc4_find_swidget_by_ids(sdev, module_id, instance_id);
-	dev_err(sdev->dev, "Only supported with IPC4\n");
+	if (sdev->pdata->ipc_type != SOF_IPC_TYPE_4) {
+		dev_err(sdev->dev, "Only supported with IPC4\n");
+		return -EOPNOTSUPP;
+	}
 
-	return NULL;
+	/* The module can be in the topology of any of the audio clients */
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(client, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (!client->ops->get_module_name)
+			continue;
+
+		if (!client->ops->get_module_name(client, module_id, instance_id,
+						  name, size))
+			return 0;
+	}
+
+	return -ENOENT;
 }
-EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_find_swidget_by_id, "SND_SOC_SOF_CLIENT");
+EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_get_module_name, "SND_SOC_SOF_CLIENT");
 
 ssize_t sof_client_ipc4_find_debug_slot_offset_by_type(struct sof_client_dev *cdev,
 						       u32 type)
@@ -515,6 +527,145 @@ enum sof_ipc_type sof_client_get_ipc_type(struct sof_client_dev *cdev)
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_get_ipc_type, "SND_SOC_SOF_CLIENT");
 
+/**
+ * sof_client_is_suspend_target_s0ix - check if the system is suspending to S0iX
+ * @cdev:	SOF client device
+ *
+ * The suspend target is only valid while a system suspend is in progress, it
+ * is reset when the system resumes.
+ *
+ * Return: true if the pending system suspend targets S0iX.
+ */
+bool sof_client_is_suspend_target_s0ix(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->system_suspend_target == SOF_SUSPEND_S0IX;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_is_suspend_target_s0ix, "SND_SOC_SOF_CLIENT");
+
+bool sof_client_is_dsp_in_d0(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->dsp_power_state.state == SOF_DSP_PM_D0;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_is_dsp_in_d0, "SND_SOC_SOF_CLIENT");
+
+/**
+ * sof_client_get_topology_name - get the topology file name of the SOF device
+ * @cdev:	SOF client device
+ *
+ * The returned name is the topology resolved by the SOF core, either from the
+ * selected machine descriptor or from the firmware file profile. Clients
+ * owning their own machine description should prefer the topology name from
+ * it and only fall back to this one.
+ *
+ * Return: the topology file name, without the topology path prefix.
+ */
+const char *sof_client_get_topology_name(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->pdata->tplg_filename;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_topology_name, "SND_SOC_SOF_CLIENT");
+
+/**
+ * sof_client_get_topology_prefix - get the topology path of the SOF device
+ * @cdev:	SOF client device
+ *
+ * The topology path is a property of the SOF device, it is shared by all
+ * clients and it applies to the topology name of the client's own machine
+ * description as well.
+ *
+ * Return: the path the topology files are loaded from.
+ */
+const char *sof_client_get_topology_prefix(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->pdata->tplg_filename_prefix;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_topology_prefix, "SND_SOC_SOF_CLIENT");
+
+/**
+ * sof_client_is_function_topology_disabled - check if function topology is off
+ * @cdev:	SOF client device
+ *
+ * Function topology loading is disabled when the user requested a specific
+ * topology file to be loaded, in which case that file must be used as is.
+ *
+ * Return: true if function topology loading must not be attempted.
+ */
+bool sof_client_is_function_topology_disabled(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->pdata->disable_function_topology;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_is_function_topology_disabled, "SND_SOC_SOF_CLIENT");
+
+/**
+ * sof_client_get_machine - get the machine description of the SOF device
+ * @cdev:	SOF client device
+ *
+ * This is the machine selected by the SOF core, shared by all clients. A
+ * client owning its own machine description must use that one instead, this
+ * is only the fallback for clients which do not have one.
+ *
+ * Return: the machine description, or NULL if the SOF device has none.
+ */
+const struct snd_soc_acpi_mach *sof_client_get_machine(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->pdata->machine;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_machine, "SND_SOC_SOF_CLIENT");
+
+/*
+ * The machine driver is described either by an ACPI or by an OF descriptor,
+ * depending on the platform. Hide the difference from the clients.
+ */
+const char *sof_client_get_machine_drv_name(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct snd_sof_pdata *plat_data = sdev->pdata;
+
+	if (plat_data->machine)
+		return plat_data->machine->drv_name;
+
+	if (plat_data->of_machine)
+		return plat_data->of_machine->drv_name;
+
+	return NULL;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_machine_drv_name, "SND_SOC_SOF_CLIENT");
+
+/**
+ * sof_client_get_ssp_mclk_id_quirk - get the platform SSP MCLK ID quirk
+ * @cdev:	SOF client device
+ * @mclk_id:	filled with the quirk value when a quirk is present
+ *
+ * Some platforms need to override the SSP mclk_id specified by the topology,
+ * either derived from NHLT or forced via a kernel parameter.
+ *
+ * Return: true if @mclk_id was set and the topology value must be overridden.
+ */
+bool sof_client_get_ssp_mclk_id_quirk(struct sof_client_dev *cdev, u16 *mclk_id)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	if (!sdev->mclk_id_override)
+		return false;
+
+	*mclk_id = sdev->mclk_id_quirk;
+
+	return true;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_ssp_mclk_id_quirk, "SND_SOC_SOF_CLIENT");
+
 int sof_client_boot_dsp(struct sof_client_dev *cdev)
 {
 	return snd_sof_boot_dsp_firmware(sof_client_dev_to_sof_dev(cdev));
@@ -542,139 +693,162 @@ void sof_client_core_module_put(struct sof_client_dev *cdev)
 EXPORT_SYMBOL_NS_GPL(sof_client_core_module_put, "SND_SOC_SOF_CLIENT");
 
 /* IPC event handling */
+int sof_client_ipc_msg_data(struct sof_client_dev *cdev,
+			    struct snd_sof_pcm_stream *sps, void *p, size_t sz)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return snd_sof_ipc_msg_data(sdev, sps, p, sz);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_ipc_msg_data, "SND_SOC_SOF_CLIENT");
+
 void sof_client_ipc_rx_dispatcher(struct snd_sof_dev *sdev, void *msg_buf)
 {
-	struct sof_ipc_event_entry *event;
-	u32 msg_type;
+	struct sof_client_dev *cdev;
 
-	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_3) {
-		struct sof_ipc_cmd_hdr *hdr = msg_buf;
-
-		msg_type = hdr->cmd & SOF_GLB_TYPE_MASK;
-	} else if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
-		struct sof_ipc4_msg *msg = msg_buf;
-
-		msg_type = SOF_IPC4_NOTIFICATION_TYPE_GET(msg->primary);
-	} else {
-		dev_dbg_once(sdev->dev, "Not supported IPC version: %d\n",
-			     sdev->pdata->ipc_type);
-		return;
-	}
-
-	guard(mutex)(&sdev->client_event_handler_mutex);
-	list_for_each_entry(event, &sdev->ipc_rx_handler_list, list) {
-		if (event->ipc_msg_type == msg_type)
-			event->callback(event->cdev, msg_buf);
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (cdev->ops->ipc_rx_handler)
+			cdev->ops->ipc_rx_handler(cdev, msg_buf);
 	}
 }
 
-int sof_client_register_ipc_rx_handler(struct sof_client_dev *cdev,
-				       u32 ipc_msg_type,
-				       sof_client_event_callback callback)
-{
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_ipc_event_entry *event;
-
-	if (!callback)
-		return -EINVAL;
-
-	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_3) {
-		if (!(ipc_msg_type & SOF_GLB_TYPE_MASK))
-			return -EINVAL;
-	} else if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
-		if (!(ipc_msg_type & SOF_IPC4_NOTIFICATION_TYPE_MASK))
-			return -EINVAL;
-	} else {
-		dev_warn(sdev->dev, "%s: Not supported IPC version: %d\n",
-			 __func__, sdev->pdata->ipc_type);
-		return -EINVAL;
-	}
-
-	event = kmalloc_obj(*event);
-	if (!event)
-		return -ENOMEM;
-
-	event->ipc_msg_type = ipc_msg_type;
-	event->cdev = cdev;
-	event->callback = callback;
-
-	/* add to list of SOF client devices */
-	guard(mutex)(&sdev->client_event_handler_mutex);
-	list_add(&event->list, &sdev->ipc_rx_handler_list);
-
-	return 0;
-}
-EXPORT_SYMBOL_NS_GPL(sof_client_register_ipc_rx_handler, "SND_SOC_SOF_CLIENT");
-
-void sof_client_unregister_ipc_rx_handler(struct sof_client_dev *cdev,
-					  u32 ipc_msg_type)
-{
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_ipc_event_entry *event;
-
-	guard(mutex)(&sdev->ipc_client_mutex);
-
-	list_for_each_entry(event, &sdev->ipc_rx_handler_list, list) {
-		if (event->cdev == cdev && event->ipc_msg_type == ipc_msg_type) {
-			list_del(&event->list);
-			kfree(event);
-			break;
-		}
-	}
-}
-EXPORT_SYMBOL_NS_GPL(sof_client_unregister_ipc_rx_handler, "SND_SOC_SOF_CLIENT");
-
-/*DSP state notification and query */
+/* DSP state notification */
 void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev)
 {
-	struct sof_state_event_entry *event;
+	struct sof_client_dev *cdev;
 
-	guard(mutex)(&sdev->ipc_client_mutex);
-
-	list_for_each_entry(event, &sdev->fw_state_handler_list, list)
-		event->callback(event->cdev, sdev->fw_state);
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (cdev->ops->fw_state_handler)
+			cdev->ops->fw_state_handler(cdev, sdev->fw_state);
+	}
 }
 
-int sof_client_register_fw_state_handler(struct sof_client_dev *cdev,
-					 sof_client_fw_state_callback callback)
+/* Let the clients rebuild the state they had in the DSP before the boot */
+int sof_client_fw_booted_dispatcher(struct snd_sof_dev *sdev)
 {
-	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_state_event_entry *event;
+	struct sof_client_dev *cdev;
+	int ret;
 
-	if (!callback)
-		return -EINVAL;
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (!cdev->ops->fw_booted)
+			continue;
 
-	event = kmalloc_obj(*event);
-	if (!event)
-		return -ENOMEM;
-
-	event->cdev = cdev;
-	event->callback = callback;
-
-	/* add to list of SOF client devices */
-	guard(mutex)(&sdev->client_event_handler_mutex);
-	list_add(&event->list, &sdev->fw_state_handler_list);
+		ret = cdev->ops->fw_booted(cdev);
+		if (ret < 0) {
+			dev_err(&cdev->auxdev.dev,
+				"failed to handle the firmware boot: %d\n", ret);
+			return ret;
+		}
+	}
 
 	return 0;
 }
-EXPORT_SYMBOL_NS_GPL(sof_client_register_fw_state_handler, "SND_SOC_SOF_CLIENT");
 
-void sof_client_unregister_fw_state_handler(struct sof_client_dev *cdev)
+/*
+ * Any client which left state running in the DSP on purpose keeps it powered
+ * over the system suspend. Clients without the callback do not participate.
+ */
+bool sof_client_keep_dsp_in_d0(struct snd_sof_dev *sdev)
+{
+	struct sof_client_dev *cdev;
+
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (cdev->ops->keep_dsp_in_d0 && cdev->ops->keep_dsp_in_d0(cdev))
+			return true;
+	}
+
+	return false;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_keep_dsp_in_d0, "SND_SOC_SOF_CLIENT");
+
+/*
+ * Fold the D0i3 votes of every client that implements the d0i3_vote callback by
+ * taking the highest one, SOF_D0I3_INCOMPATIBLE being a veto.
+ * Clients without the callback do not participate in the vote.
+ */
+enum sof_d0i3_vote sof_client_get_d0i3_vote(struct snd_sof_dev *sdev)
+{
+	enum sof_d0i3_vote result = SOF_D0I3_NO_ACTIVITY;
+	struct sof_client_dev *cdev;
+
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		enum sof_d0i3_vote vote;
+
+		if (!cdev->ops->d0i3_vote)
+			continue;
+
+		vote = cdev->ops->d0i3_vote(cdev);
+		if (vote == SOF_D0I3_INCOMPATIBLE)
+			return vote;
+
+		result = max(result, vote);
+	}
+
+	return result;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_d0i3_vote, "SND_SOC_SOF_CLIENT");
+
+void sof_client_period_elapsed(struct snd_sof_dev *sdev,
+			       struct snd_pcm_substream *substream)
+{
+	struct sof_client_dev *cdev;
+
+	guard(srcu)(&sdev->client_ops_srcu);
+	list_for_each_entry_srcu(cdev, &sdev->client_ops_list, ops_node,
+				 srcu_read_lock_held(&sdev->client_ops_srcu)) {
+		if (!cdev->ops->period_elapsed)
+			continue;
+
+		if (cdev->ops->period_elapsed(cdev, substream))
+			return;
+	}
+
+	dev_warn_ratelimited(sdev->dev, "period elapsed for unknown stream\n");
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_period_elapsed, "SND_SOC_SOF_CLIENT");
+
+int sof_client_register_ops(struct sof_client_dev *cdev,
+			    const struct sof_client_ops *ops)
 {
 	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
-	struct sof_state_event_entry *event;
 
-	guard(mutex)(&sdev->ipc_client_mutex);
+	if (!ops)
+		return -EINVAL;
 
-	list_for_each_entry(event, &sdev->fw_state_handler_list, list) {
-		if (event->cdev == cdev) {
-			list_del(&event->list);
-			kfree(event);
-			break;
-		}
-	}
+	guard(mutex)(&sdev->client_ops_mutex);
+	cdev->ops = ops;
+	list_add_rcu(&cdev->ops_node, &sdev->client_ops_list);
+
+	return 0;
 }
-EXPORT_SYMBOL_NS_GPL(sof_client_unregister_fw_state_handler, "SND_SOC_SOF_CLIENT");
+EXPORT_SYMBOL_NS_GPL(sof_client_register_ops, "SND_SOC_SOF_CLIENT");
+
+void sof_client_unregister_ops(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	guard(mutex)(&sdev->client_ops_mutex);
+	if (!cdev->ops)
+		return;
+
+	list_del_rcu(&cdev->ops_node);
+
+	/* a dispatcher may still be executing a callback of this client */
+	synchronize_srcu(&sdev->client_ops_srcu);
+
+	cdev->ops = NULL;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_unregister_ops, "SND_SOC_SOF_CLIENT");
 
 enum sof_fw_state sof_client_get_fw_state(struct sof_client_dev *cdev)
 {
@@ -705,3 +879,136 @@ void sof_client_mailbox_write(struct sof_client_dev *cdev, u32 offset,
 	sof_mailbox_write(sof_client_dev_to_sof_dev(cdev), offset, message, bytes);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_mailbox_write, "SND_SOC_SOF_CLIENT");
+
+struct snd_sof_mailbox *sof_client_get_mailbox(struct sof_client_dev *cdev,
+					       enum snd_sof_mailbox_type type)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	switch (type) {
+	case SOF_MAILBOX_FW_INFO:
+		return &sdev->fw_info_box;
+	case SOF_MAILBOX_DSP:
+		return &sdev->dsp_box;
+	case SOF_MAILBOX_HOST:
+		return &sdev->host_box;
+	case SOF_MAILBOX_STREAM:
+		return &sdev->stream_box;
+	case SOF_MAILBOX_DEBUG:
+		return &sdev->debug_box;
+	default:
+		return NULL;
+	}
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_mailbox, "SND_SOC_SOF_CLIENT");
+
+bool sof_client_is_dspless(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->dspless_mode_selected;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_is_dspless, "SND_SOC_SOF_CLIENT");
+
+int sof_client_get_num_cores(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->num_cores;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_num_cores, "SND_SOC_SOF_CLIENT");
+
+struct sof_ipc4_fw_data *sof_client_get_ipc4_fw_data(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return sdev->private;
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_ipc4_fw_data, "SND_SOC_SOF_CLIENT");
+
+u32 sof_client_get_new_comp_id(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+
+	return atomic_fetch_inc(&sdev->next_comp_id);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_get_new_comp_id, "SND_SOC_SOF_CLIENT");
+
+int sof_client_machine_register(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct sof_audio_client_pdata *pdata = dev_get_platdata(&cdev->auxdev.dev);
+	struct snd_sof_pdata *spdata = sdev->pdata;
+	struct snd_soc_acpi_mach *mach;
+	struct platform_device *pdev;
+
+	/* Per-client machine: register a dedicated machine device */
+	if (pdata->machine.drv_name) {
+		mach = &pdata->machine;
+		mach->mach_params.platform = dev_name(&cdev->auxdev.dev);
+
+		pdev = platform_device_register_data(sdev->dev,
+						     mach->drv_name,
+						     PLATFORM_DEVID_AUTO,
+						     mach, sizeof(*mach));
+		if (IS_ERR(pdev))
+			return PTR_ERR(pdev);
+
+		pdata->plat_drv.ignore_machine = dev_name(&pdev->dev);
+		cdev->data = pdev;
+
+		return 0;
+	}
+
+	/*
+	 * Legacy: use shared machine from sdev.
+	 * Update the platform name to match the audio component's device so
+	 * that machine drivers can find the SOF platform component.
+	 */
+	mach = (struct snd_soc_acpi_mach *)spdata->machine;
+	if (mach)
+		mach->mach_params.platform = dev_name(&cdev->auxdev.dev);
+
+	return snd_sof_machine_register(sdev, spdata);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_machine_register, "SND_SOC_SOF_CLIENT");
+
+void sof_client_machine_unregister(struct sof_client_dev *cdev)
+{
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
+	struct platform_device *pdev = cdev->data;
+
+	if (pdev) {
+		platform_device_unregister(pdev);
+		return;
+	}
+
+	snd_sof_machine_unregister(sdev, sdev->pdata);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_machine_unregister, "SND_SOC_SOF_CLIENT");
+
+void sof_audio_client_init_pdata(struct snd_sof_dev *sdev,
+				 struct sof_audio_client_pdata *pdata)
+{
+	memset(pdata, 0, sizeof(*pdata));
+	pdata->drv = sdev->audio_ops->drv;
+	pdata->num_drv = sdev->audio_ops->num_drv;
+}
+EXPORT_SYMBOL_NS_GPL(sof_audio_client_init_pdata, "SND_SOC_SOF_CLIENT");
+
+int sof_register_audio_client(struct snd_sof_dev *sdev)
+{
+	struct sof_audio_client_pdata pdata;
+
+	sof_audio_client_init_pdata(sdev, &pdata);
+
+	return sof_client_dev_register(sdev, "audio", 0,
+				       &pdata, sizeof(pdata));
+}
+EXPORT_SYMBOL_NS_GPL(sof_register_audio_client, "SND_SOC_SOF_CLIENT");
+
+void sof_unregister_audio_client(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "audio", 0);
+}
+EXPORT_SYMBOL_NS_GPL(sof_unregister_audio_client, "SND_SOC_SOF_CLIENT");

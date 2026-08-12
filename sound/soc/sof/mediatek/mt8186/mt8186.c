@@ -20,6 +20,7 @@
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
 #include "../../ops.h"
+#include "../../sof-client.h"
 #include "../../sof-of-dev.h"
 #include "../adsp_helper.h"
 #include "../mtk-adsp-common.h"
@@ -379,6 +380,22 @@ static struct snd_soc_dai_driver mt8186_dai[] = {
 };
 
 /* mt8186 ops */
+static const struct sof_audio_ops sof_mt8186_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_hw_params	= mtk_adsp_stream_pcm_hw_params,
+	.pcm_pointer	= mtk_adsp_stream_pcm_pointer,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= mt8186_dai,
+	.num_drv	= ARRAY_SIZE(mt8186_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+};
+
 static const struct snd_sof_dsp_ops sof_mt8186_ops = {
 	/* probe and remove */
 	.probe		= mt8186_dsp_probe,
@@ -412,21 +429,15 @@ static const struct snd_sof_dsp_ops sof_mt8186_ops = {
 	/* misc */
 	.get_bar_index	= mtk_adsp_get_bar_index,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_hw_params	= mtk_adsp_stream_pcm_hw_params,
-	.pcm_pointer	= mtk_adsp_stream_pcm_pointer,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
 
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
+
 	/* Firmware ops */
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
-
-	/* DAI drivers */
-	.drv		= mt8186_dai,
-	.num_drv	= ARRAY_SIZE(mt8186_dai),
 
 	/* Debug information */
 	.dbg_dump = mt8186_adsp_dump,
@@ -435,13 +446,6 @@ static const struct snd_sof_dsp_ops sof_mt8186_ops = {
 	/* PM */
 	.suspend	= mt8186_dsp_suspend,
 	.resume		= mt8186_dsp_resume,
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 
 static struct snd_sof_of_mach sof_mt8186_machs[] = {
@@ -467,6 +471,7 @@ static const struct sof_dev_desc sof_of_mt8186_desc = {
 	},
 	.nocodec_tplg_filename = "sof-mt8186-nocodec.tplg",
 	.ops = &sof_mt8186_ops,
+	.audio_ops = &sof_mt8186_audio_ops,
 };
 
 /*
@@ -505,6 +510,22 @@ static struct snd_soc_dai_driver mt8188_dai[] = {
 };
 
 /* mt8188 ops */
+static const struct sof_audio_ops sof_mt8188_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_hw_params	= mtk_adsp_stream_pcm_hw_params,
+	.pcm_pointer	= mtk_adsp_stream_pcm_pointer,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= mt8188_dai,
+	.num_drv	= ARRAY_SIZE(mt8188_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+};
+
 static struct snd_sof_dsp_ops sof_mt8188_ops;
 
 static int sof_mt8188_ops_init(struct snd_sof_dev *sdev)
@@ -512,8 +533,7 @@ static int sof_mt8188_ops_init(struct snd_sof_dev *sdev)
 	/* common defaults */
 	memcpy(&sof_mt8188_ops, &sof_mt8186_ops, sizeof(sof_mt8188_ops));
 
-	sof_mt8188_ops.drv = mt8188_dai;
-	sof_mt8188_ops.num_drv = ARRAY_SIZE(mt8188_dai);
+	sdev->audio_ops = &sof_mt8188_audio_ops;
 
 	return 0;
 }
@@ -541,6 +561,7 @@ static const struct sof_dev_desc sof_of_mt8188_desc = {
 	},
 	.nocodec_tplg_filename = "sof-mt8188-nocodec.tplg",
 	.ops = &sof_mt8188_ops,
+	.audio_ops = &sof_mt8188_audio_ops,
 	.ops_init = sof_mt8188_ops_init,
 };
 
@@ -566,5 +587,6 @@ module_platform_driver(snd_sof_of_mt8186_driver);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF support for MT8186/MT8188 platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SND_SOC_SOF_MTK_COMMON");

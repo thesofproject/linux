@@ -778,7 +778,7 @@ int sof_mtl_set_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *dsp_ops)
 	dsp_ops->set_power_state = hda_dsp_set_power_state_ipc4;
 
 	/* set DAI ops */
-	hda_set_dai_drv_ops(sdev, dsp_ops);
+	hda_set_dai_drv_ops(sdev);
 
 	return 0;
 }

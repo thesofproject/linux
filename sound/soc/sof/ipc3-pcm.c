@@ -12,12 +12,13 @@
 #include "ops.h"
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
 
 static int sof_ipc3_pcm_hw_free(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_sof_pcm *spcm, int dir)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct sof_ipc_stream stream;
 
 	if (!spcm->prepared[dir])
@@ -28,7 +29,7 @@ static int sof_ipc3_pcm_hw_free(struct snd_soc_component *component,
 	stream.comp_id = spcm->stream[dir].comp_id;
 
 	/* send IPC to the DSP */
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	return sof_client_ipc_tx_message_no_reply(cdev, &stream);
 }
 
 static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
@@ -36,7 +37,8 @@ static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
 				  struct snd_pcm_hw_params *params,
 				  struct snd_sof_platform_stream_params *platform_params)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -116,8 +118,8 @@ static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
 		 pcm.params.stream_tag);
 
 	/* send hw_params IPC to the DSP */
-	ret = sof_ipc_tx_message(sdev->ipc, &pcm, sizeof(pcm),
-				 &ipc_params_reply, sizeof(ipc_params_reply));
+	ret = sof_client_ipc_tx_message(cdev, &pcm, &ipc_params_reply,
+					sizeof(ipc_params_reply));
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
 			 "STREAM_PCM_PARAMS ipc failed for stream_tag %d\n",
@@ -139,7 +141,7 @@ static int sof_ipc3_pcm_trigger(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_sof_pcm *spcm, int cmd, int dir)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct sof_ipc_stream stream;
 
 	stream.hdr.size = sizeof(stream);
@@ -167,12 +169,15 @@ static int sof_ipc3_pcm_trigger(struct snd_soc_component *component,
 	}
 
 	/* send IPC to the DSP */
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	return sof_client_ipc_tx_message_no_reply(cdev, &stream);
 }
 
-static void ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev, const char *link_name,
+static void ssp_dai_config_pcm_params_match(struct snd_soc_component *component,
+					    const char *link_name,
 					    struct snd_pcm_hw_params *params)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_dai_config *config;
 	struct snd_sof_dai *dai;
 	int i;
@@ -181,7 +186,7 @@ static void ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev, const char
 	 * Search for all matching DAIs as we can have both playback and capture DAI
 	 * associated with the same link.
 	 */
-	list_for_each_entry(dai, &sdev->dai_list, list) {
+	list_for_each_entry(dai, &instance->dai_list, list) {
 		if (!dai->name || strcmp(link_name, dai->name))
 			continue;
 		for (i = 0; i < dai->number_configs; i++) {
@@ -205,7 +210,6 @@ static int sof_ipc3_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	struct snd_sof_dai *dai = snd_sof_find_dai(component, (char *)rtd->dai_link->name);
 	struct snd_interval *rate = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct sof_dai_private_data *private;
 	struct snd_soc_dpcm *dpcm;
 
@@ -244,7 +248,7 @@ static int sof_ipc3_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd,
 	switch (private->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
 		/* search for config to pcm params match, if not found use default */
-		ssp_dai_config_pcm_params_match(sdev, (char *)rtd->dai_link->name, params);
+		ssp_dai_config_pcm_params_match(component, (char *)rtd->dai_link->name, params);
 
 		rate->min = private->dai_config[dai->current_config].ssp.fsync_rate;
 		rate->max = private->dai_config[dai->current_config].ssp.fsync_rate;

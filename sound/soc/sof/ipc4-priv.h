@@ -140,7 +140,7 @@ extern const struct sof_ipc_fw_tracing_ops ipc4_mtrace_ops;
 extern const struct snd_compress_ops sof_ipc4_compressed_ops;
 #endif
 
-int sof_ipc4_set_pipeline_state(struct snd_sof_dev *sdev, u32 instance_id, u32 state);
+int sof_ipc4_set_pipeline_state(struct sof_client_dev *cdev, u32 instance_id, u32 state);
 int sof_ipc4_mtrace_update_pos(struct snd_sof_dev *sdev, int core);
 
 int sof_ipc4_complete_split_release(struct snd_sof_dev *sdev);
@@ -149,7 +149,7 @@ int sof_ipc4_reload_fw_libraries(struct snd_sof_dev *sdev);
 struct sof_ipc4_fw_module *sof_ipc4_find_module_by_uuid(struct snd_sof_dev *sdev,
 							const guid_t *uuid);
 
-struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_sof_dev *sdev,
+struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_soc_component *scomp,
 						    u32 module_id, int instance_id);
 
 struct sof_ipc4_base_module_cfg;
@@ -174,9 +174,9 @@ int sof_ipc4_get_stream_start_offset(struct snd_sof_dev *sdev,
 u64 sof_ipc4_frames_dai_to_host(struct sof_ipc4_timestamp_info *time_info, u64 value);
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
-void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev, void *ipc_message);
+void sof_ipc4_compr_drain_done(struct snd_soc_component *scomp, void *ipc_message);
 #else
-static inline void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev,
+static inline void sof_ipc4_compr_drain_done(struct snd_soc_component *scomp,
 					     void *ipc_message) { }
 #endif
 

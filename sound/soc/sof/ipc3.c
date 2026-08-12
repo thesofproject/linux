@@ -858,115 +858,7 @@ static int ipc3_fw_ready(struct snd_sof_dev *sdev, u32 cmd)
 	return ipc3_init_reply_data_buffer(sdev);
 }
 
-/* IPC stream position. */
-static void ipc3_period_elapsed(struct snd_sof_dev *sdev, u32 msg_id)
-{
-	struct snd_soc_component *scomp = sdev->component;
-	struct snd_sof_pcm_stream *stream;
-	struct sof_ipc_stream_posn posn;
-	struct snd_sof_pcm *spcm;
-	int direction, ret;
-
-	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
-	if (!spcm) {
-		dev_err(sdev->dev, "period elapsed for unknown stream, msg_id %d\n",
-			msg_id);
-		return;
-	}
-
-	stream = &spcm->stream[direction];
-	ret = snd_sof_ipc_msg_data(sdev, stream, &posn, sizeof(posn));
-	if (ret < 0) {
-		dev_warn(sdev->dev, "failed to read stream position: %d\n", ret);
-		return;
-	}
-
-	trace_sof_ipc3_period_elapsed_position(sdev, &posn);
-
-	memcpy(&stream->posn, &posn, sizeof(posn));
-
-	if (spcm->pcm.compress)
-		snd_sof_compr_fragment_elapsed(stream->cstream);
-	else if (stream->substream->runtime &&
-		 !stream->substream->runtime->no_period_wakeup)
-		/* only inform ALSA for period_wakeup mode */
-		snd_sof_pcm_period_elapsed(stream->substream);
-}
-
-/* DSP notifies host of an XRUN within FW */
-static void ipc3_xrun(struct snd_sof_dev *sdev, u32 msg_id)
-{
-	struct snd_soc_component *scomp = sdev->component;
-	struct snd_sof_pcm_stream *stream;
-	struct sof_ipc_stream_posn posn;
-	struct snd_sof_pcm *spcm;
-	int direction, ret;
-
-	spcm = snd_sof_find_spcm_comp(scomp, msg_id, &direction);
-	if (!spcm) {
-		dev_err(sdev->dev, "XRUN for unknown stream, msg_id %d\n",
-			msg_id);
-		return;
-	}
-
-	stream = &spcm->stream[direction];
-	ret = snd_sof_ipc_msg_data(sdev, stream, &posn, sizeof(posn));
-	if (ret < 0) {
-		dev_warn(sdev->dev, "failed to read overrun position: %d\n", ret);
-		return;
-	}
-
-	dev_dbg(sdev->dev,  "posn XRUN: host %llx comp %d size %d\n",
-		posn.host_posn, posn.xrun_comp_id, posn.xrun_size);
-
-#if defined(CONFIG_SND_SOC_SOF_DEBUG_XRUN_STOP)
-	/* stop PCM on XRUN - used for pipeline debug */
-	memcpy(&stream->posn, &posn, sizeof(posn));
-	snd_pcm_stop_xrun(stream->substream);
-#endif
-}
-
-/* stream notifications from firmware */
-static void ipc3_stream_message(struct snd_sof_dev *sdev, void *msg_buf)
-{
-	struct sof_ipc_cmd_hdr *hdr = msg_buf;
-	u32 msg_type = hdr->cmd & SOF_CMD_TYPE_MASK;
-	u32 msg_id = SOF_IPC_MESSAGE_ID(hdr->cmd);
-
-	switch (msg_type) {
-	case SOF_IPC_STREAM_POSITION:
-		ipc3_period_elapsed(sdev, msg_id);
-		break;
-	case SOF_IPC_STREAM_TRIG_XRUN:
-		ipc3_xrun(sdev, msg_id);
-		break;
-	default:
-		dev_err(sdev->dev, "unhandled stream message %#x\n",
-			msg_id);
-		break;
-	}
-}
-
 /* component notifications from firmware */
-static void ipc3_comp_notification(struct snd_sof_dev *sdev, void *msg_buf)
-{
-	const struct sof_ipc_tplg_ops *tplg_ops = sdev->ipc->ops->tplg;
-	struct sof_ipc_cmd_hdr *hdr = msg_buf;
-	u32 msg_type = hdr->cmd & SOF_CMD_TYPE_MASK;
-
-	switch (msg_type) {
-	case SOF_IPC_COMP_GET_VALUE:
-	case SOF_IPC_COMP_GET_DATA:
-		break;
-	default:
-		dev_err(sdev->dev, "unhandled component message %#x\n", msg_type);
-		return;
-	}
-
-	if (tplg_ops->control->update)
-		tplg_ops->control->update(sdev, msg_buf);
-}
-
 static void ipc3_trace_message(struct snd_sof_dev *sdev, void *msg_buf)
 {
 	struct sof_ipc_cmd_hdr *hdr = msg_buf;
@@ -1019,12 +911,8 @@ void sof_ipc3_do_rx_work(struct snd_sof_dev *sdev, struct sof_ipc_cmd_hdr *hdr, 
 	case SOF_IPC_GLB_COMPOUND:
 	case SOF_IPC_GLB_TPLG_MSG:
 	case SOF_IPC_GLB_PM_MSG:
-		break;
 	case SOF_IPC_GLB_COMP_MSG:
-		rx_callback = ipc3_comp_notification;
-		break;
 	case SOF_IPC_GLB_STREAM_MSG:
-		rx_callback = ipc3_stream_message;
 		break;
 	case SOF_IPC_GLB_TRACE_MSG:
 		rx_callback = ipc3_trace_message;
@@ -1140,9 +1028,7 @@ static const struct sof_ipc_pm_ops ipc3_pm_ops = {
 };
 
 const struct sof_ipc_ops ipc3_ops = {
-	.tplg = &ipc3_tplg_ops,
 	.pm = &ipc3_pm_ops,
-	.pcm = &ipc3_pcm_ops,
 	.fw_loader = &ipc3_loader_ops,
 	.fw_tracing = &ipc3_dtrace_ops,
 

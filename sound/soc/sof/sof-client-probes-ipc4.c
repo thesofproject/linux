@@ -288,19 +288,22 @@ static int ipc4_probes_point_print(struct sof_client_dev *cdev, char *buf, size_
 				   struct sof_probe_point_desc *desc)
 {
 	struct device *dev = &cdev->auxdev.dev;
-	struct snd_sof_widget *swidget;
+	char name[SOF_CLIENT_MODULE_NAME_MAX];
 	int ret;
 
-	swidget = sof_client_ipc4_find_swidget_by_id(cdev, SOF_IPC4_MOD_ID_GET(desc->buffer_id),
-						     SOF_IPC4_MOD_INSTANCE_GET(desc->buffer_id));
-	if (!swidget)
+	ret = sof_client_ipc4_get_module_name(cdev, SOF_IPC4_MOD_ID_GET(desc->buffer_id),
+					      SOF_IPC4_MOD_INSTANCE_GET(desc->buffer_id),
+					      name, sizeof(name));
+	if (ret < 0) {
 		dev_err(dev, "%s: Failed to find widget for module %lu.%lu\n",
 			__func__, SOF_IPC4_MOD_ID_GET(desc->buffer_id),
 			SOF_IPC4_MOD_INSTANCE_GET(desc->buffer_id));
+		strscpy(name, "<unknown>", sizeof(name));
+	}
 
 	ret = scnprintf(buf, size, "%#x,%#x,%#x\t%s %s buf idx %lu %s\n",
 		       desc->buffer_id, desc->purpose, desc->stream_tag,
-		       swidget ? swidget->widget->name : "<unknown>",
+		       name,
 		       sof_probe_ipc4_type_string(SOF_IPC4_PROBE_TYPE_GET(desc->buffer_id)),
 		       SOF_IPC4_PROBE_IDX_GET(desc->buffer_id),
 		       desc->stream_tag ? "(connected)" : "");

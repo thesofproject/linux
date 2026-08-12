@@ -20,6 +20,7 @@
 #include <sound/sof/dai.h>
 #include <sound/sof/topology.h>
 #include "sof-priv.h"
+#include "sof-client-audio.h"
 
 #define SOF_AUDIO_PCM_DRV_NAME	"sof-audio-component"
 
@@ -46,6 +47,7 @@
 #define WIDGET_IS_PROCESS(id) ((id) == snd_soc_dapm_effect ||	\
 			       (id) == snd_soc_dapm_decoder ||	\
 			       (id) == snd_soc_dapm_encoder)
+
 
 #define SOF_DAI_PARAM_INTEL_SSP_MCLK		0
 #define SOF_DAI_PARAM_INTEL_SSP_BCLK		1
@@ -91,6 +93,11 @@ struct snd_sof_route;
 struct snd_sof_control;
 struct snd_sof_dai;
 struct snd_sof_pcm;
+
+extern const struct sof_ipc_tplg_ops ipc3_tplg_ops;
+extern const struct sof_ipc_tplg_ops ipc4_tplg_ops;
+extern const struct sof_ipc_pcm_ops ipc3_pcm_ops;
+extern const struct sof_ipc_pcm_ops ipc4_pcm_ops;
 
 struct snd_sof_dai_config_data {
 	int dai_index;
@@ -166,7 +173,7 @@ struct sof_ipc_tplg_control_ops {
 	int (*bytes_ext_put)(struct snd_sof_control *scontrol,
 			     const unsigned int __user *binary_data, unsigned int size);
 	/* update control data based on notification from the DSP */
-	void (*update)(struct snd_sof_dev *sdev, void *ipc_control_message);
+	void (*update)(struct snd_soc_component *scomp, void *ipc_control_message);
 	/* Optional callback to setup kcontrols associated with an swidget */
 	int (*widget_kcontrol_setup)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 	/* mandatory callback to set up volume table for volume kcontrols */
@@ -217,8 +224,10 @@ struct sof_ipc_tplg_widget_ops {
  * @dai_config: Function pointer for sending DAI config IPC to the DSP
  * @host_config: Function pointer for setting the DMA ID for host widgets
  * @dai_get_param: Function pointer for getting the DAI parameter
- * @set_up_all_pipelines: Function pointer for setting up all topology pipelines
- * @tear_down_all_pipelines: Function pointer for tearing down all topology pipelines
+ * @set_up_all_pipelines: Function pointer for setting up the topology pipelines of
+ *			  the audio instance the component belongs to
+ * @tear_down_all_pipelines: Function pointer for tearing down the topology pipelines of
+ *			     the audio instance the component belongs to
  * @parse_manifest: Function pointer for ipc4 specific parsing of topology manifest
  * @link_setup: Function pointer for IPC-specific DAI link set up
  *
@@ -240,8 +249,8 @@ struct sof_ipc_tplg_ops {
 	void (*host_config)(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
 			    struct snd_sof_platform_stream_params *platform_params);
 	int (*dai_get_param)(struct snd_sof_dev *sdev, struct snd_sof_dai *dai, int param_type);
-	int (*set_up_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
-	int (*tear_down_all_pipelines)(struct snd_sof_dev *sdev, bool verify);
+	int (*set_up_all_pipelines)(struct snd_soc_component *component, bool verify);
+	int (*tear_down_all_pipelines)(struct snd_soc_component *component, bool verify);
 	int (*parse_manifest)(struct snd_soc_component *scomp, int index,
 			      struct snd_soc_tplg_manifest *man);
 	int (*link_setup)(struct snd_sof_dev *sdev, struct snd_soc_dai_link *link);
@@ -619,14 +628,63 @@ snd_sof_find_swidget_sname(struct snd_soc_component *scomp,
 struct snd_sof_dai *snd_sof_find_dai(struct snd_soc_component *scomp,
 				     const char *name);
 
+static inline struct sof_client_dev *
+snd_sof_component_get_cdev(struct snd_soc_component *scomp)
+{
+	return snd_soc_component_get_drvdata(scomp);
+}
+
+static inline struct snd_sof_dev *
+snd_sof_component_get_sdev(struct snd_soc_component *scomp)
+{
+	return sof_client_dev_to_sof_dev(snd_sof_component_get_cdev(scomp));
+}
+
+struct snd_sof_audio_instance *
+snd_sof_audio_instance_register(struct snd_sof_dev *sdev,
+				struct snd_soc_component *component);
+void snd_sof_audio_instance_unregister(struct snd_sof_audio_instance *instance);
+
+static inline struct snd_sof_audio_instance *
+snd_sof_component_get_audio_instance(struct snd_soc_component *scomp)
+{
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
+	struct sof_audio_client_pdata *pdata;
+
+	if (!cdev)
+		return NULL;
+
+	pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	return pdata->instance;
+}
+
+static inline const struct sof_ipc_tplg_ops *
+snd_sof_component_get_tplg_ops(struct snd_soc_component *scomp)
+{
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
+
+	return instance ? instance->tplg_ops : NULL;
+}
+
+static inline const struct sof_ipc_pcm_ops *
+snd_sof_component_get_pcm_ops(struct snd_soc_component *scomp)
+{
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
+
+	return instance ? instance->pcm_ops : NULL;
+}
+
+int sof_instance_set_up_pipelines(struct snd_sof_audio_instance *instance);
+
 static inline
 struct snd_sof_pcm *snd_sof_find_spcm_dai(struct snd_soc_component *scomp,
 					  struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_pcm *spcm;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	list_for_each_entry(spcm, &instance->pcm_list, list) {
 		if (le32_to_cpu(spcm->pcm.dai_id) == rtd->dai_link->id)
 			return spcm;
 	}
@@ -639,13 +697,13 @@ struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_soc_component *scomp,
 struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 					   unsigned int comp_id,
 					   int *direction);
-void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
+
 void snd_sof_pcm_init_elapsed_work(struct work_struct *work);
 int sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
 				    struct snd_sof_pcm *spcm, struct snd_pcm_hw_params *params,
 				    struct snd_sof_platform_stream_params *platform_params,
 				    int dir);
-struct snd_sof_widget *snd_sof_find_swidget_by_comp_id(struct snd_sof_dev *sdev,
+struct snd_sof_widget *snd_sof_find_swidget_by_comp_id(struct snd_soc_component *scomp,
 						       int comp_id);
 /*
  * snd_sof_pcm specific wrappers for dev_dbg() and dev_err() to provide
@@ -683,10 +741,6 @@ static inline void snd_sof_compr_init_elapsed_work(struct work_struct *work) { }
 /* DAI link fixup */
 int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_params *params);
 
-/* PM */
-bool snd_sof_stream_suspend_ignored(struct snd_sof_dev *sdev);
-bool snd_sof_dsp_only_d0i3_compatible_stream_active(struct snd_sof_dev *sdev);
-
 /* Machine driver enumeration */
 int sof_machine_register(struct snd_sof_dev *sdev, void *pdata);
 void sof_machine_unregister(struct snd_sof_dev *sdev, void *pdata);
@@ -697,19 +751,20 @@ int sof_route_setup(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *wsourc
 		    struct snd_soc_dapm_widget *wsink);
 
 /* PCM */
-int sof_widget_list_setup(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
+int sof_widget_list_setup(struct snd_soc_component *component, struct snd_sof_pcm *spcm,
 			  struct snd_pcm_hw_params *fe_params,
 			  struct snd_sof_platform_stream_params *platform_params,
 			  int dir);
-int sof_widget_list_prepare(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
+int sof_widget_list_prepare(struct snd_soc_component *component, struct snd_sof_pcm *spcm,
 			    struct snd_pcm_hw_params *fe_params,
 			    struct snd_sof_platform_stream_params *platform_params,
 			    int dir);
-void sof_widget_list_unprepare(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir);
-int sof_widget_list_free(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir);
+void sof_widget_list_unprepare(struct snd_soc_component *component, struct snd_sof_pcm *spcm,
+			       int dir);
+int sof_widget_list_free(struct snd_soc_component *component, struct snd_sof_pcm *spcm, int dir);
 int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream, struct snd_sof_dev *sdev,
 			 struct snd_sof_pcm *spcm);
-int sof_pcm_free_all_streams(struct snd_sof_dev *sdev);
+int sof_pcm_free_all_streams(struct snd_soc_component *component);
 int get_token_u32(void *elem, void *object, u32 offset);
 int get_token_u16(void *elem, void *object, u32 offset);
 int get_token_comp_format(void *elem, void *object, u32 offset);

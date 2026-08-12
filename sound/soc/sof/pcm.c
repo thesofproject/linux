@@ -13,10 +13,12 @@
 #include <linux/pm_runtime.h>
 #include <sound/pcm_params.h>
 #include <sound/sof.h>
-#include <trace/events/sof.h>
+#include <trace/events/sof_audio.h>
 #include "sof-of-dev.h"
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
+#include "sof-client-audio.h"
 #include "sof-utils.h"
 #include "ops.h"
 
@@ -38,33 +40,32 @@ void snd_sof_pcm_init_elapsed_work(struct work_struct *work)
 }
 
 /*
- * sof pcm period elapse, this could be called at irq thread context.
+ * Called from atomic context, the platform interrupt handler may hold its
+ * own locks, so only queue the work here.
  */
-void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
+bool sof_audio_instance_period_elapsed(struct snd_soc_component *component,
+				       struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_soc_component *component =
-		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
 	struct snd_sof_pcm *spcm;
 
+	/* dai_link ids are only unique within a card, match the component first */
+	if (component != snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME))
+		return false;
+
 	spcm = snd_sof_find_spcm_dai(component, rtd);
-	if (!spcm) {
-		dev_err(component->dev,
-			"error: period elapsed for unknown stream!\n");
-		return;
-	}
+	if (!spcm)
+		return false;
 
 	/*
-	 * snd_pcm_period_elapsed() can be called in interrupt context
-	 * before IRQ_HANDLED is returned. Inside snd_pcm_period_elapsed(),
-	 * when the PCM is done draining or xrun happened, a STOP IPC will
-	 * then be sent and this IPC will hit IPC timeout.
-	 * To avoid sending IPC before the previous IPC is handled, we
-	 * schedule delayed work here to call the snd_pcm_period_elapsed().
+	 * snd_pcm_period_elapsed() sends a STOP IPC when the PCM is done
+	 * draining or an xrun happened, which would hit an IPC timeout if it
+	 * was sent before the previous IPC is handled.
 	 */
 	queue_work(system_highpri_wq, &spcm->stream[substream->stream].period_elapsed_work);
+
+	return true;
 }
-EXPORT_SYMBOL(snd_sof_pcm_period_elapsed);
 
 int
 sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
@@ -88,7 +89,7 @@ sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_run
 
 		spcm->stream[dir].list = list;
 
-		ret = sof_widget_list_prepare(sdev, spcm, params, platform_params, dir);
+		ret = sof_widget_list_prepare(spcm->scomp, spcm, params, platform_params, dir);
 		if (ret < 0) {
 			spcm_err(spcm, dir, "widget list prepare failed\n");
 			spcm->stream[dir].list = NULL;
@@ -100,12 +101,16 @@ sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_run
 	return 0;
 }
 
-struct snd_sof_widget *snd_sof_find_swidget_by_comp_id(struct snd_sof_dev *sdev,
+struct snd_sof_widget *snd_sof_find_swidget_by_comp_id(struct snd_soc_component *scomp,
 						       int comp_id)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_widget *swidget;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	if (!instance)
+		return NULL;
+
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (comp_id == swidget->comp_id)
 			return swidget;
 	}
@@ -117,10 +122,10 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 			     struct snd_pcm_substream *substream,
 			     struct snd_pcm_hw_params *params)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_tplg_ops *tplg_ops = snd_sof_component_get_tplg_ops(component);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_platform_stream_params *platform_params;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_sof_widget *host_widget;
@@ -160,7 +165,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	}
 
 	platform_params = &spcm->platform_params[substream->stream];
-	ret = snd_sof_pcm_platform_hw_params(sdev, substream, params, platform_params);
+	ret = snd_sof_pcm_platform_hw_params(component, substream, params, platform_params);
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream, "platform hw params failed\n");
 		return ret;
@@ -177,7 +182,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	if (!sdev->dspless_mode_selected) {
 		int host_comp_id = spcm->stream[substream->stream].comp_id;
 
-		host_widget = snd_sof_find_swidget_by_comp_id(sdev, host_comp_id);
+		host_widget = snd_sof_find_swidget_by_comp_id(component, host_comp_id);
 		if (!host_widget) {
 			spcm_err(spcm, substream->stream,
 				 "failed to find host widget with comp_id %d\n", host_comp_id);
@@ -207,23 +212,24 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 }
 
 static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
+			       struct snd_soc_component *component,
 			       struct snd_pcm_substream *substream,
 			       struct snd_sof_pcm *spcm, int dir,
 			       bool free_widget_list)
 {
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	int ret;
 	int err = 0;
 
 	if (spcm->prepared[substream->stream]) {
 		/* stop DMA first if needed */
 		if (pcm_ops && pcm_ops->platform_stop_during_hw_free)
-			snd_sof_pcm_platform_trigger(sdev, substream,
+			snd_sof_pcm_platform_trigger(component, substream,
 						     SNDRV_PCM_TRIGGER_STOP);
 
 		/* free PCM in the DSP */
 		if (pcm_ops && pcm_ops->hw_free) {
-			ret = pcm_ops->hw_free(sdev->component, substream, spcm,
+			ret = pcm_ops->hw_free(component, substream, spcm,
 					       substream->stream);
 			if (ret < 0) {
 				spcm_err(spcm, substream->stream,
@@ -237,7 +243,7 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	}
 
 	/* reset the DMA */
-	ret = snd_sof_pcm_platform_hw_free(sdev, substream);
+	ret = snd_sof_pcm_platform_hw_free(component, substream);
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
 			 "platform hw free failed %d\n", ret);
@@ -247,7 +253,7 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 
 	/* free widget list */
 	if (free_widget_list) {
-		ret = sof_widget_list_free(sdev, spcm, dir);
+		ret = sof_widget_list_free(component, spcm, dir);
 		if (ret < 0) {
 			spcm_err(spcm, substream->stream,
 				 "sof_widget_list_free failed %d\n", ret);
@@ -259,13 +265,18 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	return err;
 }
 
-int sof_pcm_free_all_streams(struct snd_sof_dev *sdev)
+int sof_pcm_free_all_streams(struct snd_soc_component *component)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_pcm_substream *substream;
 	struct snd_sof_pcm *spcm;
 	int dir, ret;
 
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+	if (!instance)
+		return 0;
+
+	list_for_each_entry(spcm, &instance->pcm_list, list) {
 		for_each_pcm_streams(dir) {
 			substream = spcm->stream[dir].substream;
 
@@ -274,7 +285,7 @@ int sof_pcm_free_all_streams(struct snd_sof_dev *sdev)
 				continue;
 
 			if (spcm->stream[dir].list) {
-				ret = sof_pcm_stream_free(sdev, substream, spcm,
+				ret = sof_pcm_stream_free(sdev, spcm->scomp, substream, spcm,
 							  dir, true);
 				if (ret < 0)
 					return ret;
@@ -289,7 +300,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_pcm *spcm;
 	int ret;
 
@@ -303,10 +314,11 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: hw_free\n");
 
-	ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
+	ret = sof_pcm_stream_free(sdev, component, substream, spcm,
+				  substream->stream, true);
 
 	/* unprepare and free the list of DAPM widgets */
-	sof_widget_list_unprepare(sdev, spcm, substream->stream);
+	sof_widget_list_unprepare(component, spcm, substream->stream);
 
 	cancel_work_sync(&spcm->stream[substream->stream].period_elapsed_work);
 
@@ -317,8 +329,8 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_platform_stream_params *platform_params;
 	struct snd_soc_dapm_widget_list *list;
 	struct snd_pcm_hw_params *params;
@@ -344,7 +356,7 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 		 * this case should be reached in case of xruns where we absolutely
 		 * want to free-up and reset all PCM/DMA resources
 		 */
-		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
+		ret = sof_pcm_stream_free(sdev, component, substream, spcm, dir, true);
 		if (ret < 0)
 			return ret;
 	}
@@ -359,9 +371,9 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	list = spcm->stream[dir].list;
 	params = &spcm->params[substream->stream];
 	platform_params = &spcm->platform_params[substream->stream];
-	ret = sof_widget_list_setup(sdev, spcm, params, platform_params, dir);
+	ret = sof_widget_list_setup(component, spcm, params, platform_params, dir);
 	if (ret < 0) {
-		dev_err(sdev->dev, "failed widget list set up for pcm %d dir %u\n",
+		dev_err(component->dev, "failed widget list set up for pcm %d dir %u\n",
 			le32_to_cpu(spcm->pcm.pcm_id), dir);
 		spcm->stream[dir].list = NULL;
 		snd_soc_dapm_dai_free_widgets(&list);
@@ -387,8 +399,9 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			   struct snd_pcm_substream *substream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_pcm *spcm;
 	bool reset_hw_params = false;
 	bool ipc_first = false;
@@ -434,7 +447,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		 * D0I3-compatible streams to keep the firmware pipeline running
 		 */
 		if (pcm_ops && pcm_ops->d0i3_supported_in_s0ix &&
-		    sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
+		    sof_client_is_suspend_target_s0ix(cdev) &&
 		    spcm->stream[substream->stream].d0i3_compatible) {
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
@@ -456,7 +469,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	}
 
 	if (!ipc_first)
-		snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+		snd_sof_pcm_platform_trigger(component, substream, cmd);
 
 	if (pcm_ops && pcm_ops->trigger)
 		ret = pcm_ops->trigger(component, substream, spcm, cmd, substream->stream);
@@ -466,14 +479,14 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	case SNDRV_PCM_TRIGGER_START:
 		/* invoke platform trigger to start DMA only if pcm_ops is successful */
 		if (ipc_first && !ret)
-			snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+			snd_sof_pcm_platform_trigger(component, substream, cmd);
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
 		/* invoke platform trigger to stop DMA even if pcm_ops isn't set or if it failed */
 		if (!pcm_ops || !pcm_ops->platform_stop_during_hw_free)
-			snd_sof_pcm_platform_trigger(sdev, substream, cmd);
+			snd_sof_pcm_platform_trigger(component, substream, cmd);
 
 		/*
 		 * set the pending_stop flag to indicate that pipeline stop has been delayed.
@@ -490,7 +503,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 
 	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
 	if (!ret && reset_hw_params)
-		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, false);
+		ret = sof_pcm_stream_free(sdev, component, substream, spcm,
+					  substream->stream, false);
 
 	return ret;
 }
@@ -499,8 +513,10 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 					 struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	struct snd_sof_audio_instance *ins =
+		snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 	struct snd_sof_pcm *spcm;
 	snd_pcm_uframes_t host, dai;
 	int ret = -EOPNOTSUPP;
@@ -515,13 +531,13 @@ static snd_pcm_uframes_t sof_pcm_pointer(struct snd_soc_component *component,
 	if (ret != -EOPNOTSUPP)
 		return ret ? ret : host;
 
-	/* use dsp ops pointer callback directly if set */
-	if (sof_ops(sdev)->pcm_pointer)
-		return sof_ops(sdev)->pcm_pointer(sdev, substream);
-
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)
 		return -EINVAL;
+
+	/* use dsp ops pointer callback directly if set */
+	if (ins && ins->audio_ops->pcm_pointer)
+		return ins->audio_ops->pcm_pointer(component, spcm, substream);
 
 	/* read position from DSP */
 	host = bytes_to_frames(substream->runtime,
@@ -539,8 +555,9 @@ static int sof_pcm_open(struct snd_soc_component *component,
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	const struct snd_sof_dsp_ops *ops = sof_ops(sdev);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct snd_sof_audio_instance *ins =
+		snd_sof_component_get_audio_instance(component);
 	struct snd_sof_pcm *spcm;
 	struct snd_soc_tplg_stream_caps *caps;
 	int ret;
@@ -548,6 +565,10 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	/* nothing to do for BE */
 	if (rtd->dai_link->no_pcm)
 		return 0;
+
+	ret = sof_client_core_module_get(cdev);
+	if (ret)
+		return ret;
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm)
@@ -558,7 +579,7 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	caps = &spcm->pcm.caps[substream->stream];
 
 	/* set runtime config */
-	runtime->hw.info = ops->hw_info; /* platform-specific */
+	runtime->hw.info = ins->audio_ops->hw_info; /* platform-specific */
 
 	/* set any runtime constraints based on topology */
 	runtime->hw.formats = le64_to_cpu(caps->formats);
@@ -581,10 +602,11 @@ static int sof_pcm_open(struct snd_soc_component *component,
 	spcm->stream[substream->stream].substream = substream;
 	spcm->prepared[substream->stream] = false;
 
-	ret = snd_sof_pcm_platform_open(sdev, substream);
+	ret = snd_sof_pcm_platform_open(component, spcm, substream);
 	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
 			 "platform pcm open failed %d\n", ret);
+		sof_client_core_module_put(cdev);
 		return ret;
 	}
 
@@ -601,7 +623,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 			 struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
 	struct snd_sof_pcm *spcm;
 	int err;
 
@@ -615,7 +637,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: close\n");
 
-	err = snd_sof_pcm_platform_close(sdev, substream);
+	err = snd_sof_pcm_platform_close(component, substream);
 	if (err < 0) {
 		spcm_err(spcm, substream->stream,
 			 "platform pcm close failed %d\n", err);
@@ -626,6 +648,8 @@ static int sof_pcm_close(struct snd_soc_component *component,
 	}
 
 	spcm->stream[substream->stream].substream = NULL;
+
+	sof_client_core_module_put(cdev);
 
 	return 0;
 }
@@ -638,7 +662,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 static int sof_pcm_new(struct snd_soc_component *component,
 		       struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_pcm *spcm;
 	struct snd_pcm *pcm = rtd->pcm;
 	struct snd_soc_tplg_stream_caps *caps;
@@ -728,8 +752,7 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
 	struct snd_sof_dai *dai =
 		snd_sof_find_dai(component, (char *)rtd->dai_link->name);
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 
 	/* no topology exists for this BE, try a common configuration */
 	if (!dai) {
@@ -759,29 +782,42 @@ EXPORT_SYMBOL(sof_pcm_dai_link_fixup);
 
 static int sof_pcm_probe(struct snd_soc_component *component)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct sof_audio_client_pdata *audio_pdata = dev_get_platdata(&cdev->auxdev.dev);
+	struct snd_sof_dev *sdev = sof_client_dev_to_sof_dev(cdev);
 	struct snd_sof_pdata *plat_data = sdev->pdata;
+	struct snd_sof_audio_instance *instance;
+	bool got_runtime_pm;
 	const char *tplg_filename;
 	int ret;
+
+	instance = snd_sof_audio_instance_register(sdev, component);
+	if (!instance)
+		return -ENOMEM;
+
+	audio_pdata->component = component;
 
 	/*
 	 * make sure the device is pm_runtime_active before loading the
 	 * topology and initiating IPC or bus transactions
 	 */
 	ret = pm_runtime_resume_and_get(component->dev);
-	if (ret < 0 && ret != -EACCES)
+	if (ret < 0 && ret != -EACCES) {
+		snd_sof_audio_instance_unregister(instance);
 		return ret;
+	}
+	got_runtime_pm = ret >= 0;
 
 	/* load the default topology */
-	sdev->component = component;
-
-	tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
+	tplg_filename = devm_kasprintf(component->dev, GFP_KERNEL,
 				       "%s/%s",
 				       plat_data->tplg_filename_prefix,
+				       audio_pdata->machine.sof_tplg_filename ?
+				       audio_pdata->machine.sof_tplg_filename :
 				       plat_data->tplg_filename);
 	if (!tplg_filename) {
 		ret = -ENOMEM;
-		goto pm_error;
+		goto out;
 	}
 
 	ret = snd_sof_load_topology(component, tplg_filename);
@@ -789,14 +825,38 @@ static int sof_pcm_probe(struct snd_soc_component *component)
 		dev_err(component->dev, "error: failed to load DSP topology %d\n",
 			ret);
 
-pm_error:
-	pm_runtime_put_autosuspend(component->dev);
+out:
+	if (ret) {
+		/*
+		 * Remove topology objects to prevent dangling references.
+		 * When sof_complete() or a late topology file fails, DAIs from
+		 * previously successful loads remain on the component's DAI
+		 * list. Their driver structs are allocated under the card
+		 * device (tplg->dev) which gets freed by devres when mc_probe
+		 * fails, leaving dangling driver pointers. Subsequent card
+		 * binding would crash iterating these DAIs.
+		 */
+		snd_soc_tplg_component_remove(component);
+		snd_sof_audio_instance_unregister(instance);
+		audio_pdata->component = NULL;
+	}
+	if (got_runtime_pm)
+		pm_runtime_put_autosuspend(component->dev);
 
 	return ret;
 }
 
 static void sof_pcm_remove(struct snd_soc_component *component)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(component);
+	struct sof_audio_client_pdata *audio_pdata = dev_get_platdata(&cdev->auxdev.dev);
+
+	audio_pdata->component = NULL;
+
+	if (instance)
+		snd_sof_audio_instance_unregister(instance);
+
 	/* remove topology */
 	snd_soc_tplg_component_remove(component);
 }
@@ -804,16 +864,13 @@ static void sof_pcm_remove(struct snd_soc_component *component)
 static int sof_pcm_ack(struct snd_soc_component *component,
 		       struct snd_pcm_substream *substream)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-
-	return snd_sof_pcm_platform_ack(sdev, substream);
+	return snd_sof_pcm_platform_ack(component, substream);
 }
 
 static snd_pcm_sframes_t sof_pcm_delay(struct snd_soc_component *component,
 				       struct snd_pcm_substream *substream)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
+	const struct sof_ipc_pcm_ops *pcm_ops = snd_sof_component_get_pcm_ops(component);
 
 	if (pcm_ops && pcm_ops->delay)
 		return pcm_ops->delay(component, substream);
@@ -821,18 +878,28 @@ static snd_pcm_sframes_t sof_pcm_delay(struct snd_soc_component *component,
 	return 0;
 }
 
-void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
+void snd_sof_new_platform_drv(struct sof_client_dev *cdev,
+			      struct snd_soc_component_driver * const pd)
 {
-	struct snd_soc_component_driver *pd = &sdev->plat_drv;
-	struct snd_sof_pdata *plat_data = sdev->pdata;
+	const struct sof_ipc_pcm_ops *pcm_ops = NULL;
 	const char *drv_name;
 
-	if (plat_data->machine)
-		drv_name = plat_data->machine->drv_name;
-	else if (plat_data->of_machine)
-		drv_name = plat_data->of_machine->drv_name;
-	else
-		drv_name = NULL;
+	switch (sof_client_get_ipc_type(cdev)) {
+#if defined(CONFIG_SND_SOC_SOF_IPC3)
+	case SOF_IPC_TYPE_3:
+		pcm_ops = &ipc3_pcm_ops;
+		break;
+#endif
+#if defined(CONFIG_SND_SOC_SOF_IPC4)
+	case SOF_IPC_TYPE_4:
+		pcm_ops = &ipc4_pcm_ops;
+		break;
+#endif
+	default:
+		break;
+	}
+
+	drv_name = sof_client_get_machine_drv_name(cdev);
 
 	pd->name = "sof-audio-component";
 	pd->probe = sof_pcm_probe;
@@ -848,8 +915,6 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->delay = sof_pcm_delay;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
-	const struct sof_ipc_pcm_ops *pcm_ops = sof_ipc_get_ops(sdev, pcm);
-
 	if (pcm_ops)
 		pd->compress_ops = pcm_ops->compress_ops;
 #endif
@@ -869,6 +934,6 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	 * The fixup is only needed when the DSP is in use as with the DSPless
 	 * mode we are directly using the audio interface
 	 */
-	if (!sdev->dspless_mode_selected)
+	if (!sof_client_is_dspless(cdev))
 		pd->be_hw_params_fixup = sof_pcm_dai_link_fixup;
 }

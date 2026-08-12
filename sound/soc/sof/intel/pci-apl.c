@@ -47,6 +47,7 @@ static const struct sof_dev_desc bxt_desc = {
 	},
 	.nocodec_tplg_filename = "sof-apl-nocodec.tplg",
 	.ops = &sof_apl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_apl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -79,6 +80,7 @@ static const struct sof_dev_desc glk_desc = {
 	},
 	.nocodec_tplg_filename = "sof-glk-nocodec.tplg",
 	.ops = &sof_apl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_apl_ops_init,
 	.ops_free = hda_ops_free,
 };

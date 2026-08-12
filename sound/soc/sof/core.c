@@ -472,9 +472,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 	if (sdev->dspless_mode_selected) {
 		sof_set_fw_state(sdev, SOF_DSPLESS_MODE);
 
-		/* set up platform component driver */
-		snd_sof_new_platform_drv(sdev);
-
 		goto skip_dsp_init;
 	}
 
@@ -498,9 +495,6 @@ static int sof_probe_continue(struct snd_sof_dev *sdev)
 		dev_err(sdev->dev, "error: failed to init DSP IPC %d\n", ret);
 		goto ipc_err;
 	}
-
-	/* set up platform component driver after initializing the IPC ops */
-	snd_sof_new_platform_drv(sdev);
 
 	/*
 	 * skip loading/booting firmware and registering the machine driver when DSP OPS testing
@@ -554,27 +548,10 @@ skip_dsp_init:
 	/* hereafter all FW boot flows are for PM reasons */
 	sdev->first_boot = false;
 
-	/* now register audio DSP platform driver and dai */
-	ret = devm_snd_soc_register_component(sdev->dev, &sdev->plat_drv,
-					      sof_ops(sdev)->drv,
-					      sof_ops(sdev)->num_drv);
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register DSP DAI driver %d\n", ret);
-		goto fw_trace_err;
-	}
-
-	ret = snd_sof_machine_register(sdev, plat_data);
-	if (ret < 0) {
-		dev_err(sdev->dev,
-			"error: failed to register machine driver %d\n", ret);
-		goto fw_trace_err;
-	}
-
 	ret = sof_register_clients(sdev);
 	if (ret < 0) {
 		dev_err(sdev->dev, "failed to register clients %d\n", ret);
-		goto sof_machine_err;
+		goto fw_trace_err;
 	}
 
 	/*
@@ -592,8 +569,6 @@ skip_dsp_init:
 
 	return 0;
 
-sof_machine_err:
-	snd_sof_machine_unregister(sdev, plat_data);
 fw_trace_err:
 	sof_fw_trace_free(sdev);
 fw_run_err:
@@ -648,6 +623,13 @@ sof_apply_profile_override(struct sof_loadable_file_profile *path_override,
 	}
 }
 
+static void sof_cleanup_client_ops_srcu(void *data)
+{
+	struct snd_sof_dev *sdev = data;
+
+	cleanup_srcu_struct(&sdev->client_ops_srcu);
+}
+
 int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 {
 	struct snd_sof_dev *sdev;
@@ -678,26 +660,29 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 
 	sof_apply_profile_override(&plat_data->ipc_file_profile_base, plat_data);
 
+	sdev->audio_ops = plat_data->desc->audio_ops;
+
 	/* Initialize sof_ops based on the initial selected IPC version */
 	ret = sof_init_sof_ops(sdev);
 	if (ret)
 		return ret;
 
-	INIT_LIST_HEAD(&sdev->pcm_list);
-	INIT_LIST_HEAD(&sdev->kcontrol_list);
-	INIT_LIST_HEAD(&sdev->widget_list);
-	INIT_LIST_HEAD(&sdev->pipeline_list);
-	INIT_LIST_HEAD(&sdev->dai_list);
-	INIT_LIST_HEAD(&sdev->dai_link_list);
-	INIT_LIST_HEAD(&sdev->route_list);
 	INIT_LIST_HEAD(&sdev->ipc_client_list);
-	INIT_LIST_HEAD(&sdev->ipc_rx_handler_list);
-	INIT_LIST_HEAD(&sdev->fw_state_handler_list);
+	INIT_LIST_HEAD(&sdev->client_ops_list);
+
+	ret = init_srcu_struct(&sdev->client_ops_srcu);
+	if (ret)
+		return ret;
+
+	ret = devm_add_action_or_reset(dev, sof_cleanup_client_ops_srcu, sdev);
+	if (ret)
+		return ret;
+
 	spin_lock_init(&sdev->ipc_lock);
 	spin_lock_init(&sdev->hw_lock);
 	mutex_init(&sdev->power_state_access);
 	mutex_init(&sdev->ipc_client_mutex);
-	mutex_init(&sdev->client_event_handler_mutex);
+	mutex_init(&sdev->client_ops_mutex);
 	mutex_init(&sdev->dsp_fw_boot_mutex);
 
 	/* set default timeouts if none provided */
@@ -750,7 +735,6 @@ EXPORT_SYMBOL(snd_sof_device_probe_completed);
 int snd_sof_device_remove(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
-	struct snd_sof_pdata *pdata = sdev->pdata;
 	int ret;
 	bool aborted = false;
 
@@ -762,13 +746,6 @@ int snd_sof_device_remove(struct device *dev)
 	 * to allow client drivers to be removed cleanly
 	 */
 	sof_unregister_clients(sdev);
-
-	/*
-	 * Unregister machine driver. This will unbind the snd_card which
-	 * will remove the component driver and unload the topology
-	 * before freeing the snd_card.
-	 */
-	snd_sof_machine_unregister(sdev, pdata);
 
 	/*
 	 * Balance the runtime pm usage count in case we are faced with an

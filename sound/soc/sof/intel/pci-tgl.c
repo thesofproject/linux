@@ -48,6 +48,7 @@ static const struct sof_dev_desc tgl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-tgl-nocodec.tplg",
 	.ops = &sof_tgl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_tgl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -81,6 +82,7 @@ static const struct sof_dev_desc tglh_desc = {
 	},
 	.nocodec_tplg_filename = "sof-tgl-nocodec.tplg",
 	.ops = &sof_tgl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_tgl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -113,6 +115,7 @@ static const struct sof_dev_desc ehl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-ehl-nocodec.tplg",
 	.ops = &sof_tgl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_tgl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -146,6 +149,7 @@ static const struct sof_dev_desc adls_desc = {
 	},
 	.nocodec_tplg_filename = "sof-adl-nocodec.tplg",
 	.ops = &sof_tgl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_tgl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -179,6 +183,7 @@ static const struct sof_dev_desc adl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-adl-nocodec.tplg",
 	.ops = &sof_tgl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_tgl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -212,6 +217,7 @@ static const struct sof_dev_desc adln_desc = {
 	},
 	.nocodec_tplg_filename = "sof-adl-nocodec.tplg",
 	.ops = &sof_tgl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_tgl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -245,6 +251,7 @@ static const struct sof_dev_desc rpls_desc = {
 	},
 	.nocodec_tplg_filename = "sof-rpl-nocodec.tplg",
 	.ops = &sof_tgl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_tgl_ops_init,
 	.ops_free = hda_ops_free,
 };
@@ -278,6 +285,7 @@ static const struct sof_dev_desc rpl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-rpl-nocodec.tplg",
 	.ops = &sof_tgl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_tgl_ops_init,
 	.ops_free = hda_ops_free,
 };

@@ -19,6 +19,7 @@
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
 #include "../../ops.h"
+#include "../../sof-client.h"
 #include "../../sof-of-dev.h"
 #include "../../sof-audio.h"
 #include "../adsp_helper.h"
@@ -436,7 +437,7 @@ static int mt8365_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 	return type;
 }
 
-static int mt8365_pcm_hw_params(struct snd_sof_dev *sdev,
+static int mt8365_pcm_hw_params(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params,
 				struct snd_sof_platform_stream_params *platform_params)
@@ -446,23 +447,15 @@ static int mt8365_pcm_hw_params(struct snd_sof_dev *sdev,
 	return 0;
 }
 
-static snd_pcm_uframes_t mt8365_pcm_pointer(struct snd_sof_dev *sdev,
+static snd_pcm_uframes_t mt8365_pcm_pointer(struct snd_soc_component *component,
+					    struct snd_sof_pcm *spcm,
 					    struct snd_pcm_substream *substream)
 {
-	struct snd_sof_pcm *spcm;
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_stream_posn posn;
 	struct snd_sof_pcm_stream *stream;
-	struct snd_soc_component *scomp = sdev->component;
-	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	snd_pcm_uframes_t pos;
 	int ret;
-
-	spcm = snd_sof_find_spcm_dai(scomp, rtd);
-	if (!spcm) {
-		dev_warn_ratelimited(sdev->dev, "warn: can't find PCM with DAI ID %d\n",
-				     rtd->dai_link->id);
-		return 0;
-	}
 
 	stream = &spcm->stream[substream->stream];
 	ret = snd_sof_ipc_msg_data(sdev, stream, &posn, sizeof(posn));
@@ -534,6 +527,22 @@ static struct snd_soc_dai_driver mt8365_dai[] = {
 },
 };
 
+static const struct sof_audio_ops sof_mt8365_audio_ops = {
+	.pcm_open	= sof_stream_pcm_open,
+	.pcm_hw_params	= mt8365_pcm_hw_params,
+	.pcm_pointer	= mt8365_pcm_pointer,
+	.pcm_close	= sof_stream_pcm_close,
+
+	.drv		= mt8365_dai,
+	.num_drv	= ARRAY_SIZE(mt8365_dai),
+
+	.hw_info =	SNDRV_PCM_INFO_MMAP |
+			SNDRV_PCM_INFO_MMAP_VALID |
+			SNDRV_PCM_INFO_INTERLEAVED |
+			SNDRV_PCM_INFO_PAUSE |
+			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
+};
+
 /* mt8365 ops */
 static struct snd_sof_dsp_ops sof_mt8365_ops = {
 	/* probe and remove */
@@ -568,14 +577,12 @@ static struct snd_sof_dsp_ops sof_mt8365_ops = {
 	/* misc */
 	.get_bar_index	= mt8365_get_bar_index,
 
-	/* stream callbacks */
-	.pcm_open	= sof_stream_pcm_open,
-	.pcm_hw_params	= mt8365_pcm_hw_params,
-	.pcm_pointer	= mt8365_pcm_pointer,
-	.pcm_close	= sof_stream_pcm_close,
-
 	/* firmware loading */
 	.load_firmware	= snd_sof_load_firmware_memcpy,
+
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
 
 	/* Firmware ops */
 	.dsp_arch_ops = &sof_xtensa_arch_ops,
@@ -584,20 +591,9 @@ static struct snd_sof_dsp_ops sof_mt8365_ops = {
 	.dbg_dump = mt8365_adsp_dump,
 	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
-	/* DAI drivers */
-	.drv = mt8365_dai,
-	.num_drv = ARRAY_SIZE(mt8365_dai),
-
 	/* PM */
 	.suspend	= mt8365_dsp_suspend,
 	.resume		= mt8365_dsp_resume,
-
-	/* ALSA HW info flags */
-	.hw_info =	SNDRV_PCM_INFO_MMAP |
-			SNDRV_PCM_INFO_MMAP_VALID |
-			SNDRV_PCM_INFO_INTERLEAVED |
-			SNDRV_PCM_INFO_PAUSE |
-			SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 
 static struct snd_sof_of_mach sof_mt8365_machs[] = {
@@ -624,6 +620,7 @@ static const struct sof_dev_desc sof_of_mt8365_desc = {
 	},
 	.nocodec_tplg_filename = "sof-mt8365-nocodec.tplg",
 	.ops = &sof_mt8365_ops,
+	.audio_ops = &sof_mt8365_audio_ops,
 	.ipc_timeout = 1000,
 };
 
@@ -646,6 +643,7 @@ static struct platform_driver snd_sof_of_mt8365_driver = {
 };
 module_platform_driver(snd_sof_of_mt8365_driver);
 
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");
 MODULE_IMPORT_NS("SND_SOC_SOF_XTENSA");
 MODULE_IMPORT_NS("SND_SOC_SOF_MTK_COMMON");
 MODULE_LICENSE("Dual BSD/GPL");

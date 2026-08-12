@@ -1833,6 +1833,7 @@ static void soc_check_tplg_fes(struct snd_soc_card *card)
 {
 	struct snd_soc_component *component;
 	struct snd_soc_dai_link *dai_link;
+	struct snd_soc_dai_link_component *cpu;
 	int i;
 
 	for_each_component(component) {
@@ -1867,10 +1868,34 @@ match:
 				continue;
 			}
 
-			if (component->dev->of_node)
+			if (component->dev->of_node) {
 				dai_link->platforms->of_node = component->dev->of_node;
-			else
+			} else {
+				struct snd_soc_dai *dai;
+				int j;
+
 				dai_link->platforms->name = component->name;
+
+				/*
+				 * Override CPU component name to ensure the
+				 * correct component is matched when multiple
+				 * components provide identically-named DAIs.
+				 * Only override when the DAI is actually
+				 * provided by this component.
+				 */
+				for_each_link_cpus(dai_link, j, cpu) {
+					if (cpu->of_node)
+						continue;
+
+					for_each_component_dais(component, dai) {
+						if (cpu->dai_name &&
+						    !strcmp(dai->name, cpu->dai_name)) {
+							cpu->name = component->name;
+							break;
+						}
+					}
+				}
+			}
 
 			/* convert non BE into BE */
 			dai_link->no_pcm = 1;

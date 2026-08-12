@@ -12,6 +12,7 @@
 #include <sound/sof/xtensa.h>
 
 #include "../ops.h"
+#include "../sof-client.h"
 
 #include "imx-common.h"
 
@@ -455,10 +456,11 @@ const struct snd_sof_dsp_ops sof_imx_ops = {
 	.get_bar_index = imx_get_bar_index,
 	.load_firmware = snd_sof_load_firmware_memcpy,
 
-	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
+	/* audio client */
+	.register_audio_client = sof_register_audio_client,
+	.unregister_audio_client = sof_unregister_audio_client,
 
-	.pcm_open = sof_stream_pcm_open,
-	.pcm_close = sof_stream_pcm_close,
+	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
 	.runtime_suspend = imx_runtime_suspend,
 	.runtime_resume = imx_runtime_resume,
@@ -466,15 +468,9 @@ const struct snd_sof_dsp_ops sof_imx_ops = {
 	.resume = imx_resume,
 
 	.set_power_state = imx_set_power_state,
-
-	.hw_info = SNDRV_PCM_INFO_MMAP |
-		SNDRV_PCM_INFO_MMAP_VALID |
-		SNDRV_PCM_INFO_INTERLEAVED |
-		SNDRV_PCM_INFO_PAUSE |
-		SNDRV_PCM_INFO_BATCH |
-		SNDRV_PCM_INFO_NO_PERIOD_WAKEUP,
 };
 EXPORT_SYMBOL(sof_imx_ops);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("SOF helpers for IMX platforms");
+MODULE_IMPORT_NS("SND_SOC_SOF_CLIENT");

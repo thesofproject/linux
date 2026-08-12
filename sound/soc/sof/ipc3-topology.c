@@ -11,6 +11,7 @@
 #include <sound/pcm_params.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-client.h"
 #include "ipc3-priv.h"
 #include "ops.h"
 
@@ -524,7 +525,7 @@ static int sof_ipc3_widget_setup_comp_mixer(struct snd_sof_widget *swidget)
 static int sof_ipc3_widget_setup_comp_pipeline(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct snd_sof_pipeline *spipe = swidget->spipe;
 	struct sof_ipc_pipe_new *pipeline;
 	struct snd_sof_widget *comp_swidget;
@@ -757,7 +758,7 @@ static int sof_ipc3_widget_setup_comp_mux(struct snd_sof_widget *swidget)
 static int sof_ipc3_widget_setup_comp_pga(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct sof_ipc_comp_volume *volume;
 	struct snd_sof_control *scontrol;
 	size_t ipc_size = sizeof(*volume);
@@ -790,7 +791,7 @@ static int sof_ipc3_widget_setup_comp_pga(struct snd_sof_widget *swidget)
 	dev_dbg(scomp->dev, "loaded PGA %s\n", swidget->widget->name);
 	sof_dbg_comp_config(scomp, &volume->config);
 
-	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
+	list_for_each_entry(scontrol, &instance->kcontrol_list, list) {
 		if (scontrol->comp_id == swidget->comp_id &&
 		    scontrol->volume_table) {
 			min_step = scontrol->min_volume_step;
@@ -1429,11 +1430,12 @@ static int sof_link_afe_load(struct snd_soc_component *scomp, struct snd_sof_dai
 static int sof_link_ssp_load(struct snd_soc_component *scomp, struct snd_sof_dai_link *slink,
 			     struct sof_ipc_dai_config *config, struct snd_sof_dai *dai)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_soc_tplg_hw_config *hw_config = slink->hw_configs;
 	struct sof_dai_private_data *private = dai->private;
 	u32 size = sizeof(*config);
 	int current_config = 0;
+	u16 mclk_id;
 	int i, ret;
 
 	/*
@@ -1454,10 +1456,10 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, struct snd_sof_dai
 
 		config[i].hdr.size = size;
 
-		if (sdev->mclk_id_override) {
+		if (sof_client_get_ssp_mclk_id_quirk(cdev, &mclk_id)) {
 			dev_dbg(scomp->dev, "tplg: overriding topology mclk_id %d by quirk %d\n",
-				config[i].ssp.mclk_id, sdev->mclk_id_quirk);
-			config[i].ssp.mclk_id = sdev->mclk_id_quirk;
+				config[i].ssp.mclk_id, mclk_id);
+			config[i].ssp.mclk_id = mclk_id;
 		}
 
 		/* copy differentiating hw configs to ipc structs */
@@ -1502,7 +1504,7 @@ static int sof_link_ssp_load(struct snd_soc_component *scomp, struct snd_sof_dai
 static int sof_link_dmic_load(struct snd_soc_component *scomp, struct snd_sof_dai_link *slink,
 			      struct sof_ipc_dai_config *config, struct snd_sof_dai *dai)
 {
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(scomp);
 	struct sof_dai_private_data *private = dai->private;
 	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
 	struct sof_ipc_fw_version *v = &ready->version;
@@ -1600,7 +1602,7 @@ static int sof_link_alh_load(struct snd_soc_component *scomp, struct snd_sof_dai
 static int sof_ipc3_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(scomp);
 	struct snd_sof_dai *dai = swidget->private;
 	struct sof_dai_private_data *private;
 	struct sof_ipc_comp_dai *comp_dai;
@@ -1642,7 +1644,7 @@ static int sof_ipc3_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 	/* Subtract the base to match the FW dai index. */
 	if (comp_dai->type == SOF_DAI_INTEL_ALH) {
 		if (comp_dai->dai_index < INTEL_ALH_DAI_INDEX_BASE) {
-			dev_err(sdev->dev,
+			dev_err(scomp->dev,
 				"Invalid ALH dai index %d, only Pin numbers >= %d can be used\n",
 				comp_dai->dai_index, INTEL_ALH_DAI_INDEX_BASE);
 			ret = -EINVAL;
@@ -1656,7 +1658,7 @@ static int sof_ipc3_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 	sof_dbg_comp_config(scomp, &comp_dai->config);
 
 	/* now update DAI config */
-	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+	list_for_each_entry(slink, &instance->dai_link_list, list) {
 		struct sof_ipc_dai_config common_config;
 		int i;
 
@@ -1779,6 +1781,8 @@ static void sof_ipc3_widget_free_comp_dai(struct snd_sof_widget *swidget)
 
 static int sof_ipc3_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *sroute)
 {
+	struct snd_soc_component *scomp = sroute->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc_pipe_comp_connect connect;
 	int ret;
 
@@ -1787,33 +1791,34 @@ static int sof_ipc3_route_setup(struct snd_sof_dev *sdev, struct snd_sof_route *
 	connect.source_id = sroute->src_widget->comp_id;
 	connect.sink_id = sroute->sink_widget->comp_id;
 
-	dev_dbg(sdev->dev, "setting up route %s -> %s\n",
+	dev_dbg(scomp->dev, "setting up route %s -> %s\n",
 		sroute->src_widget->widget->name,
 		sroute->sink_widget->widget->name);
 
 	/* send ipc */
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &connect, sizeof(connect));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &connect);
 	if (ret < 0)
-		dev_err(sdev->dev, "%s: route %s -> %s failed\n", __func__,
+		dev_err(scomp->dev, "%s: route %s -> %s failed\n", __func__,
 			sroute->src_widget->widget->name, sroute->sink_widget->widget->name);
 
 	return ret;
 }
 
-static int sof_ipc3_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
+static int sof_ipc3_control_load_bytes(struct snd_sof_control *scontrol)
 {
+	struct snd_soc_component *scomp = scontrol->scomp;
 	struct sof_ipc_ctrl_data *cdata;
 	size_t priv_size_check;
 	int ret;
 
 	if (scontrol->max_size < (sizeof(*cdata) + sizeof(struct sof_abi_hdr))) {
-		dev_err(sdev->dev, "%s: insufficient size for a bytes control: %zu.\n",
+		dev_err(scomp->dev, "%s: insufficient size for a bytes control: %zu.\n",
 			__func__, scontrol->max_size);
 		return -EINVAL;
 	}
 
 	if (scontrol->priv_size > scontrol->max_size - sizeof(*cdata)) {
-		dev_err(sdev->dev,
+		dev_err(scomp->dev,
 			"%s: bytes data size %zu exceeds max %zu.\n", __func__,
 			scontrol->priv_size, scontrol->max_size - sizeof(*cdata));
 		return -EINVAL;
@@ -1835,13 +1840,13 @@ static int sof_ipc3_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_
 		scontrol->priv = NULL;
 
 		if (cdata->data->magic != SOF_ABI_MAGIC) {
-			dev_err(sdev->dev, "Wrong ABI magic 0x%08x.\n", cdata->data->magic);
+			dev_err(scomp->dev, "Wrong ABI magic 0x%08x.\n", cdata->data->magic);
 			ret = -EINVAL;
 			goto err;
 		}
 
 		if (SOF_ABI_VERSION_INCOMPATIBLE(SOF_ABI_VERSION, cdata->data->abi)) {
-			dev_err(sdev->dev, "Incompatible ABI version 0x%08x.\n",
+			dev_err(scomp->dev, "Incompatible ABI version 0x%08x.\n",
 				cdata->data->abi);
 			ret = -EINVAL;
 			goto err;
@@ -1849,7 +1854,7 @@ static int sof_ipc3_control_load_bytes(struct snd_sof_dev *sdev, struct snd_sof_
 
 		priv_size_check = cdata->data->size + sizeof(struct sof_abi_hdr);
 		if (priv_size_check != scontrol->priv_size) {
-			dev_err(sdev->dev, "Conflict in bytes (%zu) vs. priv size (%zu).\n",
+			dev_err(scomp->dev, "Conflict in bytes (%zu) vs. priv size (%zu).\n",
 				priv_size_check, scontrol->priv_size);
 			ret = -EINVAL;
 			goto err;
@@ -1921,7 +1926,7 @@ static int sof_ipc3_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 	case SND_SOC_TPLG_CTL_VOLSW_XR_SX:
 		return sof_ipc3_control_load_volume(sdev, scontrol);
 	case SND_SOC_TPLG_CTL_BYTES:
-		return sof_ipc3_control_load_bytes(sdev, scontrol);
+		return sof_ipc3_control_load_bytes(scontrol);
 	case SND_SOC_TPLG_CTL_ENUM:
 	case SND_SOC_TPLG_CTL_ENUM_VALUE:
 		return sof_ipc3_control_load_enum(sdev, scontrol);
@@ -1934,6 +1939,7 @@ static int sof_ipc3_control_setup(struct snd_sof_dev *sdev, struct snd_sof_contr
 
 static int sof_ipc3_control_free(struct snd_sof_dev *sdev, struct snd_sof_control *scontrol)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scontrol->scomp);
 	struct sof_ipc_free fcomp;
 
 	fcomp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_FREE;
@@ -1941,14 +1947,14 @@ static int sof_ipc3_control_free(struct snd_sof_dev *sdev, struct snd_sof_contro
 	fcomp.id = scontrol->comp_id;
 
 	/* send IPC to the DSP */
-	return sof_ipc_tx_message_no_reply(sdev->ipc, &fcomp, sizeof(fcomp));
+	return sof_client_ipc_tx_message_no_reply(cdev, &fcomp);
 }
 
 /* send pcm params ipc */
 static int sof_ipc3_keyword_detect_pcm_params(struct snd_sof_widget *swidget, int dir)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct snd_pcm_hw_params *params;
 	struct sof_ipc_pcm_params pcm;
 	struct snd_sof_pcm *spcm;
@@ -1992,7 +1998,7 @@ static int sof_ipc3_keyword_detect_pcm_params(struct snd_sof_widget *swidget, in
 	}
 
 	/* send IPC to the DSP */
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &pcm, sizeof(pcm));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &pcm);
 	if (ret < 0)
 		dev_err(scomp->dev, "%s: PCM params failed for %s\n", __func__,
 			swidget->widget->name);
@@ -2004,7 +2010,7 @@ static int sof_ipc3_keyword_detect_pcm_params(struct snd_sof_widget *swidget, in
 static int sof_ipc3_keyword_detect_trigger(struct snd_sof_widget *swidget, int cmd)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc_stream stream;
 	int ret;
 
@@ -2014,7 +2020,7 @@ static int sof_ipc3_keyword_detect_trigger(struct snd_sof_widget *swidget, int c
 	stream.comp_id = swidget->comp_id;
 
 	/* send IPC to the DSP */
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &stream);
 	if (ret < 0)
 		dev_err(scomp->dev, "%s: Failed to trigger %s\n", __func__, swidget->widget->name);
 
@@ -2130,10 +2136,12 @@ static int sof_ipc3_widget_bind_event(struct snd_soc_component *scomp,
 
 static int sof_ipc3_complete_pipeline(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
+	struct snd_soc_component *scomp = swidget->scomp;
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(scomp);
 	struct sof_ipc_pipe_ready ready;
 	int ret;
 
-	dev_dbg(sdev->dev, "tplg: complete pipeline %s id %d\n",
+	dev_dbg(scomp->dev, "tplg: complete pipeline %s id %d\n",
 		swidget->widget->name, swidget->comp_id);
 
 	memset(&ready, 0, sizeof(ready));
@@ -2141,7 +2149,7 @@ static int sof_ipc3_complete_pipeline(struct snd_sof_dev *sdev, struct snd_sof_w
 	ready.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_PIPE_COMPLETE;
 	ready.comp_id = swidget->comp_id;
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &ready, sizeof(ready));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &ready);
 	if (ret < 0)
 		return ret;
 
@@ -2150,6 +2158,7 @@ static int sof_ipc3_complete_pipeline(struct snd_sof_dev *sdev, struct snd_sof_w
 
 static int sof_ipc3_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(swidget->scomp);
 	struct sof_ipc_free ipc_free = {
 		.hdr = {
 			.size = sizeof(ipc_free),
@@ -2176,9 +2185,10 @@ static int sof_ipc3_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 		break;
 	}
 
-	ret = sof_ipc_tx_message_no_reply(sdev->ipc, &ipc_free, sizeof(ipc_free));
+	ret = sof_client_ipc_tx_message_no_reply(cdev, &ipc_free);
 	if (ret < 0)
-		dev_err(sdev->dev, "failed to free widget %s\n", swidget->widget->name);
+		dev_err(swidget->scomp->dev, "failed to free widget %s\n",
+			swidget->widget->name);
 
 	return ret;
 }
@@ -2193,19 +2203,21 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	int ret = 0;
 
 	if (!dai || !dai->private) {
-		dev_err(sdev->dev, "No private data for DAI %s\n", swidget->widget->name);
+		dev_err(swidget->scomp->dev, "No private data for DAI %s\n",
+			swidget->widget->name);
 		return -EINVAL;
 	}
 
 	private = dai->private;
 	if (!private->dai_config) {
-		dev_err(sdev->dev, "No config for DAI %s\n", dai->name);
+		dev_err(swidget->scomp->dev, "No config for DAI %s\n", dai->name);
 		return -EINVAL;
 	}
 
 	config = &private->dai_config[dai->current_config];
 	if (!config) {
-		dev_err(sdev->dev, "Invalid current config for DAI %s\n", dai->name);
+		dev_err(swidget->scomp->dev, "Invalid current config for DAI %s\n",
+			dai->name);
 		return -EINVAL;
 	}
 
@@ -2230,7 +2242,7 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 			if (flags & SOF_DAI_CONFIG_FLAGS_HW_PARAMS) {
 				/* Subtract the base to match the FW dai index. */
 				if (data->dai_index < INTEL_ALH_DAI_INDEX_BASE) {
-					dev_err(sdev->dev,
+					dev_err(swidget->scomp->dev,
 						"Invalid ALH dai index %d, only Pin numbers >= %d can be used\n",
 						config->dai_index, INTEL_ALH_DAI_INDEX_BASE);
 					return -EINVAL;
@@ -2274,9 +2286,11 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 
 	/* only send the IPC if the widget is set up in the DSP */
 	if (swidget->use_count > 0) {
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, config, config->hdr.size);
+		ret = sof_client_ipc_tx_message_no_reply(snd_sof_component_get_cdev(swidget->scomp),
+							 config);
 		if (ret < 0)
-			dev_err(sdev->dev, "Failed to set dai config for %s\n", dai->name);
+			dev_err(swidget->scomp->dev, "Failed to set dai config for %s\n",
+				dai->name);
 
 		/* clear the flags once the IPC has been sent even if it fails */
 		config->flags = SOF_DAI_CONFIG_FLAGS_NONE;
@@ -2287,6 +2301,7 @@ static int sof_ipc3_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 
 static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget)
 {
+	struct sof_client_dev *cdev = snd_sof_component_get_cdev(swidget->scomp);
 	int ret;
 
 	if (!swidget->private)
@@ -2298,9 +2313,8 @@ static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 	{
 		struct snd_sof_dai *dai = swidget->private;
 		struct sof_dai_private_data *dai_data = dai->private;
-		struct sof_ipc_comp *comp = &dai_data->comp_dai->comp;
 
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, dai_data->comp_dai, comp->hdr.size);
+		ret = sof_client_ipc_tx_message_no_reply(cdev, dai_data->comp_dai);
 		break;
 	}
 	case snd_soc_dapm_scheduler:
@@ -2308,33 +2322,34 @@ static int sof_ipc3_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		struct sof_ipc_pipe_new *pipeline;
 
 		pipeline = swidget->private;
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, pipeline, sizeof(*pipeline));
+		ret = sof_client_ipc_tx_message_no_reply(cdev, pipeline);
 		break;
 	}
 	default:
-	{
-		struct sof_ipc_cmd_hdr *hdr;
-
-		hdr = swidget->private;
-		ret = sof_ipc_tx_message_no_reply(sdev->ipc, swidget->private, hdr->size);
+		ret = sof_client_ipc_tx_message_no_reply(cdev, swidget->private);
 		break;
 	}
-	}
 	if (ret < 0)
-		dev_err(sdev->dev, "Failed to setup widget %s\n", swidget->widget->name);
+		dev_err(swidget->scomp->dev, "Failed to setup widget %s\n",
+			swidget->widget->name);
 
 	return ret;
 }
 
-static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
+static int sof_ipc3_set_up_all_pipelines(struct snd_soc_component *component, bool verify)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
 	int ret;
 
+	if (!instance)
+		return 0;
+
 	/* restore pipeline components */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		/* only set up the widgets belonging to static pipelines */
 		if (!verify && swidget->dynamic_pipeline_widget)
 			continue;
@@ -2376,7 +2391,7 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 	}
 
 	/* restore pipeline connections */
-	list_for_each_entry(sroute, &sdev->route_list, list) {
+	list_for_each_entry(sroute, &instance->route_list, list) {
 		/* only set up routes belonging to static pipelines */
 		if (!verify && (sroute->src_widget->dynamic_pipeline_widget ||
 				sroute->sink_widget->dynamic_pipeline_widget))
@@ -2393,13 +2408,13 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
 		ret = sof_route_setup(sdev, sroute->src_widget->widget,
 				      sroute->sink_widget->widget);
 		if (ret < 0) {
-			dev_err(sdev->dev, "%s: route set up failed\n", __func__);
+			dev_err(sroute->scomp->dev, "%s: route set up failed\n", __func__);
 			return ret;
 		}
 	}
 
 	/* complete pipeline */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		switch (swidget->id) {
 		case snd_soc_dapm_scheduler:
 			/* only complete static pipelines */
@@ -2428,8 +2443,10 @@ static int sof_ipc3_set_up_all_pipelines(struct snd_sof_dev *sdev, bool verify)
  * Free the PCM, its associated widgets and set the prepared flag to false for all PCMs that
  * did not get suspended(ex: paused streams) so the widgets can be set up again during resume.
  */
-static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
+static int sof_tear_down_left_over_pipelines(struct snd_soc_component *component)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct snd_sof_widget *swidget;
 	int ret;
 
@@ -2438,7 +2455,7 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 	 * list is not NULL. This should only be true for paused streams at this point.
 	 * This is equivalent to the handling of FE DAI suspend trigger for running streams.
 	 */
-	ret = sof_pcm_free_all_streams(sdev);
+	ret = sof_pcm_free_all_streams(component);
 	if (ret)
 		return ret;
 
@@ -2446,7 +2463,7 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 	 * free any left over DAI widgets. This is equivalent to the handling of suspend trigger
 	 * for the BE DAI for running streams.
 	 */
-	list_for_each_entry(swidget, &sdev->widget_list, list)
+	list_for_each_entry(swidget, &instance->widget_list, list)
 		if (WIDGET_IS_DAI(swidget->id) && swidget->use_count == 1) {
 			ret = sof_widget_free(sdev, swidget);
 			if (ret < 0)
@@ -2456,14 +2473,17 @@ static int sof_tear_down_left_over_pipelines(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static int sof_ipc3_free_widgets_in_list(struct snd_sof_dev *sdev, bool include_scheduler,
+static int sof_ipc3_free_widgets_in_list(struct snd_soc_component *component,
+					 bool include_scheduler,
 					 bool *dyn_widgets, bool verify)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_sof_widget *swidget;
 	int ret;
 
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (swidget->dynamic_pipeline_widget) {
 			*dyn_widgets = true;
 			continue;
@@ -2498,13 +2518,18 @@ static int sof_ipc3_free_widgets_in_list(struct snd_sof_dev *sdev, bool include_
  * For older firmware, this function doesn't free widgets for static pipelines during suspend.
  * It only resets use_count for all widgets.
  */
-static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verify)
+static int sof_ipc3_tear_down_all_pipelines(struct snd_soc_component *component, bool verify)
 {
+	struct snd_sof_audio_instance *instance = snd_sof_component_get_audio_instance(component);
+	struct snd_sof_dev *sdev = snd_sof_component_get_sdev(component);
 	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_sof_widget *swidget;
 	struct snd_sof_route *sroute;
 	bool dyn_widgets = false;
 	int ret;
+
+	if (!instance)
+		return 0;
 
 	/*
 	 * This function is called during suspend and for one-time topology verification during
@@ -2514,7 +2539,7 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 * widgets yet so that the secondary cores do not get powered down before all the widgets
 	 * associated with the scheduler are freed.
 	 */
-	ret = sof_ipc3_free_widgets_in_list(sdev, false, &dyn_widgets, verify);
+	ret = sof_ipc3_free_widgets_in_list(component, false, &dyn_widgets, verify);
 	if (ret < 0)
 		return ret;
 
@@ -2526,19 +2551,19 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 */
 	if (!verify && (dyn_widgets || SOF_FW_VER(v->major, v->minor, v->micro) >=
 	    SOF_FW_VER(2, 2, 0))) {
-		ret = sof_tear_down_left_over_pipelines(sdev);
+		ret = sof_tear_down_left_over_pipelines(component);
 		if (ret < 0) {
-			dev_err(sdev->dev, "failed to tear down paused pipelines\n");
+			dev_err(component->dev, "failed to tear down paused pipelines\n");
 			return ret;
 		}
 	}
 
 	/* free all the scheduler widgets now. This will also power down the secondary cores */
-	ret = sof_ipc3_free_widgets_in_list(sdev, true, &dyn_widgets, verify);
+	ret = sof_ipc3_free_widgets_in_list(component, true, &dyn_widgets, verify);
 	if (ret < 0)
 		return ret;
 
-	list_for_each_entry(sroute, &sdev->route_list, list)
+	list_for_each_entry(sroute, &instance->route_list, list)
 		sroute->setup = false;
 
 	/*
@@ -2546,9 +2571,10 @@ static int sof_ipc3_tear_down_all_pipelines(struct snd_sof_dev *sdev, bool verif
 	 * to recover at this point but this will help root cause bad sequences leading to
 	 * more issues on resume
 	 */
-	list_for_each_entry(swidget, &sdev->widget_list, list) {
+	list_for_each_entry(swidget, &instance->widget_list, list) {
 		if (swidget->use_count != 0) {
-			dev_err(sdev->dev, "%s: widget %s is still in use: count %d\n",
+			dev_err(swidget->scomp->dev,
+				"%s: widget %s is still in use: count %d\n",
 				__func__, swidget->widget->name, swidget->use_count);
 		}
 	}

@@ -55,6 +55,7 @@ static const struct sof_dev_desc lnl_desc = {
 	},
 	.nocodec_tplg_filename = "sof-lnl-nocodec.tplg",
 	.ops = &sof_lnl_ops,
+	.audio_ops = &sof_hda_audio_ops,
 	.ops_init = sof_lnl_ops_init,
 };
 

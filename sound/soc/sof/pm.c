@@ -18,6 +18,25 @@ module_param_named(on_demand_boot, override_on_demand_boot, int, 0444);
 MODULE_PARM_DESC(on_demand_boot, "Force on-demand DSP boot: 0 - disabled, 1 - enabled");
 
 /*
+ * D0i3 is only entered if at least one client has an active stream and all
+ * of the active streams tolerate the DSP being in the low power substate.
+ */
+bool snd_sof_dsp_state_is_d0i3_compatible(struct snd_sof_dev *sdev)
+{
+	enum sof_d0i3_vote vote = sof_client_get_d0i3_vote(sdev);
+
+	return vote == SOF_D0I3_COMPATIBLE_ACTIVE || vote == SOF_D0I3_COMPATIBLE_PLAYBACK;
+}
+EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_compatible);
+
+/* Streaming power gating additionally requires an active playback stream. */
+bool snd_sof_dsp_state_is_d0i3_streaming(struct snd_sof_dev *sdev)
+{
+	return sof_client_get_d0i3_vote(sdev) == SOF_D0I3_COMPATIBLE_PLAYBACK;
+}
+EXPORT_SYMBOL(snd_sof_dsp_state_is_d0i3_streaming);
+
+/*
  * Helper function to determine the target DSP state during
  * system suspend. This function only cares about the device
  * D-states. Platform-specific substates, if any, should be
@@ -38,11 +57,11 @@ static u32 snd_sof_dsp_power_target(struct snd_sof_dev *sdev)
 	case SOF_SUSPEND_S0IX:
 		/*
 		 * Currently, the only criterion for retaining the DSP in D0
-		 * is that there are streams that ignored the suspend trigger.
+		 * is that a client left something running in it on purpose.
 		 * Additional criteria such Soundwire clock-stop mode and
 		 * device suspend latency considerations will be added later.
 		 */
-		if (snd_sof_stream_suspend_ignored(sdev))
+		if (sof_client_keep_dsp_in_d0(sdev))
 			target_dsp_state = SOF_DSP_PM_D0;
 		else
 			target_dsp_state = SOF_DSP_PM_D3;
@@ -78,7 +97,6 @@ static void sof_cache_debugfs(struct snd_sof_dev *sdev)
 int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev)
 {
 	const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	int ret;
 
 	guard(mutex)(&sdev->dsp_fw_boot_mutex);
@@ -123,15 +141,10 @@ int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev)
 			 __func__, ret);
 	}
 
-	/* restore pipelines */
-	if (tplg_ops && tplg_ops->set_up_all_pipelines) {
-		ret = tplg_ops->set_up_all_pipelines(sdev, false);
-		if (ret < 0) {
-			dev_err(sdev->dev, "%s: failed to restore pipeline: %d\n",
-				__func__, ret);
-			goto setup_fail;
-		}
-	}
+	/* let the clients rebuild the state they had in the DSP */
+	ret = sof_client_fw_booted_dispatcher(sdev);
+	if (ret < 0)
+		goto setup_fail;
 
 	/* Notify clients not managed by pm framework about core resume */
 	sof_resume_clients(sdev);
@@ -230,11 +243,15 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	const struct sof_ipc_pm_ops *pm_ops = sof_ipc_get_ops(sdev, pm);
-	const struct sof_ipc_tplg_ops *tplg_ops = sof_ipc_get_ops(sdev, tplg);
 	pm_message_t pm_state;
 	u32 target_state = snd_sof_dsp_power_target(sdev);
-	u32 old_state = sdev->dsp_power_state.state;
 	int ret;
+
+	/*
+	 * Note: the topology pipelines are torn down by the audio clients from
+	 * their own suspend callbacks. The audio clients are children of the
+	 * SOF device, so the PM core runs them before this callback.
+	 */
 
 	/* do nothing if dsp suspend callback is not set */
 	if (!runtime_suspend && !sof_ops(sdev)->suspend)
@@ -242,14 +259,6 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 
 	if (runtime_suspend && !sof_ops(sdev)->runtime_suspend)
 		return 0;
-
-	/* we need to tear down pipelines only if the DSP hardware is
-	 * active, which happens for PCI devices. if the device is
-	 * suspended, it is brought back to full power and then
-	 * suspended again
-	 */
-	if (tplg_ops && tplg_ops->tear_down_all_pipelines && (old_state == SOF_DSP_PM_D0))
-		tplg_ops->tear_down_all_pipelines(sdev, false);
 
 	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
 		goto suspend;

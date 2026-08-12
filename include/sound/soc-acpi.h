@@ -74,6 +74,9 @@ static inline struct snd_soc_acpi_mach *snd_soc_acpi_codec_list(void *arg)
  * @subsystem_id_set: true if a value has been written to
  *		      subsystem_vendor and subsystem_device.
  * @bt_link_mask: BT offload link enabled on the board
+ * @card_name: optional card name to be used by the machine driver
+ * @dai_type_mask: optional mask of the DAI types the machine driver is
+ *		   restricted to, all DAI types are used when it is not set
  */
 struct snd_soc_acpi_mach_params {
 	u32 acpi_ipc_irq_index;
@@ -90,6 +93,8 @@ struct snd_soc_acpi_mach_params {
 	unsigned short subsystem_rev;
 	bool subsystem_id_set;
 	u32 bt_link_mask;
+	const char *card_name;
+	u32 dai_type_mask;
 };
 
 /**

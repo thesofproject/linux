@@ -523,34 +523,6 @@ static int hda_dsp_update_d0i3c_register(struct snd_sof_dev *sdev, u8 value)
 	return 0;
 }
 
-/*
- * d0i3 streaming is enabled if all the active streams can
- * work in d0i3 state and playback is enabled
- */
-static bool hda_dsp_d0i3_streaming_applicable(struct snd_sof_dev *sdev)
-{
-	struct snd_pcm_substream *substream;
-	struct snd_sof_pcm *spcm;
-	bool playback_active = false;
-	int dir;
-
-	list_for_each_entry(spcm, &sdev->pcm_list, list) {
-		for_each_pcm_streams(dir) {
-			substream = spcm->stream[dir].substream;
-			if (!substream || !substream->runtime)
-				continue;
-
-			if (!spcm->stream[dir].d0i3_compatible)
-				return false;
-
-			if (dir == SNDRV_PCM_STREAM_PLAYBACK)
-				playback_active = true;
-		}
-	}
-
-	return playback_active;
-}
-
 static int hda_dsp_set_D0_state(struct snd_sof_dev *sdev,
 				const struct sof_dsp_power_state *target_state)
 {
@@ -593,7 +565,8 @@ static int hda_dsp_set_D0_state(struct snd_sof_dev *sdev,
 		    sdev->system_suspend_target != SOF_SUSPEND_NONE)
 			flags = HDA_PM_NO_DMA_TRACE;
 
-		if (hda_dsp_d0i3_streaming_applicable(sdev))
+		/* power gated streaming needs an active D0i3 capable playback */
+		if (snd_sof_dsp_state_is_d0i3_streaming(sdev))
 			flags |= HDA_PM_PG_STREAMING;
 	} else {
 		/* prevent power gating in D0I0 */
@@ -1180,7 +1153,7 @@ void hda_dsp_d0i3_work(struct work_struct *work)
 	int ret;
 
 	/* DSP can enter D0I3 iff only D0I3-compatible streams are active */
-	if (!snd_sof_dsp_only_d0i3_compatible_stream_active(sdev))
+	if (!snd_sof_dsp_state_is_d0i3_compatible(sdev))
 		/* remain in D0I0 */
 		return;
 
