@@ -145,7 +145,8 @@ static void sof_ipc4_add_pipeline_by_priority(struct ipc4_pipeline_set_state_dat
 }
 
 static void
-sof_ipc4_add_pipeline_to_trigger_list(struct snd_sof_dev *sdev, int state,
+sof_ipc4_add_pipeline_to_trigger_list(struct snd_sof_dev *sdev,
+				      struct snd_pcm_substream *substream, int state,
 				      struct snd_sof_pipeline *spipe,
 				      struct ipc4_pipeline_set_state_data *trigger_list,
 				      s8 *pipe_priority)
@@ -170,6 +171,15 @@ sof_ipc4_add_pipeline_to_trigger_list(struct snd_sof_dev *sdev, int state,
 	case SOF_IPC4_PIPE_RESET:
 		/* RESET if the pipeline is neither running nor paused */
 		if (!spipe->started_count && !spipe->paused_count)
+			sof_ipc4_add_pipeline_by_priority(trigger_list, pipe_widget, pipe_priority,
+							  true);
+		/*
+		 * Compressed streams do not have a substream and skip pipeline counter
+		 * accounting. Reset an active skipped pipeline before it is deleted.
+		 */
+		else if (!substream && pipeline->skip_during_fe_trigger &&
+			 pipeline->state != SOF_IPC4_PIPE_RESET &&
+			 pipeline->state != SOF_IPC4_PIPE_UNINITIALIZED)
 			sof_ipc4_add_pipeline_by_priority(trigger_list, pipe_widget, pipe_priority,
 							  true);
 		break;
@@ -487,7 +497,8 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 			spipe = pipeline_list->pipelines[i];
 			if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
 				continue;
-			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
+			sof_ipc4_add_pipeline_to_trigger_list(sdev, substream, state, spipe,
+							      trigger_list,
 							      pipe_priority);
 		}
 	else
@@ -495,7 +506,8 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 			spipe = pipeline_list->pipelines[i];
 			if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
 				continue;
-			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
+			sof_ipc4_add_pipeline_to_trigger_list(sdev, substream, state, spipe,
+							      trigger_list,
 							      pipe_priority);
 		}
 
