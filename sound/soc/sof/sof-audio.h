@@ -121,7 +121,6 @@ struct snd_sof_dai_config_data {
  *				  triggers. The FW keeps the host DMA running in this case and
  *				  therefore the host must do the same and should stop the DMA during
  *				  hw_free.
- * @d0i3_supported_in_s0ix: Allow DSP D0I3 during S0iX
  * @compress_ops: Pointer to ops for compressed streams
  */
 struct sof_ipc_pcm_ops {
@@ -143,7 +142,6 @@ struct sof_ipc_pcm_ops {
 	bool reset_hw_params_during_stop;
 	bool ipc_first_on_start;
 	bool platform_stop_during_hw_free;
-	bool d0i3_supported_in_s0ix;
 	const struct snd_compress_ops *compress_ops;
 };
 
