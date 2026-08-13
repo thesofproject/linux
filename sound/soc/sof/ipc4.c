@@ -719,7 +719,7 @@ size_t sof_ipc4_find_debug_slot_offset_by_type(struct snd_sof_dev *sdev,
 		slot_desc_type_offset += SOF_IPC4_DEBUG_DESCRIPTOR_SIZE;
 	}
 
-	dev_dbg(sdev->dev, "Slot type %#x is not available in debug window\n", slot_type);
+	dev_dbg_ratelimited(sdev->dev, "Slot type %#x is not available in debug window\n", slot_type);
 	return 0;
 }
 EXPORT_SYMBOL(sof_ipc4_find_debug_slot_offset_by_type);
