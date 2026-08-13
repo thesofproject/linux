@@ -136,6 +136,14 @@ static const struct sof_topology_token ipc4_copier_deep_buffer_tokens[] = {
 	{SOF_TKN_INTEL_COPIER_DEEP_BUFFER_DMA_MS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32, 0},
 };
 
+static const struct sof_topology_token ipc4_stream_playback_d0i3_tokens[] = {
+	{SOF_TKN_STREAM_PLAYBACK_COMPATIBLE_D0I3, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u32, 0},
+};
+
+static const struct sof_topology_token ipc4_stream_capture_d0i3_tokens[] = {
+	{SOF_TKN_STREAM_CAPTURE_COMPATIBLE_D0I3, SND_SOC_TPLG_TUPLE_TYPE_BOOL, get_token_u32, 0},
+};
+
 static const struct sof_topology_token ipc4_copier_tokens[] = {
 	{SOF_TKN_INTEL_COPIER_NODE_TYPE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32, 0},
 };
@@ -211,6 +219,12 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 		ipc4_copier_deep_buffer_tokens, ARRAY_SIZE(ipc4_copier_deep_buffer_tokens)},
 	[SOF_COPIER_TOKENS] = {"IPC4 Copier tokens", ipc4_copier_tokens,
 		ARRAY_SIZE(ipc4_copier_tokens)},
+	[SOF_STREAM_PLAYBACK_D0I3_TOKENS] = {"IPC4 Stream playback D0I3 tokens",
+		ipc4_stream_playback_d0i3_tokens,
+		ARRAY_SIZE(ipc4_stream_playback_d0i3_tokens)},
+	[SOF_STREAM_CAPTURE_D0I3_TOKENS] = {"IPC4 Stream capture D0I3 tokens",
+		ipc4_stream_capture_d0i3_tokens,
+		ARRAY_SIZE(ipc4_stream_capture_d0i3_tokens)},
 	[SOF_AUDIO_FMT_NUM_TOKENS] = {"IPC4 Audio format number tokens",
 		ipc4_audio_fmt_num_tokens, ARRAY_SIZE(ipc4_audio_fmt_num_tokens)},
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
@@ -680,6 +694,7 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 	struct snd_sof_pcm_stream *sps;
 	struct snd_sof_pcm *spcm;
 	int node_type = 0;
+	u32 d0i3 = 0;
 	int ret, dir;
 
 	ipc4_copier = kzalloc_obj(*ipc4_copier);
@@ -730,6 +745,15 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 			      SOF_COPIER_DEEP_BUFFER_TOKENS,
 			      swidget->tuples,
 			      swidget->num_tuples, sizeof(u32), 1);
+
+	/* Parse D0I3 compatibility token for this stream direction */
+	sof_update_ipc_object(scomp, &d0i3,
+			      dir == SNDRV_PCM_STREAM_PLAYBACK ?
+			      SOF_STREAM_PLAYBACK_D0I3_TOKENS :
+			      SOF_STREAM_CAPTURE_D0I3_TOKENS,
+			      swidget->tuples,
+			      swidget->num_tuples, sizeof(d0i3), 1);
+	sps->d0i3_compatible = !!d0i3;
 
 	/* Set default DMA buffer size if it is not specified in topology */
 	if (!sps->dsp_max_burst_size_in_ms) {
@@ -4265,6 +4289,8 @@ static enum sof_tokens copier_token_list[] = {
 	SOF_COMP_EXT_TOKENS,
 
 	SOF_COPIER_DEEP_BUFFER_TOKENS,	/* for AIF copier */
+	SOF_STREAM_PLAYBACK_D0I3_TOKENS, /* for AIF copier */
+	SOF_STREAM_CAPTURE_D0I3_TOKENS,  /* for AIF copier */
 	SOF_DAI_TOKENS,			/* for DAI copier */
 };
 
