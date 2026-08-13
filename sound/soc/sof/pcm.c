@@ -430,11 +430,10 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 		/*
-		 * If DSP D0I3 is allowed during S0iX, set the suspend_ignored flag for
-		 * D0I3-compatible streams to keep the firmware pipeline running
+		 * Set the suspend_ignored flag for D0I3-compatible
+		 * streams to keep the firmware pipeline running
 		 */
-		if (pcm_ops && pcm_ops->d0i3_supported_in_s0ix &&
-		    sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
+		if (sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
 		    spcm->stream[substream->stream].d0i3_compatible) {
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
