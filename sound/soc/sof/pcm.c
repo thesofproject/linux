@@ -437,16 +437,20 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		return -EINVAL;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 		/*
-		 * If DSP D0I3 is allowed during S0iX, set the suspend_ignored flag for
-		 * D0I3-compatible streams to keep the firmware pipeline running
+		 * Set the suspend_ignored flag for D0I3-compatible streams used
+		 * for WoV to keep the firmware pipeline running.
+		 * WoV streams can be indetified by:
+		 * They are capture streams and
+		 * They have the d0i3_compatible flag set and
+		 * They don't use Deep Buffer
 		 */
-		if (pcm_ops && pcm_ops->d0i3_supported_in_s0ix &&
-		    sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
-		    spcm->stream[substream->stream].d0i3_compatible) {
+		if (sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
+		    substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
+		    spcm->stream[substream->stream].d0i3_compatible &&
+		    spcm->stream[substream->stream].dsp_max_burst_size_in_ms <= 1) {
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}
-
 		/* On suspend the DMA must be stopped in DSPless mode */
 		if (sdev->dspless_mode_selected)
 			reset_hw_params = true;
