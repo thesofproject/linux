@@ -6,6 +6,7 @@
 //
 //
 
+#include <linux/cleanup.h>
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/dmi.h>
@@ -294,7 +295,7 @@ io_error:
 
 static void rt722_sdca_jack_init(struct rt722_sdca_priv *rt722)
 {
-	mutex_lock(&rt722->calibrate_mutex);
+	guard(mutex)(&rt722->calibrate_mutex);
 	if (rt722->hs_jack) {
 		/* set SCP_SDCA_IntMask1[0]=1 */
 		sdw_write_no_pm(rt722->slave, SDW_SCP_SDCA_INTMASK1,
@@ -317,7 +318,6 @@ static void rt722_sdca_jack_init(struct rt722_sdca_priv *rt722)
 		rt722_sdca_index_update_bits(rt722, RT722_VENDOR_HDA_CTL,
 			RT722_GE_RELATED_CTL2, 0x4000, 0x4000);
 	}
-	mutex_unlock(&rt722->calibrate_mutex);
 }
 
 static int rt722_sdca_set_jack_detect(struct snd_soc_component *component,
@@ -1851,6 +1851,17 @@ static void rt722_sdca_jack_preset(struct rt722_sdca_priv *rt722)
 	}
 }
 
+static void rt722_sdca_reset(struct rt722_sdca_priv *rt722)
+{
+	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+		RT722_LDO1_CTL, RT722_HIDDEN_REG_SW_RESET,
+		RT722_HIDDEN_REG_SW_RESET);
+	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_HDA_CTL,
+		RT722_HDA_LEGACY_RESET_CTL, 0x1, 0x1);
+	if (rt722->hw_vid == RT722_VA)
+		rt722_sdca_index_write(rt722, RT722_VENDOR_REG, RT722_LDO1_CTL, 0xb091);
+}
+
 int rt722_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 {
 	struct rt722_sdca_priv *rt722 = dev_get_drvdata(dev);
@@ -1888,9 +1899,15 @@ int rt722_sdca_io_init(struct device *dev, struct sdw_slave *slave)
 	rt722->hw_vid = (val & 0x0f00) >> 8;
 	dev_dbg(&slave->dev, "%s hw_vid=0x%x\n", __func__, rt722->hw_vid);
 
+	if (!rt722->first_hw_init)
+		rt722_sdca_reset(rt722);
+
 	rt722_sdca_dmic_preset(rt722);
 	rt722_sdca_amp_preset(rt722);
 	rt722_sdca_jack_preset(rt722);
+
+	if (rt722->hs_jack && (!rt722->first_hw_init))
+		rt722_sdca_jack_init(rt722);
 
 	if (rt722->first_hw_init) {
 		regcache_cache_bypass(rt722->regmap, false);

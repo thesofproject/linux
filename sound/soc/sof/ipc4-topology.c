@@ -3522,7 +3522,7 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		 * link DMA stream tags change after a suspend/resume cycle.
 		 *
 		 * copier_data->gtw_cfg.config_length does not include the
-		 * TLV size (it was restored after _sof_ipc4_prepare_copier_module),
+		 * TLV size (it was restored after sof_ipc4_prepare_copier_module),
 		 * so temporarily inflate it to match the ipc_config_data layout.
 		 */
 		copier_data = &ipc4_copier->data;

@@ -417,7 +417,7 @@ static int snd_ctl_elem_add_compat(struct snd_ctl_file *file,
 		break;
 	}
 	return snd_ctl_elem_add(file, data, replace);
-}  
+}
 
 enum {
 	SNDRV_CTL_IOCTL_ELEM_LIST32 = _IOWR('U', 0x10, struct snd_ctl_elem_list32),
@@ -446,6 +446,7 @@ static inline long snd_ctl_ioctl_compat(struct file *file, unsigned int cmd, uns
 	switch (cmd) {
 	case SNDRV_CTL_IOCTL_PVERSION:
 	case SNDRV_CTL_IOCTL_CARD_INFO:
+	case SNDRV_CTL_IOCTL_CARD_BYTES:
 	case SNDRV_CTL_IOCTL_SUBSCRIBE_EVENTS:
 	case SNDRV_CTL_IOCTL_POWER:
 	case SNDRV_CTL_IOCTL_POWER_STATE:
