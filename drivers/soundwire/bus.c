@@ -794,22 +794,23 @@ static int sdw_assign_device_num(struct sdw_slave *slave)
 	return 0;
 }
 
-void sdw_extract_slave_id(struct sdw_bus *bus,
-			  u64 addr, struct sdw_slave_id *id)
+void sdw_extract_slave_id(u64 addr, struct sdw_slave_id *id)
 {
-	dev_dbg(bus->dev, "SDW Slave Addr: %llx\n", addr);
-
 	id->sdw_version = SDW_VERSION(addr);
 	id->unique_id = SDW_UNIQUE_ID(addr);
 	id->mfg_id = SDW_MFG_ID(addr);
 	id->part_id = SDW_PART_ID(addr);
 	id->class_id = SDW_CLASS_ID(addr);
+}
+EXPORT_SYMBOL(sdw_extract_slave_id);
 
-	dev_dbg(bus->dev,
+void sdw_debug_log_slave_id(struct device *dev, const struct sdw_slave_id *id)
+{
+	dev_dbg(dev,
 		"SDW Slave class_id 0x%02x, mfg_id 0x%04x, part_id 0x%04x, unique_id 0x%x, version 0x%x\n",
 		id->class_id, id->mfg_id, id->part_id, id->unique_id, id->sdw_version);
 }
-EXPORT_SYMBOL(sdw_extract_slave_id);
+EXPORT_SYMBOL(sdw_debug_log_slave_id);
 
 bool is_clock_scaling_supported_by_slave(struct sdw_slave *slave)
 {
@@ -862,7 +863,8 @@ static int sdw_program_device_num(struct sdw_bus *bus, bool *programmed)
 			((u64)buf[2] << 24) | ((u64)buf[1] << 32) |
 			((u64)buf[0] << 40);
 
-		sdw_extract_slave_id(bus, addr, &id);
+		sdw_extract_slave_id(addr, &id);
+		sdw_debug_log_slave_id(bus->dev, &id);
 
 		found = false;
 		/* Now compare with entries */
