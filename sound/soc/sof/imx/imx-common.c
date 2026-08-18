@@ -191,7 +191,11 @@ static int imx_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 {
 	switch (type) {
 	case SOF_FW_BLK_TYPE_IRAM:
+	case SOF_FW_BLK_TYPE_DRAM:
 	case SOF_FW_BLK_TYPE_SRAM:
+		/* i.MX95 maps IRAM/DRAM/SRAM through a single window */
+		if (!sdev->bar[type])
+			return sdev->mailbox_bar;
 		return type;
 	default:
 		return -EINVAL;
