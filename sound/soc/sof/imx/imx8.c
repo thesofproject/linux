@@ -358,6 +358,11 @@ static const struct imx_chip_info imx8_chip_info = {
 		.has_panic_code = true,
 		.boot_mbox_offset = 0x800000,
 		.window_offset = 0x800000,
+		/* IPC4 window layout, same as imx8m */
+		.ipc4_inbox_offset = 0x800000 + IMX_IPC4_HDR_SIZE,
+		.ipc4_outbox_offset = 0x801000 + IMX_IPC4_HDR_SIZE,
+		.ipc4_debug_offset = 0x802000,
+		.ipc4_fw_regs_offset = 0x802800,
 	},
 	.memory = imx8_memory_regions,
 	.drv = imx8_dai,
@@ -370,6 +375,11 @@ static const struct imx_chip_info imx8x_chip_info = {
 		.has_panic_code = true,
 		.boot_mbox_offset = 0x800000,
 		.window_offset = 0x800000,
+		/* IPC4 window layout, same as imx8m */
+		.ipc4_inbox_offset = 0x800000 + IMX_IPC4_HDR_SIZE,
+		.ipc4_outbox_offset = 0x801000 + IMX_IPC4_HDR_SIZE,
+		.ipc4_debug_offset = 0x802000,
+		.ipc4_fw_regs_offset = 0x802800,
 	},
 	.memory = imx8_memory_regions,
 	.drv = imx8_dai,
@@ -456,8 +466,8 @@ static struct snd_sof_of_mach sof_imx8_machs[] = {
 	{}
 };
 
-IMX_SOF_DEV_DESC(imx8, sof_imx8_machs, &imx8_chip_info, &sof_imx8_ops, imx8_ops_init);
-IMX_SOF_DEV_DESC(imx8x, sof_imx8_machs, &imx8x_chip_info, &sof_imx8_ops, imx8_ops_init);
+IMX_SOF_DEV_DESC_IPC4(imx8, sof_imx8_machs, &imx8_chip_info, &sof_imx8_ops, imx8_ops_init);
+IMX_SOF_DEV_DESC_IPC4(imx8x, sof_imx8_machs, &imx8x_chip_info, &sof_imx8_ops, imx8_ops_init);
 IMX_SOF_DEV_DESC_IPC4(imx8m, sof_imx8_machs, &imx8m_chip_info, &sof_imx8_ops, imx8_ops_init);
 IMX_SOF_DEV_DESC(imx8ulp, sof_imx8_machs, &imx8ulp_chip_info, &sof_imx8_ops, imx8_ops_init);
 
