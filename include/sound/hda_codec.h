@@ -260,6 +260,9 @@ struct hda_codec {
 	unsigned int no_stream_clean_at_suspend:1; /* do not clean streams at suspend */
 	unsigned int ctl_dev_id:1; /* old control element id build behaviour */
 	unsigned int eld_jack_detect:1;	/* Machine jack-detection by ELD */
+	unsigned int constrain_pcms:1;	/* narrow the PCMs with hw_constraints
+					 * because runtime->hw is not honoured
+					 */
 
 	unsigned long power_on_acct;
 	unsigned long power_off_acct;
