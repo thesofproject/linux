@@ -174,6 +174,14 @@ static int imx8m_run(struct snd_sof_dev *sdev)
 	return reset_control_deassert(chip->run_stall);
 }
 
+/* stall the core before its clocks are cut so a later reload recovers */
+static int imx8m_shutdown(struct snd_sof_dev *sdev)
+{
+	struct imx8m_chip_data *chip = get_chip_pdata(sdev);
+
+	return reset_control_assert(chip->run_stall);
+}
+
 static int imx8m_probe(struct snd_sof_dev *sdev)
 {
 	struct imx_common_data *common;
@@ -299,7 +307,7 @@ static int imx8_ops_init(struct snd_sof_dev *sdev)
 	sof_imx8_ops.drv = get_chip_info(sdev)->drv;
 	sof_imx8_ops.num_drv = get_chip_info(sdev)->num_drv;
 
-	return 0;
+	return imx_ipc4_init_data(sdev);
 }
 
 static const struct imx_chip_ops imx8_chip_ops = {
@@ -318,6 +326,7 @@ static const struct imx_chip_ops imx8m_chip_ops = {
 	.probe = imx8m_probe,
 	.core_kick = imx8m_run,
 	.core_reset = imx8m_reset,
+	.core_shutdown = imx8m_shutdown,
 };
 
 static const struct imx_chip_ops imx8ulp_chip_ops = {
@@ -373,6 +382,11 @@ static const struct imx_chip_info imx8m_chip_info = {
 		.has_panic_code = true,
 		.boot_mbox_offset = 0x800000,
 		.window_offset = 0x800000,
+		/* IPC4 window layout, each box payload follows an 8-byte header slot */
+		.ipc4_inbox_offset = 0x800000 + IMX_IPC4_HDR_SIZE,
+		.ipc4_outbox_offset = 0x801000 + IMX_IPC4_HDR_SIZE,
+		.ipc4_debug_offset = 0x802000,
+		.ipc4_fw_regs_offset = 0x802800,
 	},
 	.memory = imx8m_memory_regions,
 	.drv = imx8m_dai,
@@ -444,7 +458,7 @@ static struct snd_sof_of_mach sof_imx8_machs[] = {
 
 IMX_SOF_DEV_DESC(imx8, sof_imx8_machs, &imx8_chip_info, &sof_imx8_ops, imx8_ops_init);
 IMX_SOF_DEV_DESC(imx8x, sof_imx8_machs, &imx8x_chip_info, &sof_imx8_ops, imx8_ops_init);
-IMX_SOF_DEV_DESC(imx8m, sof_imx8_machs, &imx8m_chip_info, &sof_imx8_ops, imx8_ops_init);
+IMX_SOF_DEV_DESC_IPC4(imx8m, sof_imx8_machs, &imx8m_chip_info, &sof_imx8_ops, imx8_ops_init);
 IMX_SOF_DEV_DESC(imx8ulp, sof_imx8_machs, &imx8ulp_chip_info, &sof_imx8_ops, imx8_ops_init);
 
 static const struct of_device_id sof_of_imx8_ids[] = {
