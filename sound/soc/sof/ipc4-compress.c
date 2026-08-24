@@ -735,7 +735,7 @@ void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev, void *ipc_message)
 		return;
 	}
 
-	if (!swidget->spipe)
+	if (!swidget->spipe || !swidget->spipe->pipe_widget)
 		return;
 
 	/* Find the swidget of the host copier on the same pipeline */
