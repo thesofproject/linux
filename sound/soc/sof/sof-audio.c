@@ -547,19 +547,14 @@ sink_prepare:
  * free all widgets in the sink path starting from the source widget
  * (DAI type for capture, AIF type for playback)
  */
-static int sof_free_widgets_in_path_internal(struct snd_sof_dev *sdev,
-					     struct snd_soc_dapm_widget *widget,
-					     int dir, struct snd_sof_pcm *spcm,
-					     struct snd_soc_dapm_widget_list *list)
+static int sof_free_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
+				    int dir, struct snd_sof_pcm *spcm)
 {
+	struct snd_soc_dapm_widget_list *list = spcm->stream[dir].list;
 	struct snd_sof_widget *swidget = widget->dobj.private;
 	struct snd_soc_dapm_path *p;
-	struct snd_soc_dapm_path *next_p;
 	int err;
 	int ret = 0;
-
-	if (!list)
-		return 0;
 
 	if (is_virtual_widget(sdev, widget, __func__))
 		return 0;
@@ -580,50 +575,21 @@ static int sof_free_widgets_in_path_internal(struct snd_sof_dev *sdev,
 		ret = err;
 sink_free:
 	/* free all widgets in the sink paths even in case of error to keep use counts balanced */
-	snd_soc_dapm_widget_for_each_path_safe(widget, SND_SOC_DAPM_DIR_IN, p, next_p) {
+	snd_soc_dapm_widget_for_each_sink_path(widget, p) {
 		if (!p->walking) {
-			if (!p->sink)
-				continue;
-
 			if (!widget_in_list(list, p->sink))
 				continue;
 
 			p->walking = true;
 
-			err = sof_free_widgets_in_path_internal(sdev, p->sink,
-								dir, spcm, list);
+			err = sof_free_widgets_in_path(sdev, p->sink, dir, spcm);
 			if (err < 0)
 				ret = err;
+			p->walking = false;
 		}
 	}
 
 	return ret;
-}
-
-static int sof_free_widgets_in_path(struct snd_sof_dev *sdev,
-				    struct snd_soc_dapm_widget *widget,
-				    int dir, struct snd_sof_pcm *spcm)
-{
-	return sof_free_widgets_in_path_internal(sdev, widget, dir, spcm,
-						 spcm->stream[dir].list);
-}
-
-static void sof_reset_path_walking_flags(struct snd_soc_dapm_widget_list *list)
-{
-	struct snd_soc_dapm_widget *widget;
-	struct snd_soc_dapm_path *p;
-	int i;
-
-	if (!list)
-		return;
-
-	for_each_dapm_widgets(list, i, widget) {
-		snd_soc_dapm_widget_for_each_sink_path(widget, p)
-			p->walking = false;
-
-		snd_soc_dapm_widget_for_each_source_path(widget, p)
-			p->walking = false;
-	}
 }
 
 /*
@@ -760,16 +726,10 @@ sof_walk_widgets_in_order(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm,
 			return -EINVAL;
 		}
 		if (ret < 0) {
-			if (op == SOF_WIDGET_FREE)
-				sof_reset_path_walking_flags(list);
-
 			dev_err(sdev->dev, "Failed to %s connected widgets\n", str);
 			return ret;
 		}
 	}
-
-	if (op == SOF_WIDGET_FREE)
-		sof_reset_path_walking_flags(list);
 
 	return 0;
 }
