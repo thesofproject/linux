@@ -370,6 +370,9 @@ struct snd_sof_dsp_ops {
 
 	bool (*is_chain_dma_supported)(struct snd_sof_dev *sdev, u32 dai_type); /* optional */
 
+	/* use contiguous, coherent PCM buffers (SNDRV_DMA_TYPE_DEV) */
+	bool pcm_contiguous_buffer; /* optional */
+
 	/* ALSA HW info flags, will be stored in snd_pcm_runtime.hw.info */
 	u32 hw_info;
 

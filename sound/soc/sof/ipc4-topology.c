@@ -748,10 +748,22 @@ static int sof_ipc4_widget_setup_pcm(struct snd_sof_widget *swidget)
 		ipc4_copier->data.copier_feature_mask |= BIT(SOF_IPC4_COPIER_FAST_MODE);
 
 skip_gtw_cfg:
-	ipc4_copier->gtw_attr = kzalloc_obj(*ipc4_copier->gtw_attr);
-	if (!ipc4_copier->gtw_attr) {
-		ret = -ENOMEM;
-		goto free_available_fmt;
+	/* host copiers get room for the host config TLV, filled at prepare */
+	if (WIDGET_IS_AIF(swidget->id)) {
+		struct sof_ipc4_imx_host_config_blob *blob;
+
+		blob = kzalloc_obj(*blob);
+		if (!blob) {
+			ret = -ENOMEM;
+			goto free_available_fmt;
+		}
+		ipc4_copier->gtw_attr = &blob->gw_attr;
+	} else {
+		ipc4_copier->gtw_attr = kzalloc_obj(*ipc4_copier->gtw_attr);
+		if (!ipc4_copier->gtw_attr) {
+			ret = -ENOMEM;
+			goto free_available_fmt;
+		}
 	}
 
 	ipc4_copier->copier_config = (uint32_t *)ipc4_copier->gtw_attr;
@@ -925,6 +937,11 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 		ipc4_copier->data.gtw_cfg.node_id |=
 			SOF_IPC4_NODE_INDEX_INTEL_DMIC(ipc4_copier->dai_index);
 		break;
+	case SOF_DAI_IMX_SAI:
+		/* no sub-encoding for SAI, the DAI index is the node index */
+		ipc4_copier->data.gtw_cfg.node_id |=
+			SOF_IPC4_NODE_INDEX(ipc4_copier->dai_index);
+		fallthrough;
 	default:
 		ipc4_copier->gtw_attr = kzalloc_obj(*ipc4_copier->gtw_attr);
 		if (!ipc4_copier->gtw_attr) {
@@ -2298,6 +2315,22 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 
 		/* set gateway attributes */
 		gtw_attr->lp_buffer_alloc = pipeline->lp_mode;
+
+		/* without host DMA the firmware needs the host buffer address */
+		if (platform_params->use_phy_address) {
+			struct sof_ipc4_imx_host_config_blob *blob =
+				container_of(gtw_attr, struct sof_ipc4_imx_host_config_blob,
+					     gw_attr);
+
+			blob->tlv_type = SOF_IPC4_GTW_IMX_HOST_CONFIG_ID;
+			blob->tlv_length = sizeof(blob->phy_addr) +
+					   sizeof(blob->dma_buffer_size) +
+					   sizeof(blob->host_period_bytes);
+			blob->phy_addr = platform_params->phy_addr;
+			blob->dma_buffer_size = params_buffer_bytes(fe_params);
+			blob->host_period_bytes = params_period_bytes(fe_params);
+			copier_data->gtw_cfg.config_length = sizeof(*blob) >> 2;
+		}
 		break;
 	}
 	case snd_soc_dapm_dai_in:
@@ -4132,7 +4165,8 @@ static int sof_ipc4_dai_config(struct snd_sof_dev *sdev, struct snd_sof_widget *
 		break;
 	case SOF_DAI_INTEL_DMIC:
 	case SOF_DAI_INTEL_SSP:
-		/* nothing to do for SSP/DMIC */
+	case SOF_DAI_IMX_SAI:
+		/* nothing to do for SSP/DMIC/SAI */
 		break;
 	default:
 		dev_err(sdev->dev, "%s: unsupported dai type %d\n", __func__,
