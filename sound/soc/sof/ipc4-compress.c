@@ -323,7 +323,6 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 	struct snd_sof_platform_stream_params *platform_params;
 	struct sof_ipc4_timestamp_info *time_info;
 	struct snd_compr_params *compr_params;
-	struct snd_soc_dapm_widget_list *list;
 	struct snd_sof_widget *host_swidget;
 	struct sof_ipc4_process *process;
 	struct snd_pcm_hw_params p = {0};
@@ -497,9 +496,7 @@ clear_init_ext:
 	process->init_ext_module_size = 0;
 
 free_list:
-	list = spcm->stream[dir].list;
-	spcm->stream[dir].list = NULL;
-	snd_soc_dapm_dai_free_widgets(&list);
+	sof_widget_list_unprepare(sdev, spcm, dir);
 
 free_pages:
 	snd_compr_free_pages(cstream);
