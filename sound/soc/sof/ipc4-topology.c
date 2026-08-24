@@ -3296,7 +3296,7 @@ static void sof_ipc4_add_init_ext_dp_memory_data(struct snd_sof_dev *sdev,
 	*ext_pos += DIV_ROUND_UP(sizeof(*dp_mem_data), sizeof(u32));
 }
 
-static void
+static int
 sof_ipc4_add_init_ext_module_data(struct snd_sof_dev *sdev,
 				  struct sof_ipc4_process *process,
 				  u32 *payload, u32 *ext_pos,
@@ -3304,6 +3304,22 @@ sof_ipc4_add_init_ext_module_data(struct snd_sof_dev *sdev,
 {
 	u32 data_size = process->init_ext_module_size;
 	void *data = process->init_ext_module_data;
+	size_t needed;
+
+	/*
+	 * Unlike the other objects, the module data is of variable size,
+	 * provided by the module which is being set up.
+	 * Make sure that the object fits into the payload buffer before any of
+	 * it is written.
+	 */
+	needed = ((size_t)*ext_pos + DIV_ROUND_UP(sizeof(**hdr), sizeof(u32)) +
+		  DIV_ROUND_UP(data_size, sizeof(u32))) * sizeof(u32);
+	if (needed > sdev->ipc->max_payload_size) {
+		dev_err(sdev->dev,
+			"Max ipc payload size %zu exceeded by module data: %zu\n",
+			sdev->ipc->max_payload_size, needed);
+		return -EINVAL;
+	}
 
 	*hdr = (struct sof_ipc4_module_init_ext_object *)&payload[*ext_pos];
 	(*hdr)->header = SOF_IPC4_MOD_INIT_EXT_OBJ_ID(SOF_IPC4_MOD_INIT_DATA_ID_MODULE_DATA) |
@@ -3313,6 +3329,8 @@ sof_ipc4_add_init_ext_module_data(struct snd_sof_dev *sdev,
 	memcpy(&payload[*ext_pos], data, data_size);
 
 	*ext_pos += DIV_ROUND_UP(data_size, sizeof(u32));
+
+	return 0;
 }
 
 static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
@@ -3329,6 +3347,7 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 	int new_size;
 	u32 *payload;
 	u32 ext_pos;
+	int ret;
 
 	if (!in_dp_domain && !has_ext_data)
 		return 0;
@@ -3347,9 +3366,14 @@ static int sof_ipc4_widget_mod_init_msg_payload(struct snd_sof_dev *sdev,
 		sof_ipc4_add_init_ext_dp_memory_data(sdev, swidget, payload,
 						     &ext_pos, &hdr);
 
-	if (has_ext_data)
-		sof_ipc4_add_init_ext_module_data(sdev, process, payload,
-						  &ext_pos, &hdr);
+	if (has_ext_data) {
+		ret = sof_ipc4_add_init_ext_module_data(sdev, process, payload,
+							&ext_pos, &hdr);
+		if (ret) {
+			kfree(payload);
+			return ret;
+		}
+	}
 
 	/* Set last bit for the last object in the array */
 	hdr->header |= SOF_IPC4_MOD_INIT_EXT_OBJ_LAST_MASK;
