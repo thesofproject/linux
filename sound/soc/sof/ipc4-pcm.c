@@ -1182,6 +1182,14 @@ static int sof_ipc4_pcm_pointer(struct snd_soc_component *component,
 	if (!spcm)
 		return -EOPNOTSUPP;
 
+	/* without link DMA the host byte counter alone gives the position */
+	if (sof_ops(sdev)->get_host_byte_counter && !sof_ops(sdev)->get_dai_frame_counter) {
+		host_ptr = snd_sof_pcm_get_host_byte_counter(sdev, component, substream);
+		div64_u64_rem(host_ptr, snd_pcm_lib_buffer_bytes(substream), &host_ptr);
+		*pointer = bytes_to_frames(substream->runtime, host_ptr);
+		return 0;
+	}
+
 	sps = &spcm->stream[substream->stream];
 	time_info = sof_ipc4_sps_to_time_info(sps);
 	if (!time_info)
