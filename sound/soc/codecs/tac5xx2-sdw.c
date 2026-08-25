@@ -1168,6 +1168,40 @@ clear:
 	return 0;
 }
 
+static struct snd_soc_dai_driver tac5272_dai_driver[] = {
+	{
+		.name = "tac5xx2-aif3",
+		.id = TAC5XX2_UAJ,
+		.playback = {
+			.stream_name = "DP4 UAJ Speaker Playback",
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = TAC5XX2_DEVICE_RATES,
+			.formats = TAC5XX2_DEVICE_FORMATS,
+		},
+		.capture = {
+			.stream_name = "DP7 UAJ Mic Capture",
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = TAC5XX2_DEVICE_RATES,
+			.formats = TAC5XX2_DEVICE_FORMATS,
+		},
+		.ops = &tac_dai_ops,
+	},
+	{
+		.name = "tac5xx2-aif2",
+		.id = TAC5XX2_DMIC,
+		.capture = {
+			.stream_name = "DP3 Mic Capture",
+			.channels_min = 1,
+			.channels_max = 4,
+			.rates = TAC5XX2_DEVICE_RATES,
+			.formats = TAC5XX2_DEVICE_FORMATS,
+		},
+		.ops = &tac_dai_ops,
+	},
+};
+
 static struct snd_soc_dai_driver tac5572_dai_driver[] = {
 	{
 		.name = "tac5xx2-aif1",
@@ -1353,40 +1387,78 @@ static struct snd_soc_dai_driver tas2883_dai_driver[] = {
 static s32 tac_component_probe(struct snd_soc_component *component)
 {
 	struct tac5xx2_prv *tac_dev = snd_soc_component_get_drvdata(component);
+	u32 part_id = tac_dev->part_id;
 	int ret;
 
 	ret = pm_runtime_resume(component->dev);
 	if (ret < 0 && ret != -EACCES)
 		return ret;
 
-	if (!tac_has_uaj_support(tac_dev))
-		goto done_comp_probe;
+	switch (part_id) {
+	case 0x2883:
+	case 0x5272:
+	case 0x5572:
+	case 0x5672:
+	case 0x5682:
+		ret = snd_soc_dapm_new_controls(snd_soc_component_to_dapm(component),
+						tac5xx2_common_widgets,
+					ARRAY_SIZE(tac5xx2_common_widgets));
+		if (ret) {
+			dev_err(component->dev, "Failed to add common widgets: %d\n", ret);
+			break;
+		}
 
-	ret = snd_soc_dapm_new_controls(snd_soc_component_to_dapm(component),
-					tac_uaj_widgets,
-					ARRAY_SIZE(tac_uaj_widgets));
-	if (ret) {
-		dev_err(component->dev, "Failed to add UAJ widgets: %d\n", ret);
-		return ret;
+		ret = snd_soc_dapm_add_routes(snd_soc_component_to_dapm(component),
+					      tac5xx2_common_routes,
+					      ARRAY_SIZE(tac5xx2_common_routes));
+		if (ret) {
+			dev_err(component->dev, "Failed to add common routes: %d\n", ret);
+			break;
+		}
+
+		ret = snd_soc_add_component_controls(component, tac5xx2_snd_controls,
+						     ARRAY_SIZE(tac5xx2_snd_controls));
+		if (ret) {
+			dev_err(component->dev, "Failed to add common controls: %d\n", ret);
+			break;
+		}
+
+		if (part_id == 0x2883)
+			break;
+
+		if (!tac_has_uaj_support(tac_dev)) {
+			if (part_id == 0x5272) {
+				dev_err(component->dev, "tac5272 without UAJ support is invalid\n");
+				ret = -EINVAL;
+			}
+			break;
+		}
+
+		ret = snd_soc_dapm_new_controls(snd_soc_component_to_dapm(component),
+						tac_uaj_widgets,
+						ARRAY_SIZE(tac_uaj_widgets));
+		if (ret) {
+			dev_err(component->dev, "Failed to add UAJ widgets: %d\n", ret);
+			break;
+		}
+
+		ret = snd_soc_dapm_add_routes(snd_soc_component_to_dapm(component),
+					      tac_uaj_routes, ARRAY_SIZE(tac_uaj_routes));
+		if (ret) {
+			dev_err(component->dev, "Failed to add UAJ routes: %d\n", ret);
+			break;
+		}
+
+		ret = snd_soc_add_component_controls(component, tac_uaj_controls,
+						     ARRAY_SIZE(tac_uaj_controls));
+		if (ret)
+			dev_err(component->dev, "Failed to add UAJ controls: %d\n", ret);
+
+		break;
 	}
 
-	ret = snd_soc_dapm_add_routes(snd_soc_component_to_dapm(component),
-				      tac_uaj_routes, ARRAY_SIZE(tac_uaj_routes));
-	if (ret) {
-		dev_err(component->dev, "Failed to add UAJ routes: %d\n", ret);
-		return ret;
-	}
-
-	ret = snd_soc_add_component_controls(component, tac_uaj_controls,
-					     ARRAY_SIZE(tac_uaj_controls));
-	if (ret) {
-		dev_err(component->dev, "Failed to add UAJ controls: %d\n", ret);
-			return ret;
-	}
-
-done_comp_probe:
 	tac_dev->component = component;
-	return 0;
+	return ret;
 }
 
 static void tac_component_remove(struct snd_soc_component *codec)
@@ -1399,12 +1471,6 @@ static void tac_component_remove(struct snd_soc_component *codec)
 static const struct snd_soc_component_driver soc_codec_driver_tacdevice = {
 	.probe = tac_component_probe,
 	.remove = tac_component_remove,
-	.controls = tac5xx2_snd_controls,
-	.num_controls = ARRAY_SIZE(tac5xx2_snd_controls),
-	.dapm_widgets = tac5xx2_common_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(tac5xx2_common_widgets),
-	.dapm_routes = tac5xx2_common_routes,
-	.num_dapm_routes = ARRAY_SIZE(tac5xx2_common_routes),
 	.idle_bias_on = 0,
 	.endianness = 1,
 };
@@ -1419,6 +1485,10 @@ static s32 tac_init(struct tac5xx2_prv *tac_dev)
 	dev_set_drvdata(tac_dev->dev, tac_dev);
 
 	switch (tac_dev->part_id) {
+	case 0x5272:
+		dai_drv = tac5272_dai_driver;
+		num_dais = ARRAY_SIZE(tac5272_dai_driver);
+		break;
 	case 0x5572:
 		dai_drv = tac5572_dai_driver;
 		num_dais = ARRAY_SIZE(tac5572_dai_driver);
@@ -2045,6 +2115,7 @@ static void tac_sdw_remove(struct sdw_slave *peripheral)
 }
 
 static const struct sdw_device_id tac_sdw_id[] = {
+	SDW_SLAVE_ENTRY(0x0102, 0x5272, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5572, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5672, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5682, 0),
