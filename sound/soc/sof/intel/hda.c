@@ -1045,7 +1045,7 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct snd_soc_acpi_mach_params *mach_params;
-	struct snd_soc_acpi_mach *hda_mach;
+	struct snd_soc_acpi_mach *hda_mach, *mach_alt;
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	const char *tplg_filename;
 	int codec_num = 0;
@@ -1098,6 +1098,23 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 			 */
 			if (!pdata->tplg_filename)
 				tplg_fixup = true;
+
+			if (tplg_fixup && hda_mach->machine_quirk) {
+				mach_alt = hda_mach->machine_quirk(hda_mach);
+				if (mach_alt && mach_alt != hda_mach) {
+					/*
+					 * The quirk provides the complete topology name
+					 * (including the .tplg extension), so set it as
+					 * if overridden by the user. This skips all
+					 * topology name fixups later.
+					 */
+					hda_mach->drv_name = mach_alt->drv_name;
+					hda_mach->sof_tplg_filename = mach_alt->sof_tplg_filename;
+					pdata->tplg_filename = mach_alt->sof_tplg_filename;
+					tplg_fixup = false;
+					dev_dbg(bus->dev, "using quirk for HDA machine driver\n");
+				}
+			}
 
 			if (tplg_fixup &&
 			    codec_num == 1 && HDA_IDISP_CODEC(bus->codec_mask)) {
