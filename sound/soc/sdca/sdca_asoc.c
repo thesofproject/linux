@@ -27,6 +27,7 @@
 #include <sound/sdca.h>
 #include <sound/sdca_asoc.h>
 #include <sound/sdca_function.h>
+#include <sound/sdca_wov.h>
 #include <sound/soc.h>
 #include <sound/soc-component.h>
 #include <sound/soc-dai.h>
@@ -113,6 +114,10 @@ int sdca_asoc_count_component(struct device *dev, struct sdca_function_data *fun
 			*num_routes += !!entity->iot.is_dataport;
 			*num_controls += !entity->iot.is_dataport;
 			*num_dais += !!entity->iot.is_dataport;
+			if (sdca_wov_is_terminal(dev, function, entity)) {
+				*num_dais += 1;
+				*num_routes += 1;
+			}
 			break;
 		case SDCA_ENTITY_TYPE_PDE:
 			*num_routes += entity->pde.num_managed;
@@ -336,7 +341,7 @@ static int entity_parse_ot(struct device *dev,
 			   struct snd_soc_dapm_widget **widget,
 			   struct snd_soc_dapm_route **route)
 {
-	int i;
+	int i, ret;
 
 	if (entity->iot.is_dataport) {
 		const char *aif_name = devm_kasprintf(dev, GFP_KERNEL, "%s %s",
@@ -347,6 +352,12 @@ static int entity_parse_ot(struct device *dev,
 		(*widget)->id = snd_soc_dapm_aif_out;
 
 		add_route(route, aif_name, NULL, entity->label);
+
+		if (sdca_wov_is_terminal(dev, function, entity)) {
+			ret = sdca_wov_populate_dapm(dev, entity, route);
+			if (ret)
+				return ret;
+		}
 	} else {
 		(*widget)->id = snd_soc_dapm_spk;
 	}
@@ -1301,7 +1312,8 @@ EXPORT_SYMBOL_NS(sdca_asoc_populate_rate_format, "SND_SOC_SDCA");
  * @ops: DAI ops to be attached to each of the created DAI drivers.
  *
  * This function populates an array of ASoC DAI drivers from the DisCo
- * information for a particular SDCA Function. Typically,
+ * information for a particular SDCA Function, including compressed capture
+ * DAIs for supported WoV terminals. Typically,
  * snd_soc_asoc_count_component will be used to allocate an
  * appropriately sized array before calling this function.
  *
@@ -1352,6 +1364,13 @@ int sdca_asoc_populate_dais(struct device *dev, struct sdca_function_data *funct
 		dais[j].name = entity->label;
 		dais[j].ops = ops;
 		j++;
+
+		if (sdca_wov_is_terminal(dev, function, entity)) {
+			ret = sdca_wov_populate_dai(dev, function, &dais[j], stream, i);
+			if (ret)
+				return ret;
+			j++;
+		}
 	}
 
 	return 0;
@@ -1362,6 +1381,7 @@ EXPORT_SYMBOL_NS(sdca_asoc_populate_dais, "SND_SOC_SDCA");
  * sdca_asoc_populate_component - fill in a component driver for a Function
  * @dev: Pointer to the device against which allocations will be done.
  * @function: Pointer to the Function information.
+ * @irq_info: SDCA interrupt information used by the WoV callbacks.
  * @component_drv: Pointer to the component driver to be populated.
  * @dai_drv: Pointer to the DAI driver array to be allocated and populated.
  * @num_dai_drv: Pointer to integer that will be populated with the number of
@@ -1376,6 +1396,7 @@ EXPORT_SYMBOL_NS(sdca_asoc_populate_dais, "SND_SOC_SDCA");
  */
 int sdca_asoc_populate_component(struct device *dev,
 				 struct sdca_function_data *function,
+				 struct sdca_interrupt_info *irq_info,
 				 struct snd_soc_component_driver *component_drv,
 				 struct snd_soc_dai_driver **dai_drv, int *num_dai_drv,
 				 const struct snd_soc_dai_ops *ops)
@@ -1417,6 +1438,10 @@ int sdca_asoc_populate_component(struct device *dev,
 		return ret;
 
 	ret = sdca_asoc_populate_dais(dev, function, dais, ops);
+	if (ret)
+		return ret;
+
+	ret = sdca_wov_init_component(dev, function, irq_info, component_drv);
 	if (ret)
 		return ret;
 
