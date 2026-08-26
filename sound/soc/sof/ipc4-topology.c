@@ -937,11 +937,26 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 		ipc4_copier->data.gtw_cfg.node_id |=
 			SOF_IPC4_NODE_INDEX_INTEL_DMIC(ipc4_copier->dai_index);
 		break;
-	case SOF_DAI_IMX_SAI:
-		/* no sub-encoding for SAI, the DAI index is the node index */
+	case SOF_DAI_IMX_SAI: {
+		struct sof_ipc4_imx_dai_config_blob *blob;
+
+		/* no DAI_CONFIG IPC in IPC4: send the SAI config as a TLV after gtw_attr */
 		ipc4_copier->data.gtw_cfg.node_id |=
 			SOF_IPC4_NODE_INDEX(ipc4_copier->dai_index);
-		fallthrough;
+
+		blob = kzalloc_obj(*blob);
+		if (!blob) {
+			ret = -ENOMEM;
+			goto free_available_fmt;
+		}
+		blob->tlv_type = SOF_IPC4_GTW_IMX_DAI_CONFIG_ID;
+		blob->tlv_length = sizeof(blob->dai_config);
+
+		ipc4_copier->gtw_attr = &blob->gw_attr;
+		ipc4_copier->copier_config = (uint32_t *)blob;
+		ipc4_copier->data.gtw_cfg.config_length = sizeof(*blob) >> 2;
+		break;
+	}
 	default:
 		ipc4_copier->gtw_attr = kzalloc_obj(*ipc4_copier->gtw_attr);
 		if (!ipc4_copier->gtw_attr) {
@@ -2095,6 +2110,76 @@ sof_ipc4_adjust_params_to_dai_format(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+/* build the SAI config TLV from the BE link hw_config, as IPC3 sof_link_sai_load() */
+static int sof_ipc4_imx_dai_config(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
+				   struct sof_ipc4_copier *ipc4_copier)
+{
+	struct sof_ipc4_imx_dai_config_blob *blob = (void *)ipc4_copier->copier_config;
+	struct snd_soc_tplg_hw_config *hw_config = NULL;
+	struct sof_ipc_dai_config *cfg = &blob->dai_config;
+	struct snd_sof_dai_link *slink;
+	bool found = false;
+	int i;
+
+	list_for_each_entry(slink, &sdev->dai_link_list, list) {
+		if (!strcmp(slink->link->name, dai->name)) {
+			found = true;
+			break;
+		}
+	}
+	if (!found) {
+		dev_err(sdev->dev, "no DAI link found for DAI %s\n", dai->name);
+		return -EINVAL;
+	}
+
+	found = false;
+	for (i = 0; i < slink->num_hw_configs; i++) {
+		if (dai->current_config == le32_to_cpu(slink->hw_configs[i].id)) {
+			hw_config = &slink->hw_configs[i];
+			found = true;
+			break;
+		}
+	}
+	if (!found) {
+		dev_err(sdev->dev, "no matching hw_config for DAI %s\n", dai->name);
+		return -EINVAL;
+	}
+
+	memset(cfg, 0, sizeof(*cfg));
+	cfg->type = SOF_DAI_IMX_SAI;
+	cfg->dai_index = ipc4_copier->dai_index;
+
+	/* base format; SOF_DAI_FMT_* match SND_SOC_DAIFMT_* values */
+	cfg->format = le32_to_cpu(hw_config->fmt) & SOF_DAI_FMT_FORMAT_MASK;
+
+	/* clock provider (wrt codec) */
+	if (hw_config->bclk_provider == SND_SOC_TPLG_BCLK_CP)
+		cfg->format |= (hw_config->fsync_provider == SND_SOC_TPLG_FSYNC_CP) ?
+			SOF_DAI_FMT_CBP_CFP : SOF_DAI_FMT_CBP_CFC;
+	else
+		cfg->format |= (hw_config->fsync_provider == SND_SOC_TPLG_FSYNC_CP) ?
+			SOF_DAI_FMT_CBC_CFP : SOF_DAI_FMT_CBC_CFC;
+
+	/* clock inversion */
+	if (hw_config->invert_bclk)
+		cfg->format |= hw_config->invert_fsync ?
+			SOF_DAI_FMT_IB_IF : SOF_DAI_FMT_IB_NF;
+	else
+		cfg->format |= hw_config->invert_fsync ?
+			SOF_DAI_FMT_NB_IF : SOF_DAI_FMT_NB_NF;
+
+	cfg->sai.mclk_rate = le32_to_cpu(hw_config->mclk_rate);
+	cfg->sai.bclk_rate = le32_to_cpu(hw_config->bclk_rate);
+	cfg->sai.fsync_rate = le32_to_cpu(hw_config->fsync_rate);
+	cfg->sai.mclk_direction = hw_config->mclk_direction;
+	cfg->sai.tdm_slots = le32_to_cpu(hw_config->tdm_slots);
+	cfg->sai.tdm_slot_width = le32_to_cpu(hw_config->tdm_slot_width);
+	cfg->sai.tx_slots = le32_to_cpu(hw_config->tx_slots);
+	cfg->sai.rx_slots = le32_to_cpu(hw_config->rx_slots);
+
+	return 0;
+}
+
 static int
 sof_ipc4_prepare_dai_copier(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
 			    struct snd_pcm_hw_params *params, int dir)
@@ -2138,11 +2223,20 @@ sof_ipc4_prepare_dai_copier(struct snd_sof_dev *sdev, struct snd_sof_dai *dai,
 					     ipc4_copier->dai_type, dir,
 					     &ipc4_copier->copier_config,
 					     &copier_data->gtw_cfg.config_length);
-	/* Update the params to reflect the changes made in this function */
-	if (!ret)
-		*params = dai_params;
+	if (ret)
+		return ret;
 
-	return ret;
+	/* SAI clock and format go to the firmware in config_data */
+	if (ipc4_copier->dai_type == SOF_DAI_IMX_SAI) {
+		ret = sof_ipc4_imx_dai_config(sdev, dai, ipc4_copier);
+		if (ret)
+			return ret;
+	}
+
+	/* Update the params to reflect the changes made in this function */
+	*params = dai_params;
+
+	return 0;
 }
 
 static void sof_ipc4_host_config(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
