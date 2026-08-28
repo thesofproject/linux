@@ -1635,6 +1635,50 @@ static bool asoc_sdw_is_unique_device(const struct snd_soc_acpi_link_adr *adr_li
 	return true;
 }
 
+struct asoc_sdw_find_info {
+	const char *subname;
+	struct sdw_slave_id id;
+};
+
+static int asoc_sdw_find_component_cb(struct snd_soc_component *component, void *context)
+{
+	const struct asoc_sdw_find_info *info = context;
+	struct device *dev = component->dev;
+
+	if (!is_sdw_slave(dev)) {
+		dev = component->dev->parent;
+		if (!dev || !is_sdw_slave(dev))
+			return 0;
+	}
+
+	if (sdw_compare_devid(dev_to_sdw_dev(dev), info->id) != 0)
+		return 0;
+
+	if (info->subname && !strstr(component->name, info->subname))
+		return 0;
+
+	return 1;
+}
+
+struct snd_soc_component *asoc_sdw_find_component(const struct asoc_sdw_dai_info *dai_info,
+						  const struct snd_soc_acpi_link_adr *adr_link,
+						  int adr_index)
+{
+	u64 adr = adr_link->adr_d[adr_index].adr;
+	struct asoc_sdw_find_info info;
+	struct snd_soc_component *component;
+
+	sdw_extract_slave_id(adr, &info.id);
+	info.subname = dai_info->codec_name;
+
+	component = snd_soc_lookup_component_walk(asoc_sdw_find_component_cb, &info);
+	if (IS_ERR(component))
+		return NULL;
+
+	return component;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_find_component, "SND_SOC_SDW_UTILS");
+
 static const char *_asoc_sdw_get_codec_name(struct device *dev,
 					    const struct snd_soc_acpi_link_adr *adr_link,
 					    int adr_index)
@@ -1661,22 +1705,23 @@ const char *asoc_sdw_get_codec_name(struct device *dev,
 				    const struct snd_soc_acpi_link_adr *adr_link,
 				    int adr_index)
 {
-	if (dai_info->codec_name) {
-		struct snd_soc_component *component;
+	struct snd_soc_component *component;
 
-		component = snd_soc_lookup_component_by_name(dai_info->codec_name);
-		if (component) {
-			dev_dbg(dev, "%s found component %s for codec_name %s\n",
-				__func__, component->name, dai_info->codec_name);
-			return devm_kstrdup(dev, component->name, GFP_KERNEL);
-		} else {
-			dev_dbg(dev, "%s component %s is not registered yet\n",
-				__func__, dai_info->codec_name);
-			return ERR_PTR(-EPROBE_DEFER);
-		}
+	component = asoc_sdw_find_component(dai_info, adr_link, adr_index);
+	if (!component) {
+		dev_dbg(dev, "%s component for addr %013llx subname '%s' is not registered yet\n",
+			__func__,
+			adr_link->adr_d[adr_index].adr,
+			dai_info->codec_name);
+		return ERR_PTR(-EPROBE_DEFER);
 	}
 
-	return _asoc_sdw_get_codec_name(dev, adr_link, adr_index);
+	dev_dbg(dev, "%s found component %s for adr %013llx subname '%s'\n",
+		__func__, component->name,
+		adr_link->adr_d[adr_index].adr,
+		dai_info->codec_name);
+
+	return devm_kstrdup(dev, component->name, GFP_KERNEL);
 }
 EXPORT_SYMBOL_NS(asoc_sdw_get_codec_name, "SND_SOC_SDW_UTILS");
 
