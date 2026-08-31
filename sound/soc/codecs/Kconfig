@@ -896,6 +896,7 @@ config SND_SOC_CS35L56_SDW
 	tristate "Cirrus Logic CS35L56 CODEC (SDW)"
 	depends on SOUNDWIRE
 	select REGMAP_SOUNDWIRE
+	select IRQ_DOMAIN
 	select SND_SOC_CS35L56
 	select SND_SOC_CS35L56_SHARED
 	help
@@ -2173,6 +2174,7 @@ config SND_SOC_TAC5XX2_SDW
 	tristate "Texas Instruments TAC5XX2 SoundWire Smart Amplifier"
 	depends on SOUNDWIRE
 	depends on SND_SOC_SDCA
+	select REGMAP_SOUNDWIRE_MBQ
 	help
 	  This option enables support for Texas Instruments TAC5XX2 family
 	  of SoundWire Smart Amplifiers. This includes TAC5572, TAC5672,

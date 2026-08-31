@@ -495,6 +495,56 @@ static bool tas2783_readable_register(struct device *dev, unsigned int reg)
 	return tas2783_sdca_mbq_size(dev, reg) > 0;
 }
 
+static bool tas2783_writeable_register(struct device *dev, unsigned int reg)
+{
+	/*
+	 * The Latency Control of every Entity, together with the Power Domain
+	 * actual state and the protection status, is read-only. They are
+	 * listed in tas2783_reg_default[] with a placeholder value, so without
+	 * this a regcache_sync() would try to write them back and the
+	 * peripheral would reject the transaction, aborting the sync.
+	 */
+	switch (reg) {
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_FU21, 0x10, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_FU23, 0x10, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_FU26, 0x10, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_XU22, 0x06, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_XU22, 0x07, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_XU22, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_CS24, 0x02, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_CS21, 0x02, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_CS25, 0x02, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_CS26, 0x02, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_CS28, 0x02, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_PDE23, 0x10, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_UDMPU23, 0x06, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_SAPU29, 0x05, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_SAPU29, 0x11, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_PPU21, 0x06, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_PPU26, 0x06, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_IT21, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_IT29, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_IT26, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_IT28, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_OT24, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_OT23, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_OT25, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_OT28, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_MU26, 0x06, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_OT127, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_FU127, 0x10, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_CS127, 0x02, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_MFPU21, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_MFPU21, 0x04, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_MFPU26, 0x08, 0):
+	case SDW_SDCA_CTL(FUNC_NUM_SMART_AMP, TAS2783_SDCA_ENT_MFPU26, 0x04, 0):
+		return false;
+
+	default:
+		return tas2783_sdca_mbq_size(dev, reg) > 0;
+	}
+}
+
 static bool tas2783_volatile_register(struct device *dev, u32 reg)
 {
 	switch (reg) {
@@ -516,6 +566,7 @@ static const struct regmap_config tas_regmap = {
 	.reg_bits = 32,
 	.val_bits = 8,
 	.readable_reg = tas2783_readable_register,
+	.writeable_reg = tas2783_writeable_register,
 	.volatile_reg = tas2783_volatile_register,
 	.reg_defaults = tas2783_reg_default,
 	.num_reg_defaults = ARRAY_SIZE(tas2783_reg_default),
@@ -1259,6 +1310,7 @@ static int tas_port_prep(struct sdw_slave *slave, struct sdw_prepare_ch *prep_ch
 			 enum sdw_port_prep_ops pre_ops)
 {
 	struct device *dev = &slave->dev;
+	struct tas2783_prv *tas_dev = dev_get_drvdata(dev);
 	struct sdw_dpn_prop *dpn_prop;
 	u32 addr;
 	int ret;
@@ -1270,6 +1322,25 @@ static int tas_port_prep(struct sdw_slave *slave, struct sdw_prepare_ch *prep_ch
 	addr = SDW_DPN_PREPARECTRL(prep_ch->num);
 	switch (pre_ops) {
 	case SDW_OPS_PORT_PRE_PREP:
+		/*
+		 * The Function has to be powered before the port can complete
+		 * channel preparation.  hw_params() does that when a stream is
+		 * set up, but a stream that is only re-prepared - as it is
+		 * after the peripheral lost power in S0i3 - does not go
+		 * through hw_params() again, and the peripheral is back at its
+		 * PS3 reset default.  Power it up here, where it is needed.
+		 */
+		scoped_guard(mutex, &tas_dev->pde_lock)
+			ret = regmap_write(tas_dev->regmap,
+					   SDW_SDCA_CTL(1, TAS2783_SDCA_ENT_PDE23,
+							TAS2783_SDCA_CTL_REQ_POW_STATE, 0),
+					   TAS2783_SDCA_POW_STATE_ON);
+		if (ret) {
+			dev_err(dev, "power up failed for port %d, err=%d\n",
+				prep_ch->num, ret);
+			return ret;
+		}
+
 		ret = sdw_write_no_pm(slave, addr, prep_ch->ch_mask);
 		if (ret)
 			dev_err(dev, "prep failed for port %d, err=%d\n",

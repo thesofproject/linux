@@ -846,11 +846,17 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 	struct snd_soc_tplg_mixer_control *mc =
 		container_of(hdr, struct snd_soc_tplg_mixer_control, hdr);
 	int tlv[SOF_TLV_ITEMS];
+	u32 min, max;
 	unsigned int mask;
 	int ret;
 
 	/* validate topology data */
 	if (le32_to_cpu(mc->num_channels) > SND_SOC_TPLG_MAX_CHAN)
+		return -EINVAL;
+
+	min = le32_to_cpu(mc->min);
+	max = le32_to_cpu(mc->max);
+	if (min > max || max >= INT_MAX)
 		return -EINVAL;
 
 	/*
@@ -863,12 +869,12 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 		kc->info = snd_sof_volume_info;
 
 	scontrol->comp_id = sdev->next_comp_id;
-	scontrol->min_volume_step = le32_to_cpu(mc->min);
-	scontrol->max_volume_step = le32_to_cpu(mc->max);
+	scontrol->min_volume_step = min;
+	scontrol->max_volume_step = max;
 	scontrol->num_channels = le32_to_cpu(mc->num_channels);
 
-	scontrol->max = le32_to_cpu(mc->max);
-	if (le32_to_cpu(mc->max) == 1)
+	scontrol->max = max;
+	if (max == 1)
 		goto skip;
 
 	/* extract tlv data */
@@ -878,7 +884,7 @@ static int sof_control_load_volume(struct snd_soc_component *scomp,
 	}
 
 	/* set up volume table */
-	ret = set_up_volume_table(scontrol, tlv, le32_to_cpu(mc->max) + 1);
+	ret = set_up_volume_table(scontrol, tlv, max + 1);
 	if (ret < 0) {
 		dev_err(scomp->dev, "error: setting up volume table\n");
 		return ret;
@@ -911,7 +917,7 @@ skip:
 	return 0;
 
 err:
-	if (le32_to_cpu(mc->max) > 1)
+	if (max > 1)
 		kfree(scontrol->volume_table);
 
 	return ret;
@@ -2508,13 +2514,12 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const char *tplg_filename_prefix = sof_pdata->tplg_filename_prefix;
-	const struct firmware *fw;
-	const char **tplg_files;
 	int tplg_cnt = 0;
 	int ret;
 	int i;
 
-	tplg_files = kcalloc(scomp->card->num_links, sizeof(char *), GFP_KERNEL);
+	const char **tplg_files __free(kfree) =
+		kcalloc(scomp->card->num_links, sizeof(char *), GFP_KERNEL);
 	if (!tplg_files)
 		return -ENOMEM;
 
@@ -2540,10 +2545,8 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 								       tplg_filename_prefix,
 								       &tplg_files,
 								       no_fallback);
-		if (tplg_cnt < 0) {
-			kfree(tplg_files);
+		if (tplg_cnt < 0)
 			return tplg_cnt;
-		}
 	}
 
 	/*
@@ -2554,8 +2557,6 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		if (strstr(file, "dummy")) {
 			dev_err(scomp->dev,
 				"Function topology is required, please upgrade sof-firmware\n");
-
-			kfree(tplg_files);
 			return -EINVAL;
 		}
 		tplg_files[0] = file;
@@ -2570,6 +2571,7 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		if (tplg_files[0] != file)
 			dev_info(scomp->dev, "loading topology %d: %s\n", i, tplg_files[i]);
 
+		const struct firmware *fw __free(firmware) = NULL;
 		ret = request_firmware(&fw, tplg_files[i], scomp->dev);
 		if (ret < 0) {
 			/*
@@ -2587,8 +2589,6 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 			ret = snd_soc_tplg_component_load(scomp, &sof_dspless_tplg_ops, fw);
 		else
 			ret = snd_soc_tplg_component_load(scomp, &sof_tplg_ops, fw);
-
-		release_firmware(fw);
 
 		if (ret < 0) {
 			dev_err(scomp->dev, "tplg %s component load failed %d\n",
@@ -2608,6 +2608,8 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 			goto out;
 		}
 		dev_info(scomp->dev, "loading feature topology %d: %s\n", i, feature_topology);
+
+		const struct firmware *fw __free(firmware) = NULL;
 		ret = request_firmware(&fw, feature_topology, scomp->dev);
 		if (ret < 0) {
 			/*
@@ -2632,8 +2634,6 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		else
 			ret = snd_soc_tplg_component_load(scomp, &sof_tplg_ops, fw);
 
-		release_firmware(fw);
-
 		if (ret < 0) {
 			dev_err(scomp->dev, "feature tplg %s component load failed %d\n",
 				feature_topologies[i], ret);
@@ -2651,8 +2651,6 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 out:
 	if (ret >= 0 && sdev->led_present)
 		ret = snd_ctl_led_request();
-
-	kfree(tplg_files);
 
 	return ret;
 }

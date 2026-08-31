@@ -1001,18 +1001,25 @@ static int tasdevice_set_profile_id(struct snd_kcontrol *kcontrol,
 }
 
 /**
- * tasdevice_get_capture_profile_id - Report current active capture profile
- * ID to user space
- * @kcontrol: ALSA kcontrol structure passed from ALSA core
- * @ucontrol: User-space control element value buffer to write the result back
+ * tasdevice_set_capture_profile_id - Set runtime capture profile index via
+ * ALSA control
+ * @kcontrol: ALSA kcontrol handle that triggers this operation
+ * @ucontrol: User space control value carrying the new profile index
  *
- * This function ensures the returned profile ID is always clamped inside the
- * valid range advertised by the info callback, preventing accidental invalid
- * values from being exposed to applications even if internal driver state is
- * temporarily inconsistent.
+ * This mixer control handler validates the user-provided capture profile ID
+ * against the maximum valid index parsed from the loaded DSP firmware,
+ * then updates the runtime stored capture profile ID only if the new value
+ * differs from the current active one. It will immediately return -EINVAL
+ * if the submitted profile ID falls outside the valid range, including the
+ * edge case that no valid configuration blocks are detected in firmware.
  *
- * Returns 0 on successful fill of the control value, no error conditions
- * are defined for this getter callback.
+ * No actual DSP register write is performed in this handler. The updated
+ * profile ID will be applied to the hardware when the next ALSA capture
+ * stream starts up. Caller does not need to take extra codec lock here,
+ * as the ALSA control core already guarantees serialized execution.
+ *
+ * Return: 1 if profile ID value was changed, 0 if no modification needed,
+ *	   -EINVAL if the input profile ID is out of valid range
  */
 static int tasdevice_set_capture_profile_id(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
@@ -1449,6 +1456,43 @@ static void alpa_cali_update(struct bulk_reg_val *p,
 	p->val_len = 4;
 }
 
+static int create_tas2781_cali_start_ktrl(struct tasdevice_priv
+	*priv, struct snd_kcontrol_new *cali_ctrl)
+{
+	struct soc_bytes_ext *ext_cali_start;
+	char *cali_start_name;
+
+	ext_cali_start = devm_kzalloc(priv->dev,
+		sizeof(*ext_cali_start), GFP_KERNEL);
+	if (!ext_cali_start)
+		return -ENOMEM;
+
+	cali_start_name = devm_kstrdup(priv->dev,
+		"Calibration Start", GFP_KERNEL);
+	if (!cali_start_name)
+		return -ENOMEM;
+	/*
+	 * package structure for tas2781 ftc start:
+	 *	Pkg len (1 byte)
+	 *	Reg id (1 byte, constant 'r')
+	 *	book, page, register for pilot threshold, pilot tone
+	 *		and sine gain (12 bytes)
+	 *	for (i = 0; i < Device-Sum; i++) {
+	 *		Device #i index_info (1 byte)
+	 *		Sine gain for Device #i (8 bytes)
+	 *	}
+	 */
+	ext_cali_start->max = 14 + priv->ndev * 9;
+	cali_ctrl->name = cali_start_name;
+	cali_ctrl->iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	cali_ctrl->info = snd_soc_bytes_info_ext;
+	cali_ctrl->put = tas2781_calib_start_put;
+	cali_ctrl->get = tasdev_nop_get;
+	cali_ctrl->private_value = (unsigned long)ext_cali_start;
+
+	return 0;
+}
+
 static int tasdevice_create_cali_ctrls(struct tasdevice_priv *priv)
 {
 	struct calidata *cali_data = &priv->cali_data;
@@ -1567,37 +1611,11 @@ static int tasdevice_create_cali_ctrls(struct tasdevice_priv *priv)
 	 */
 	cali_data->data[0] = 0xff;
 	if (priv->chip_id == TAS2781) {
-		struct soc_bytes_ext *ext_cali_start;
-		char *cali_start_name;
-
-		ext_cali_start = devm_kzalloc(priv->dev,
-			sizeof(*ext_cali_start), GFP_KERNEL);
-		if (!ext_cali_start)
-			return -ENOMEM;
-
-		cali_start_name = devm_kstrdup(priv->dev,
-			"Calibration Start", GFP_KERNEL);
-		if (!cali_start_name)
-			return -ENOMEM;
-		/*
-		 * package structure for tas2781 ftc start:
-		 *	Pkg len (1 byte)
-		 *	Reg id (1 byte, constant 'r')
-		 *	book, page, register for pilot threshold, pilot tone
-		 *		and sine gain (12 bytes)
-		 *	for (i = 0; i < Device-Sum; i++) {
-		 *		Device #i index_info (1 byte)
-		 *		Sine gain for Device #i (8 bytes)
-		 *	}
-		 */
-		ext_cali_start->max = 14 + priv->ndev * 9;
-		cali_ctrls[i].name = cali_start_name;
-		cali_ctrls[i].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
-		cali_ctrls[i].info = snd_soc_bytes_info_ext;
-		cali_ctrls[i].put = tas2781_calib_start_put;
-		cali_ctrls[i].get = tasdev_nop_get;
-		cali_ctrls[i].private_value = (unsigned long)ext_cali_start;
+		rc = create_tas2781_cali_start_ktrl(priv, &cali_ctrls[i]);
+		if (rc != 0)
+			return rc;
 		i++;
+
 	}
 
 	return snd_soc_add_component_controls(priv->codec, cali_ctrls,
@@ -1663,8 +1681,8 @@ static ssize_t acoustic_ctl_write(struct file *file,
 	if (src[0] > max_pkg_len && src[0] != count) {
 		dev_err(priv->dev, "pkg(%u), max(%u), count(%u) mismatch.\n",
 			src[0], max_pkg_len, (unsigned int)count);
-		ret = 0;
-		goto exit;
+		kfree(src);
+		return 0;
 	}
 
 	switch (src[1]) {
@@ -1678,14 +1696,14 @@ static ssize_t acoustic_ctl_write(struct file *file,
 		break;
 	default:
 		dev_err(priv->dev, "%s Wrong code %02x.\n", __func__, src[1]);
-		ret = 0;
-		goto exit;
+		kfree(src);
+		return 0;
 	}
 
 	if (len < 1) {
 		dev_err(priv->dev, "pkg fmt invalid %02x.\n", len);
-		ret = 0;
-		goto exit;
+		kfree(src);
+		return 0;
 	}
 
 	for (j = 0; j < priv->ndev; j++)
@@ -1695,8 +1713,8 @@ static ssize_t acoustic_ctl_write(struct file *file,
 		}
 	if (j >= priv->ndev) {
 		dev_err(priv->dev, "no such device 0x%02x.\n", src[2]);
-		ret = 0;
-		goto exit;
+		kfree(src);
+		return 0;
 	}
 
 	reg = TASDEVICE_REG(src[3], src[4], src[5]);
@@ -1727,7 +1745,7 @@ static ssize_t acoustic_ctl_write(struct file *file,
 		dev_err(priv->dev, "i2c communication error.\n");
 	else
 		ret = count;
-exit:
+
 	kfree(src);
 	return ret;
 }
