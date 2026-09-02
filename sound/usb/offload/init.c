@@ -37,6 +37,7 @@ struct usb_offload_ctx *usb_offload_register(const struct usb_offload_res *res)
 
 	ctx->dev = res->dev;
 	ctx->ops = res->ops;
+	ctx->s24_3le_as_s24_le = res->s24_3le_as_s24_le;
 
 	ret = usb_offload_usb_audio_init(ctx);
 	if (ret) {

@@ -743,22 +743,21 @@ int usb_offload_release_stream(struct usb_offload_ctx *ctx,
 }
 EXPORT_SYMBOL_NS_GPL(usb_offload_release_stream, "USB_AUDIO_OFFLOAD");
 
-static bool usb_offload_fmt_usable(const struct audioformat *fp,
-				   struct snd_pcm_hw_params *params)
+static u64 usb_offload_add_s24_le(struct usb_offload_ctx *ctx, u64 formats)
+{
+	if (ctx->s24_3le_as_s24_le && (formats & SNDRV_PCM_FMTBIT_S24_3LE))
+		formats |= SNDRV_PCM_FMTBIT_S24_LE;
+
+	return formats;
+}
+
+static bool usb_offload_fmt_in_range(const struct audioformat *fp,
+				     struct snd_pcm_hw_params *params)
 {
 	struct snd_interval *c = hw_param_interval(params,
 						    SNDRV_PCM_HW_PARAM_CHANNELS);
 	struct snd_interval *r = hw_param_interval(params,
 						    SNDRV_PCM_HW_PARAM_RATE);
-	struct snd_mask fmts;
-
-	snd_mask_none(&fmts);
-	fmts.bits[0] = lower_32_bits(fp->formats);
-	fmts.bits[1] = upper_32_bits(fp->formats);
-	snd_mask_intersect(&fmts,
-			   hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT));
-	if (snd_mask_empty(&fmts))
-		return false;
 
 	if (fp->channels < c->min || fp->channels > c->max)
 		return false;
@@ -771,6 +770,24 @@ static bool usb_offload_fmt_usable(const struct audioformat *fp,
 		return false;
 
 	return true;
+}
+
+static bool usb_offload_fmt_usable(struct usb_offload_ctx *ctx,
+				   const struct audioformat *fp,
+				   struct snd_pcm_hw_params *params)
+{
+	struct snd_mask fmts;
+	u64 formats = usb_offload_add_s24_le(ctx, fp->formats);
+
+	snd_mask_none(&fmts);
+	fmts.bits[0] = lower_32_bits(formats);
+	fmts.bits[1] = upper_32_bits(formats);
+	snd_mask_intersect(&fmts,
+			   hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT));
+	if (snd_mask_empty(&fmts))
+		return false;
+
+	return usb_offload_fmt_in_range(fp, params);
 }
 
 static void usb_offload_fmt_rates(const struct audioformat *fp,
@@ -840,7 +857,21 @@ int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
 			continue;
 
 		list_for_each_entry(fp, &subs->fmt_list, list) {
-			if (!usb_offload_fmt_usable(fp, params))
+			/*
+			 * Resolving FORMAT is what decides whether a format
+			 * is usable in the first place - e.g. an alternate
+			 * setting whose only format is S24_3LE must still be
+			 * found here so that it can stand in for S24_LE
+			 * below, so this is checked on rate and channels
+			 * alone, unlike the other two parameters.
+			 */
+			if (var == SNDRV_PCM_HW_PARAM_FORMAT) {
+				if (usb_offload_fmt_in_range(fp, params))
+					formats |= fp->formats;
+				continue;
+			}
+
+			if (!usb_offload_fmt_usable(ctx, fp, params))
 				continue;
 
 			switch (var) {
@@ -851,14 +882,13 @@ int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
 				rmin = min(rmin, fp->channels);
 				rmax = max(rmax, fp->channels);
 				break;
-			case SNDRV_PCM_HW_PARAM_FORMAT:
-				formats |= fp->formats;
-				break;
 			}
 		}
 	}
 
 	if (var == SNDRV_PCM_HW_PARAM_FORMAT) {
+		formats = usb_offload_add_s24_le(ctx, formats);
+
 		snd_mask_none(&m);
 		m.bits[0] = lower_32_bits(formats);
 		m.bits[1] = upper_32_bits(formats);
@@ -876,6 +906,92 @@ int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
 	return snd_interval_refine(hw_param_interval(params, var), &t);
 }
 EXPORT_SYMBOL_NS_GPL(usb_offload_refine_hw_params, "USB_AUDIO_OFFLOAD");
+
+/**
+ * usb_offload_resolve_format - settle on the container the device actually has
+ * @ctx: offload context the caller owns
+ * @udev: USB device the stream would run on
+ * @direction: SNDRV_PCM_STREAM_PLAYBACK or SNDRV_PCM_STREAM_CAPTURE
+ * @pcm_index: USB SND PCM device index to check against, or negative to
+ *	      consider every PCM stream of the device
+ * @params: the parameters to resolve, as chosen by the S24_LE-only
+ *	    negotiation on the frontend
+ *
+ * A no-op unless the host set s24_3le_as_s24_le in its usb_offload_res, for a
+ * host whose pipeline only has a 24-bit representation as S24_LE (24 valid
+ * bits in a 4-byte container). Devices, however, commonly only pack 24-bit
+ * samples into 3 bytes (S24_3LE) - by the time a stream gets here the two
+ * have already been treated as interchangeable to let negotiation succeed
+ * at all, so it still has to be decided which container the device is
+ * actually going to be asked for. If no stream can serve S24_LE but one can
+ * serve S24_3LE for the same rate and channels, @params is rewritten to
+ * S24_3LE so that this reaches usb_offload_acquire_stream() in a container
+ * the device can accept.
+ *
+ * Formats other than S24_LE are left untouched.
+ *
+ * Return: 1 if @params was rewritten, 0 if it was left alone (including when
+ * s24_3le_as_s24_le is not set, or when nothing usable was found -
+ * usb_offload_acquire_stream() reports that), or
+ * a negative error code for invalid arguments.
+ */
+int usb_offload_resolve_format(struct usb_offload_ctx *ctx, struct usb_device *udev,
+			       int direction, int pcm_index,
+			       struct snd_pcm_hw_params *params)
+{
+	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+	struct snd_usb_substream *subs;
+	struct usb_offload_dev *dev;
+	const struct audioformat *fp;
+	struct snd_usb_stream *as;
+	bool have_3le = false;
+
+	if (!ctx || !udev || !params)
+		return -EINVAL;
+
+	if (direction < 0 || direction > SNDRV_PCM_STREAM_LAST)
+		return -EINVAL;
+
+	if (!ctx->s24_3le_as_s24_le || !snd_mask_test_format(fmt, SNDRV_PCM_FORMAT_S24_LE))
+		return 0;
+
+	guard(mutex)(&usb_offload_ua_lock);
+
+	if (usb_offload_ua_ctx != ctx)
+		return 0;
+
+	dev = usb_offload_ua_find_udev(udev);
+	if (!dev || !dev->connected)
+		return 0;
+
+	list_for_each_entry(as, &dev->chip->pcm_list, list) {
+		if (pcm_index >= 0 && (!as->pcm || as->pcm->device != pcm_index))
+			continue;
+
+		subs = &as->substream[direction];
+		if (!subs->ep_num)
+			continue;
+
+		list_for_each_entry(fp, &subs->fmt_list, list) {
+			if (!usb_offload_fmt_in_range(fp, params))
+				continue;
+
+			if (fp->formats & SNDRV_PCM_FMTBIT_S24_LE)
+				return 0;
+
+			if (fp->formats & SNDRV_PCM_FMTBIT_S24_3LE)
+				have_3le = true;
+		}
+	}
+
+	if (!have_3le)
+		return 0;
+
+	snd_mask_none(fmt);
+	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S24_3LE);
+	return 1;
+}
+EXPORT_SYMBOL_NS_GPL(usb_offload_resolve_format, "USB_AUDIO_OFFLOAD");
 
 /* Tear down one record. Caller holds usb_offload_ua_lock. */
 static void usb_offload_ua_teardown(struct usb_offload_dev *dev)

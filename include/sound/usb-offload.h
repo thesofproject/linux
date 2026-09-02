@@ -97,10 +97,18 @@ struct usb_offload_ops {
  * struct usb_offload_res - what the host hands the library at registration
  * @dev: the host's device, passed back to the @ops callbacks
  * @ops: host callback table
+ * @s24_3le_as_s24_le: treat a device that only offers S24_3LE as if it also
+ *		     offered S24_LE when refining a stream's format, and resolve
+ *		     the negotiated format back to S24_3LE for the device in
+ *		     usb_offload_resolve_format(). Set this when the host's own
+ *		     pipeline only has a 24-bit representation as S24_LE (24
+ *		     valid bits in a 4-byte container) and cannot take S24_3LE
+ *		     directly; leave false otherwise.
  */
 struct usb_offload_res {
 	struct device			*dev;
 	const struct usb_offload_ops	*ops;
+	bool				s24_3le_as_s24_le;
 };
 
 struct usb_offload_ctx *usb_offload_register(const struct usb_offload_res *res);
@@ -190,5 +198,9 @@ int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
 				 struct usb_device *udev, int direction,
 				 int pcm_index, int var,
 				 struct snd_pcm_hw_params *params);
+
+int usb_offload_resolve_format(struct usb_offload_ctx *ctx, struct usb_device *udev,
+			       int direction, int pcm_index,
+			       struct snd_pcm_hw_params *params);
 
 #endif /* __SOUND_USB_OFFLOAD_H */
