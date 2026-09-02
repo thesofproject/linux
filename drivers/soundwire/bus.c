@@ -314,13 +314,16 @@ int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg)
  * sdw_show_ping_status() - Direct report of PING status, to be used by Peripheral drivers
  * @bus: SDW bus
  * @sync_delay: Delay before reading status
+ *
+ * returns 0 if there is no peripherals attached, 1 if there are peripherals attached
+ * or a negative error code.
  */
-void sdw_show_ping_status(struct sdw_bus *bus, bool sync_delay)
+int sdw_show_ping_status(struct sdw_bus *bus, bool sync_delay)
 {
 	u32 status;
 
 	if (!bus->ops->read_ping_status)
-		return;
+		return -ENOTSUPP;
 
 	/*
 	 * wait for peripheral to sync if desired. 10-15ms should be more than
@@ -335,10 +338,13 @@ void sdw_show_ping_status(struct sdw_bus *bus, bool sync_delay)
 
 	mutex_unlock(&bus->msg_lock);
 
-	if (!status)
+	if (!status) {
 		dev_warn(bus->dev, "%s: no peripherals attached\n", __func__);
-	else
-		dev_dbg(bus->dev, "PING status: %#x\n", status);
+		return 0;
+	}
+
+	dev_dbg(bus->dev, "PING status: %#x\n", status);
+	return 1;
 }
 EXPORT_SYMBOL(sdw_show_ping_status);
 
