@@ -31,6 +31,8 @@
 
 #include <linux/types.h>
 
+#include <sound/asound.h>
+
 struct device;
 struct snd_pcm_hw_params;
 struct usb_device;
@@ -97,10 +99,18 @@ struct usb_offload_ops {
  * struct usb_offload_res - what the host hands the library at registration
  * @dev: the host's device, passed back to the @ops callbacks
  * @ops: host callback table
+ * @s24_3le_as_s24_le: treat a device that only offers S24_3LE as if it also
+ *		     offered S24_LE when refining a stream's format, and have
+ *		     usb_offload_acquire_stream() run the stream in S24_3LE for
+ *		     the device, see usb_offload_stream_hw.format. Set this when
+ *		     the host's own pipeline only has a 24-bit representation
+ *		     as S24_LE (24 valid bits in a 4-byte container) and cannot
+ *		     take S24_3LE directly; leave false otherwise.
  */
 struct usb_offload_res {
 	struct device			*dev;
 	const struct usb_offload_ops	*ops;
+	bool				s24_3le_as_s24_le;
 };
 
 struct usb_offload_ctx *usb_offload_register(const struct usb_offload_res *res);
@@ -129,6 +139,9 @@ struct usb_offload_ep_info {
  *	       passed back to usb_offload_release_stream()
  * @bus_devid: PCI bus, device and function of the xHCI controller, as
  *	       PCI_DEVID() lays them out
+ * @format: the sample format the device runs the stream in. It is the format of
+ *	    the params handed to usb_offload_acquire_stream(), except for the
+ *	    container of a 24-bit stream, see @s24_3le_as_s24_le
  * @slot_id: xHCI slot ID of the USB device
  * @high_speed: the root port the device hangs off runs at high speed
  * @split: the endpoint is reached through a USB 2.0 transaction translator
@@ -145,6 +158,7 @@ struct usb_offload_ep_info {
  */
 struct usb_offload_stream_hw {
 	int				pcm_index;
+	snd_pcm_format_t		format;
 	u16				bus_devid;
 	u8				slot_id;
 	bool				high_speed;

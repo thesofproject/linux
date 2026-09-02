@@ -351,12 +351,65 @@ static int usb_offload_ua_claim_ep(struct usb_offload_dev *dev,
 	return ret;
 }
 
+/*
+ * A host which has only S24_LE for 24-bit audio (usb_offload_res.s24_3le_as_s24_le)
+ * asks for it also of a device which packs 24-bit samples into 3 bytes and
+ * will not recognise S24_LE. Rewrite @params to that container, the DSP
+ * packs the samples on their way to the link. Returns false when the host
+ * did not ask for S24_LE or has no use for the rewrite.
+ */
+static bool usb_offload_s24_container(const struct usb_offload_ctx *ctx,
+				      struct snd_pcm_hw_params *params)
+{
+	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+
+	if (!ctx->s24_3le_as_s24_le || !snd_mask_test_format(fmt, SNDRV_PCM_FORMAT_S24_LE))
+		return false;
+
+	snd_mask_none(fmt);
+	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S24_3LE);
+
+	return true;
+}
+
+/*
+ * The substream of @dev which can run @params. Caller holds
+ * usb_offload_ua_lock.
+ *
+ * snd_usb_find_suppported_substream() would do this, but it takes the
+ * usb-audio register_mutex to turn a card index into the chip. The chip is
+ * already known here, and the caller is a backend DAI holding the ASoC
+ * card's pcm_mutex, which that mutex nests inside.
+ */
+static struct snd_usb_substream *
+usb_offload_find_subs(struct usb_offload_dev *dev, int direction, int pcm_index,
+		      struct snd_pcm_hw_params *params, int *pcm_device)
+{
+	struct snd_usb_stream *as;
+
+	list_for_each_entry(as, &dev->chip->pcm_list, list) {
+		if (!as->pcm || (pcm_index >= 0 && as->pcm->device != pcm_index))
+			continue;
+		if (!as->substream[direction].num_formats)
+			continue;
+
+		if (!snd_usb_find_substream_format(&as->substream[direction], params))
+			continue;
+
+		*pcm_device = as->pcm->device;
+
+		return &as->substream[direction];
+	}
+
+	return NULL;
+}
+
 int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 			       struct usb_device *udev, int direction, int pcm_index,
 			       struct snd_pcm_hw_params *params,
 			       struct usb_offload_stream_hw *hw)
 {
-	const struct audioformat *format;
+	struct snd_pcm_hw_params dev_params;
 	struct usb_host_endpoint *host_ep;
 	struct usb_host_endpoint *fb_host_ep = NULL;
 	struct usb_offload_ua_stream *stream;
@@ -364,7 +417,7 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	struct usb_offload_dev *dev;
 	struct xhci_sideband_ep_properties ep_prop;
 	struct xhci_sideband_ep_properties fb_ep_prop;
-	struct snd_usb_stream *as;
+	int pcm_device;
 	int fb_res_id = 0;
 	u8 interval;
 	int res_id;
@@ -385,26 +438,12 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	if (!dev || !dev->connected)
 		return -ENODEV;
 
-	/*
-	 * snd_usb_find_suppported_substream() would do this, but it takes the
-	 * usb-audio register_mutex to turn a card index into the chip. The
-	 * chip is already known here, and the caller is a backend DAI holding
-	 * the ASoC card's pcm_mutex, which that mutex nests inside.
-	 */
-	subs = NULL;
-	list_for_each_entry(as, &dev->chip->pcm_list, list) {
-		if (!as->pcm || (pcm_index >= 0 && as->pcm->device != pcm_index))
-			continue;
-		if (!as->substream[direction].num_formats)
-			continue;
-
-		format = snd_usb_find_substream_format(&as->substream[direction],
-						       params);
-		if (!format)
-			continue;
-		subs = &as->substream[direction];
-		break;
-	}
+	/* the container the device has, not necessarily the one the host asked for */
+	dev_params = *params;
+	subs = usb_offload_find_subs(dev, direction, pcm_index, &dev_params, &pcm_device);
+	if (!subs && usb_offload_s24_container(ctx, &dev_params))
+		subs = usb_offload_find_subs(dev, direction, pcm_index, &dev_params,
+					     &pcm_device);
 	if (!subs) {
 		dev_dbg(&udev->dev, "USB offload: no %s format for %s %uch %uHz\n",
 			direction == SNDRV_PCM_STREAM_PLAYBACK ? "playback" : "capture",
@@ -414,7 +453,7 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	}
 
 	/* a PCM is offloaded once; another PCM of the device may well be running */
-	if (usb_offload_ua_find_stream(dev, direction, as->pcm->device))
+	if (usb_offload_ua_find_stream(dev, direction, pcm_device))
 		return -EBUSY;
 
 	stream = kzalloc_obj(*stream);
@@ -422,9 +461,9 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 		return -ENOMEM;
 	stream->subs = subs;
 	stream->direction = direction;
-	stream->pcm_index = as->pcm->device;
+	stream->pcm_index = pcm_device;
 
-	ret = usb_offload_ua_start_stream(dev, subs, params);
+	ret = usb_offload_ua_start_stream(dev, subs, &dev_params);
 	if (ret)
 		goto err_free;
 
@@ -461,6 +500,7 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 
 	memset(hw, 0, sizeof(*hw));
 	hw->pcm_index = stream->pcm_index;
+	hw->format = params_format(&dev_params);
 	hw->slot_id = ep_prop.slot_id;
 	hw->bus_devid = PCI_DEVID(ep_prop.bus,
 				  PCI_DEVFN(ep_prop.device, ep_prop.function));
@@ -548,22 +588,22 @@ int usb_offload_release_stream(struct usb_offload_ctx *ctx,
 }
 EXPORT_SYMBOL_NS_GPL(usb_offload_release_stream, "USB_AUDIO_OFFLOAD");
 
-static bool usb_offload_fmt_usable(const struct audioformat *fp,
-				   struct snd_pcm_hw_params *params)
+static u64 usb_offload_add_s24_le(struct usb_offload_ctx *ctx, u64 formats)
+{
+	if (ctx->s24_3le_as_s24_le && (formats & SNDRV_PCM_FMTBIT_S24_3LE))
+		formats |= SNDRV_PCM_FMTBIT_S24_LE;
+
+	return formats;
+}
+
+static bool usb_offload_fmt_in_range(const struct audioformat *fp,
+				     struct snd_pcm_hw_params *params)
 {
 	struct snd_interval *c = hw_param_interval(params,
 						    SNDRV_PCM_HW_PARAM_CHANNELS);
 	struct snd_interval *r = hw_param_interval(params,
 						    SNDRV_PCM_HW_PARAM_RATE);
-	struct snd_mask fmts;
-
-	snd_mask_none(&fmts);
-	fmts.bits[0] = lower_32_bits(fp->formats);
-	fmts.bits[1] = upper_32_bits(fp->formats);
-	snd_mask_intersect(&fmts,
-			   hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT));
-	if (snd_mask_empty(&fmts))
-		return false;
+	unsigned int i;
 
 	if (fp->channels < c->min || fp->channels > c->max)
 		return false;
@@ -575,7 +615,38 @@ static bool usb_offload_fmt_usable(const struct audioformat *fp,
 	    (fp->rate_max == r->min && r->openmin))
 		return false;
 
-	return true;
+	/*
+	 * A format with a rate table can have none of its rates in the
+	 * interval even though the interval is within its bounds. FORMAT is
+	 * chosen before RATE, so offering it would leave no rate to choose.
+	 */
+	if ((fp->rates & SNDRV_PCM_RATE_CONTINUOUS) || !fp->rate_table || !fp->nr_rates)
+		return true;
+
+	for (i = 0; i < fp->nr_rates; i++) {
+		if (snd_interval_test(r, fp->rate_table[i]))
+			return true;
+	}
+
+	return false;
+}
+
+static bool usb_offload_fmt_usable(struct usb_offload_ctx *ctx,
+				   const struct audioformat *fp,
+				   struct snd_pcm_hw_params *params)
+{
+	struct snd_mask fmts;
+	u64 formats = usb_offload_add_s24_le(ctx, fp->formats);
+
+	snd_mask_none(&fmts);
+	fmts.bits[0] = lower_32_bits(formats);
+	fmts.bits[1] = upper_32_bits(formats);
+	snd_mask_intersect(&fmts,
+			   hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT));
+	if (snd_mask_empty(&fmts))
+		return false;
+
+	return usb_offload_fmt_in_range(fp, params);
 }
 
 static void usb_offload_fmt_rates(const struct audioformat *fp,
@@ -645,7 +716,21 @@ int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
 			continue;
 
 		list_for_each_entry(fp, &subs->fmt_list, list) {
-			if (!usb_offload_fmt_usable(fp, params))
+			/*
+			 * Resolving FORMAT is what decides whether a format
+			 * is usable in the first place - e.g. an alternate
+			 * setting whose only format is S24_3LE must still be
+			 * found here so that it can stand in for S24_LE
+			 * below, so this is checked on rate and channels
+			 * alone, unlike the other two parameters.
+			 */
+			if (var == SNDRV_PCM_HW_PARAM_FORMAT) {
+				if (usb_offload_fmt_in_range(fp, params))
+					formats |= fp->formats;
+				continue;
+			}
+
+			if (!usb_offload_fmt_usable(ctx, fp, params))
 				continue;
 
 			switch (var) {
@@ -656,14 +741,13 @@ int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
 				rmin = min(rmin, fp->channels);
 				rmax = max(rmax, fp->channels);
 				break;
-			case SNDRV_PCM_HW_PARAM_FORMAT:
-				formats |= fp->formats;
-				break;
 			}
 		}
 	}
 
 	if (var == SNDRV_PCM_HW_PARAM_FORMAT) {
+		formats = usb_offload_add_s24_le(ctx, formats);
+
 		snd_mask_none(&m);
 		m.bits[0] = lower_32_bits(formats);
 		m.bits[1] = upper_32_bits(formats);
