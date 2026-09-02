@@ -712,10 +712,10 @@ static const struct hda_rate_tbl rate_bits[] = {
 	{ 176400, SNDRV_PCM_RATE_176400, HDA_RATE(44, 4, 1) },
 	{ 192000, SNDRV_PCM_RATE_192000, HDA_RATE(48, 4, 1) },
 #define AC_PAR_PCM_RATE_BITS	11
-	/* up to bits 10, 384kHZ isn't supported properly */
+	/* up to bits 10, the rest below are not autodetected values */
 
-	/* not autodetected value */
 	{ 9600, SNDRV_PCM_RATE_KNOT, HDA_RATE(48, 1, 5) },
+	{ 384000, SNDRV_PCM_RATE_384000, HDA_RATE(48, 8, 1) },
 
 	{ 0 } /* terminator */
 };
