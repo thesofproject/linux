@@ -71,6 +71,8 @@ u32 hda_dsp_get_mult_div(struct snd_sof_dev *sdev, int rate)
 		return SDnFMT_BASE(1) | SDnFMT_MULT(4);
 	case 192000:
 		return SDnFMT_MULT(4);
+	case 384000:
+		return SDnFMT_MULT(8);
 	default:
 		dev_warn(sdev->dev, "can't find div rate %d using 48kHz\n",
 			 rate);
