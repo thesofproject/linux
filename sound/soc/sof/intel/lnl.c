@@ -73,23 +73,6 @@ static int lnl_hda_dsp_runtime_resume(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static int lnl_dsp_post_fw_run(struct snd_sof_dev *sdev)
-{
-	if (sdev->first_boot) {
-		struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
-
-		/* Check if IMR boot is usable */
-		if (!sof_debug_check_flag(SOF_DBG_IGNORE_D3_PERSISTENT)) {
-			hda->imrboot_supported = true;
-			debugfs_create_bool("skip_imr_boot",
-					    0644, sdev->debugfs_root,
-					    &hda->skip_imr_boot);
-		}
-	}
-
-	return 0;
-}
-
 int sof_lnl_set_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *dsp_ops)
 {
 	int ret;
@@ -103,9 +86,6 @@ int sof_lnl_set_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *dsp_ops)
 		dsp_ops->probe = lnl_hda_dsp_probe;
 		dsp_ops->remove = lnl_hda_dsp_remove;
 	}
-
-	/* post fw run */
-	dsp_ops->post_fw_run = lnl_dsp_post_fw_run;
 
 	/* PM */
 	if (!sdev->dspless_mode_selected) {

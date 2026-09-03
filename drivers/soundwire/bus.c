@@ -12,6 +12,9 @@
 #include "irq.h"
 #include "sysfs_local.h"
 
+#define DEFAULT_BRA_WRITE_THRESHOLD	800
+#define DEFAULT_BRA_READ_THRESHOLD	400
+
 static DEFINE_IDA(sdw_bus_ida);
 
 static int sdw_get_id(struct sdw_bus *bus)
@@ -85,6 +88,8 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 
 	lockdep_register_key(&bus->bus_lock_key);
 	__mutex_init(&bus->bus_lock, "bus_lock", &bus->bus_lock_key);
+
+	mutex_init(&bus->bpt_lock);
 
 	INIT_LIST_HEAD(&bus->slaves);
 	INIT_LIST_HEAD(&bus->m_rt_list);
@@ -161,6 +166,11 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 	bus->params.curr_dr_freq = bus->params.max_dr_freq;
 	bus->params.curr_bank = SDW_BANK0;
 	bus->params.next_bank = SDW_BANK1;
+
+	if (!bus->bpt_w_threshold)
+		bus->bpt_w_threshold = DEFAULT_BRA_WRITE_THRESHOLD;
+	if (!bus->bpt_r_threshold)
+		bus->bpt_r_threshold = DEFAULT_BRA_READ_THRESHOLD;
 
 	return 0;
 }
@@ -438,6 +448,46 @@ static int sdw_ntransfer_no_pm(struct sdw_slave *slave, u32 addr, u8 flags,
 	return 0;
 }
 
+static int sdw_ntransfer_no_pm_bpt(struct sdw_slave *slave, u32 addr, u8 flags,
+				   size_t count, u8 *val)
+{
+	struct sdw_bpt_section sec;
+	struct sdw_bpt_msg msg;
+	size_t size;
+	int retry = 5;
+	int ret;
+
+	msg.sections = 1;
+	msg.dev_num = slave->dev_num;
+	msg.flags = flags;
+	msg.sec = &sec;
+
+	while (count) {
+		size = min_t(size_t, count, SDW_BPT_MSG_MAX_BYTES);
+
+		sec.addr = addr;
+		sec.len = size;
+		sec.buf = val;
+
+		do {
+			ret = sdw_bpt_send_sync(slave->bus, slave, &msg);
+			if (ret == -EAGAIN)
+				msleep(10);
+			retry--;
+		} while (ret == -EAGAIN && retry > 0);
+
+		if (ret < 0)
+			return ret;
+
+		addr += size;
+		val += size;
+		count -= size;
+		retry = 5;
+	}
+
+	return 0;
+}
+
 /**
  * sdw_nread_no_pm() - Read "n" contiguous SDW Slave registers with no PM
  * @slave: SDW Slave
@@ -446,10 +496,26 @@ static int sdw_ntransfer_no_pm(struct sdw_slave *slave, u32 addr, u8 flags,
  * @val: Buffer for values to be read
  *
  * Note that if the message crosses a page boundary each page will be
- * transferred under a separate invocation of the msg_lock.
+ * transferred under a separate invocation of the msg_lock if it is not
+ * transferred via BPT.
  */
 int sdw_nread_no_pm(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
 {
+	struct sdw_bus *bus = slave->bus;
+	int ret;
+
+	if (!bus->ops->bpt_send_async || !bus->ops->bpt_wait ||
+	    count < bus->bpt_r_threshold)
+		goto fallback;
+
+	ret = sdw_ntransfer_no_pm_bpt(slave, addr, SDW_MSG_FLAG_READ, count, val);
+	if (!ret)
+		return 0;
+
+	dev_dbg(&slave->dev,
+		"BPT read failed for addr %x, count %zu, ret %d fallback to normal read\n",
+		addr, count, ret);
+fallback:
 	return sdw_ntransfer_no_pm(slave, addr, SDW_MSG_FLAG_READ, count, val);
 }
 EXPORT_SYMBOL(sdw_nread_no_pm);
@@ -462,10 +528,26 @@ EXPORT_SYMBOL(sdw_nread_no_pm);
  * @val: Buffer for values to be written
  *
  * Note that if the message crosses a page boundary each page will be
- * transferred under a separate invocation of the msg_lock.
+ * transferred under a separate invocation of the msg_lock if it is not
+ * transferred via BPT.
  */
 int sdw_nwrite_no_pm(struct sdw_slave *slave, u32 addr, size_t count, const u8 *val)
 {
+	struct sdw_bus *bus = slave->bus;
+	int ret;
+
+	if (!bus->ops->bpt_send_async || !bus->ops->bpt_wait ||
+	    count < bus->bpt_w_threshold)
+		goto fallback;
+
+	ret = sdw_ntransfer_no_pm_bpt(slave, addr, SDW_MSG_FLAG_WRITE, count, (u8 *)val);
+	if (!ret)
+		return 0;
+
+	dev_dbg(&slave->dev,
+		"BPT write failed for addr %x, count %zu, ret %d fallback to normal write\n",
+		addr, count, ret);
+fallback:
 	return sdw_ntransfer_no_pm(slave, addr, SDW_MSG_FLAG_WRITE, count, (u8 *)val);
 }
 EXPORT_SYMBOL(sdw_nwrite_no_pm);
@@ -603,7 +685,8 @@ EXPORT_SYMBOL(sdw_update);
  * This version of the function will take a PM reference to the slave
  * device.
  * Note that if the message crosses a page boundary each page will be
- * transferred under a separate invocation of the msg_lock.
+ * transferred under a separate invocation of the msg_lock if it is not
+ * transferred via BPT.
  */
 int sdw_nread(struct sdw_slave *slave, u32 addr, size_t count, u8 *val)
 {
@@ -634,7 +717,8 @@ EXPORT_SYMBOL(sdw_nread);
  * This version of the function will take a PM reference to the slave
  * device.
  * Note that if the message crosses a page boundary each page will be
- * transferred under a separate invocation of the msg_lock.
+ * transferred under a separate invocation of the msg_lock if it is not
+ * transferred via BPT.
  */
 int sdw_nwrite(struct sdw_slave *slave, u32 addr, size_t count, const u8 *val)
 {
@@ -2074,6 +2158,7 @@ EXPORT_SYMBOL(sdw_clear_slave_status);
 int sdw_bpt_send_async(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_bpt_msg *msg)
 {
 	int len = 0;
+	int ret;
 	int i;
 
 	for (i = 0; i < msg->sections; i++)
@@ -2098,13 +2183,26 @@ int sdw_bpt_send_async(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_
 		return -EOPNOTSUPP;
 	}
 
-	return bus->ops->bpt_send_async(bus, slave, msg);
+	/* Serialize BPT/BRA transfers per bus: PDIs and DMA resources are shared */
+	mutex_lock(&bus->bpt_lock);
+
+	ret = bus->ops->bpt_send_async(bus, slave, msg);
+	if (ret < 0)
+		mutex_unlock(&bus->bpt_lock);
+
+	/* on success the lock is held until sdw_bpt_wait() */
+	return ret;
 }
 EXPORT_SYMBOL(sdw_bpt_send_async);
 
 int sdw_bpt_wait(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_bpt_msg *msg)
 {
-	return bus->ops->bpt_wait(bus, slave, msg);
+	int ret;
+
+	ret = bus->ops->bpt_wait(bus, slave, msg);
+	mutex_unlock(&bus->bpt_lock);
+
+	return ret;
 }
 EXPORT_SYMBOL(sdw_bpt_wait);
 
