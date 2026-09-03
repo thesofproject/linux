@@ -271,16 +271,35 @@ config SND_SOC_SOF_DEBUG_FW_GDB
 	  socket, to which GDB can then connect.
 	  If unsure, select "N".
 
-config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
-	bool "SOF retain DSP context on any FW exceptions"
+config SND_SOC_SOF_SERIAL
+	tristate "SOF serial port client driver"
+	depends on SND_SOC_SOF
+	select SND_SOC_SOF_CLIENT
 	help
-	  This option keeps the DSP in D0 state so that firmware debug
-	  information can be retained and dumped to userspace.
-	  Say Y if you want to retain DSP context for FW exceptions.
-	  If unsure, select "N".
+	  This enables a virtual serial port (tty) client for the SOF DSP.
+	  The driver registers a ttysof0 device that exchanges shell data
+	  with IPC4 firmware through the ADSP shell debug window using the
+	  Zephyr sys_winstream format. A debugfs file is also created to
+	  expose the shared DSP memory window for inspection and testing.
+	  Only IPC4 is supported.  If unsure, select "N".
 
-endif ## SND_SOC_SOF_DEBUG
+config SND_SOC_SOF_CLIENT_LLEXT_LOAD
+        tristate "SOF shell llext_load client"
+        depends on SND_SOC_SOF
+        select SND_SOC_SOF_CLIENT
+        help
+          Enables the SOF shell llext_load client driver which creates
+          /sys/kernel/debug/sof/llext_load.  Writing a compiled rimage
+          library binary to this file completes the host side of the
+          2-step DSP-shell-driven module load handshake:
 
+            Step 1 (DSP shell):  sof llext_load <name> [lib_id]
+            Step 2 (Linux host): cat module.ri > /sys/kernel/debug/sof/llext_load
+
+          The driver uses the IPC4 LOAD_LIBRARY_PREPARE + LOAD_LIBRARY path
+          (HDA code-loader DMA) matching the normal library-load flow.
+          Requires CONFIG_SOF_SHELL_LLEXT_LOAD=y in the DSP firmware build.
+          If unsure, select "N".
 endif ## SND_SOC_SOF_DEVELOPER_SUPPORT
 
 config SND_SOC_SOF
