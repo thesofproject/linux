@@ -86,11 +86,7 @@ MODULE_PARM_DESC(cdns_mcp_int_mask, "Cadence MCP IntMask");
 #define CDNS_MCP_INT_IRQ			BIT(31)
 #define CDNS_MCP_INT_RESERVED1			GENMASK(30, 17)
 #define CDNS_MCP_INT_WAKEUP			BIT(16)
-#define CDNS_MCP_INT_SLAVE_RSVD			BIT(15)
-#define CDNS_MCP_INT_SLAVE_ALERT		BIT(14)
-#define CDNS_MCP_INT_SLAVE_ATTACH		BIT(13)
-#define CDNS_MCP_INT_SLAVE_NATTACH		BIT(12)
-#define CDNS_MCP_INT_SLAVE_MASK			GENMASK(15, 12)
+/* CDNS_MCP_INT_SLAVE_xxx defines are moved to cadence_master.h */
 #define CDNS_MCP_INT_DPINT			BIT(11)
 #define CDNS_MCP_INT_CTRL_CLASH			BIT(10)
 #define CDNS_MCP_INT_DATA_CLASH			BIT(9)
@@ -1112,7 +1108,7 @@ update_status:
 
 	/* unmask Slave interrupt now */
 	cdns_updatel(cdns, CDNS_MCP_INTMASK,
-		     CDNS_MCP_INT_SLAVE_MASK, CDNS_MCP_INT_SLAVE_MASK);
+		     CDNS_MCP_INT_SLAVE_MASK, cdns->peripheral_int_mask);
 
 }
 
@@ -1198,7 +1194,7 @@ static void cdns_enable_slave_interrupts(struct sdw_cdns *cdns, bool state)
 
 	mask = cdns_readl(cdns, CDNS_MCP_INTMASK);
 	if (state)
-		mask |= CDNS_MCP_INT_SLAVE_MASK;
+		mask |= cdns->peripheral_int_mask;
 	else
 		mask &= ~CDNS_MCP_INT_SLAVE_MASK;
 
@@ -1223,7 +1219,7 @@ int sdw_cdns_enable_interrupt(struct sdw_cdns *cdns, bool state)
 	slave_intmask1 = CDNS_MCP_SLAVE_INTMASK1_MASK;
 
 	/* enable detection of all slave state changes */
-	mask = CDNS_MCP_INT_SLAVE_MASK;
+	mask = cdns->peripheral_int_mask;
 
 	/* enable detection of bus issues */
 	mask |= CDNS_MCP_INT_CTRL_CLASH | CDNS_MCP_INT_DATA_CLASH |
@@ -1836,6 +1832,7 @@ int sdw_cdns_probe(struct sdw_cdns *cdns)
 {
 	init_completion(&cdns->tx_complete);
 	cdns->bus.port_ops = &cdns_port_ops;
+	cdns->peripheral_int_mask = CDNS_MCP_INT_SLAVE_MASK;
 
 	mutex_init(&cdns->status_update_lock);
 
