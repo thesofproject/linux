@@ -146,6 +146,8 @@ struct tac5xx2_prv {
 	struct device *dev;
 	bool hw_init;
 	bool first_hw_init_done;
+	bool support_spk;
+	bool support_dmic;
 	u32 part_id;
 	u32 rev_id;
 	struct snd_soc_jack *hs_jack;
@@ -1168,6 +1170,28 @@ clear:
 	return 0;
 }
 
+static struct snd_soc_dai_driver tac5272_dai_driver[] = {
+	{
+		.name = "tac5xx2-aif3",
+		.id = TAC5XX2_UAJ,
+		.playback = {
+			.stream_name = "DP4 UAJ Speaker Playback",
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = TAC5XX2_DEVICE_RATES,
+			.formats = TAC5XX2_DEVICE_FORMATS,
+		},
+		.capture = {
+			.stream_name = "DP7 UAJ Mic Capture",
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = TAC5XX2_DEVICE_RATES,
+			.formats = TAC5XX2_DEVICE_FORMATS,
+		},
+		.ops = &tac_dai_ops,
+	},
+};
+
 static struct snd_soc_dai_driver tac5572_dai_driver[] = {
 	{
 		.name = "tac5xx2-aif1",
@@ -1409,8 +1433,16 @@ static const struct snd_soc_component_driver soc_codec_driver_tacdevice = {
 	.endianness = 1,
 };
 
+static const struct snd_soc_component_driver soc_codec_driver_tac5272 = {
+	.probe = tac_component_probe,
+	.remove = tac_component_remove,
+	.idle_bias_on = 0,
+	.endianness = 1,
+};
+
 static s32 tac_init(struct tac5xx2_prv *tac_dev)
 {
+	const struct snd_soc_component_driver *template;
 	struct snd_soc_component_driver *component_driver;
 	struct snd_soc_dai_driver *dai_drv;
 	int num_dais;
@@ -1419,21 +1451,30 @@ static s32 tac_init(struct tac5xx2_prv *tac_dev)
 	dev_set_drvdata(tac_dev->dev, tac_dev);
 
 	switch (tac_dev->part_id) {
+	case 0x5272:
+		dai_drv = tac5272_dai_driver;
+		num_dais = ARRAY_SIZE(tac5272_dai_driver);
+		template = &soc_codec_driver_tac5272;
+		break;
 	case 0x5572:
 		dai_drv = tac5572_dai_driver;
 		num_dais = ARRAY_SIZE(tac5572_dai_driver);
+		template = &soc_codec_driver_tacdevice;
 		break;
 	case 0x5672:
 		dai_drv = tac5672_dai_driver;
 		num_dais = ARRAY_SIZE(tac5672_dai_driver);
+		template = &soc_codec_driver_tacdevice;
 		break;
 	case 0x5682:
 		dai_drv = tac5682_dai_driver;
 		num_dais = ARRAY_SIZE(tac5682_dai_driver);
+		template = &soc_codec_driver_tacdevice;
 		break;
 	case 0x2883:
 		dai_drv = tas2883_dai_driver;
 		num_dais = ARRAY_SIZE(tas2883_dai_driver);
+		template = &soc_codec_driver_tacdevice;
 		break;
 	default:
 		dev_err(tac_dev->dev, "Unsupported device: 0x%x\n",
@@ -1446,7 +1487,7 @@ static s32 tac_init(struct tac5xx2_prv *tac_dev)
 	if (!component_driver)
 		return -ENOMEM;
 
-	memcpy(component_driver, &soc_codec_driver_tacdevice, sizeof(*component_driver));
+	memcpy(component_driver, template, sizeof(*component_driver));
 	if (tac_has_uaj_support(tac_dev))
 		component_driver->set_jack = tac5xx2_set_jack;
 
@@ -1756,7 +1797,7 @@ static int tac_io_init(struct device *dev, struct sdw_slave *slave, bool first)
 		}
 	}
 
-	if (tac_dev->sa_func_data) {
+	if (tac_dev->sa_func_data && tac_dev->support_spk) {
 		ret = sdca_regmap_write_init(dev, tac_dev->regmap,
 					     tac_dev->sa_func_data);
 		if (ret) {
@@ -1775,7 +1816,7 @@ static int tac_io_init(struct device *dev, struct sdw_slave *slave, bool first)
 		}
 	}
 
-	if (tac_dev->sm_func_data) {
+	if (tac_dev->sm_func_data && tac_dev->support_dmic) {
 		ret = sdca_regmap_write_init(dev, tac_dev->regmap,
 					     tac_dev->sm_func_data);
 		if (ret) {
@@ -1995,6 +2036,8 @@ static s32 tac_sdw_probe(struct sdw_slave *peripheral,
 	tac_dev->first_hw_init_done = false;
 	tac_dev->part_id = id->part_id;
 	tac_dev->rev_id = 0x0;
+	tac_dev->support_spk = (id->part_id != 0x5272);
+	tac_dev->support_dmic = (id->part_id != 0x5272);
 	dev_set_drvdata(dev, tac_dev);
 
 	regmap = devm_regmap_init_sdw_mbq_cfg(&peripheral->dev, peripheral,
@@ -2045,6 +2088,7 @@ static void tac_sdw_remove(struct sdw_slave *peripheral)
 }
 
 static const struct sdw_device_id tac_sdw_id[] = {
+	SDW_SLAVE_ENTRY(0x0102, 0x5272, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5572, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5672, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5682, 0),
