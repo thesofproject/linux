@@ -70,6 +70,23 @@ static const struct snd_soc_acpi_endpoint jack_amp_g1_dmic_endpoints[] = {
 	},
 };
 
+static const struct snd_soc_acpi_endpoint jack_amp_endpoints[] = {
+	/* Jack Endpoint */
+	{
+		.num = 0,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+	/* Stand alone Amp Endpoint */
+	{
+		.num = 1,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+};
+
 static const struct snd_soc_acpi_adr_device cs35l56_2_lr_adr[] = {
 	{
 		.adr = 0x00023001FA355601ull,
@@ -283,6 +300,15 @@ static const struct snd_soc_acpi_adr_device rt712_0_agg_adr[] = {
 	}
 };
 
+static const struct snd_soc_acpi_adr_device rt712_0_adr[] = {
+	{
+		.adr = 0x000030025D071201ull,
+		.num_endpoints = ARRAY_SIZE(jack_amp_endpoints),
+		.endpoints = jack_amp_endpoints,
+		.name_prefix = "rt712"
+	}
+};
+
 static const struct snd_soc_acpi_adr_device rt1316_3_single_adr[] = {
 	{
 		.adr = 0x000330025D131601ull,
@@ -482,6 +508,15 @@ static const struct snd_soc_acpi_link_adr arl_rt712_l0_rt1320_l3[] = {
 	{}
 };
 
+static const struct snd_soc_acpi_link_adr arl_rt712_l0[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(rt712_0_adr),
+		.adr_d = rt712_0_adr,
+	},
+	{}
+};
+
 static const struct snd_soc_acpi_codecs arl_essx_83x6 = {
 	.num_codecs = 3,
 	.codecs = { "ESSX8316", "ESSX8326", "ESSX8336"},
@@ -587,6 +622,14 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_arl_sdw_machines[] = {
 		.links = arl_cs42l43_l2_cs35l56_l3,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-arl-cs42l43-l2-cs35l56-l3.tplg",
+		.get_function_tplg_files = sof_sdw_get_tplg_files,
+	},
+	{
+		.link_mask = BIT(0),
+		.links = arl_rt712_l0,
+		.drv_name = "sof_sdw",
+		.machine_check = snd_soc_acpi_intel_sdca_is_device_rt712_vb,
+		.sof_tplg_filename = "sof-arl-dummy.tplg",
 		.get_function_tplg_files = sof_sdw_get_tplg_files,
 	},
 	{
