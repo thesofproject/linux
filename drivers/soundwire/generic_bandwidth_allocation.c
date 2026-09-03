@@ -96,9 +96,9 @@ static void sdw_compute_dp0_slave_ports(struct sdw_master_runtime *m_rt)
 		list_for_each_entry(p_rt, &s_rt->port_list, port_node) {
 			sdw_fill_xport_params(&p_rt->transport_params, p_rt->num, false,
 					      SDW_BLK_GRP_CNT_1, bus->params.col, 0, 0, 1,
-					      bus->params.col - 1, SDW_BLK_PKG_PER_PORT, 0x0);
+					      bus->params.bpt_hstop, SDW_BLK_PKG_PER_PORT, 0x0);
 
-			sdw_fill_port_params(&p_rt->port_params, p_rt->num, bus->params.col - 1,
+			sdw_fill_port_params(&p_rt->port_params, p_rt->num, bus->params.bpt_hstop,
 					     SDW_PORT_FLOW_MODE_ISOCH, SDW_PORT_DATA_MODE_NORMAL);
 		}
 	}
@@ -112,9 +112,9 @@ static void sdw_compute_dp0_master_ports(struct sdw_master_runtime *m_rt)
 	list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
 		sdw_fill_xport_params(&p_rt->transport_params, p_rt->num, false,
 				      SDW_BLK_GRP_CNT_1, bus->params.col, 0, 0, 1,
-				      bus->params.col - 1, SDW_BLK_PKG_PER_PORT, 0x0);
+				      bus->params.bpt_hstop, SDW_BLK_PKG_PER_PORT, 0x0);
 
-		sdw_fill_port_params(&p_rt->port_params, p_rt->num, bus->params.col - 1,
+		sdw_fill_port_params(&p_rt->port_params, p_rt->num, bus->params.bpt_hstop,
 				     SDW_PORT_FLOW_MODE_ISOCH, SDW_PORT_DATA_MODE_NORMAL);
 	}
 }
@@ -189,8 +189,8 @@ static void sdw_compute_master_ports(struct sdw_master_runtime *m_rt,
 	sdw_compute_slave_ports(m_rt, &t_data);
 }
 
-static void _sdw_compute_port_params(struct sdw_bus *bus,
-				     struct sdw_group_params *params, int count)
+static void _sdw_compute_port_params(struct sdw_bus *bus, struct sdw_group_params *params,
+				     int count, bool update_bpt_hstop)
 {
 	struct sdw_master_runtime *m_rt;
 	int port_bo, i, l;
@@ -198,7 +198,7 @@ static void _sdw_compute_port_params(struct sdw_bus *bus,
 
 	/* Run loop for all groups to compute transport parameters */
 	for (l = 0; l < SDW_MAX_LANES; l++) {
-		if (l > 0 && !bus->lane_used_bandwidth[l])
+		if (l > 0 && !bus->params.lane_used_bandwidth[l])
 			continue;
 		/* reset hstop for each lane */
 		hstop = bus->params.col - 1;
@@ -215,10 +215,24 @@ static void _sdw_compute_port_params(struct sdw_bus *bus,
 				if (m_rt->stream->state > SDW_STREAM_DISABLED ||
 				    m_rt->stream->state < SDW_STREAM_CONFIGURED)
 					continue;
+				/* BPT stream is handled in sdw_compute_dp0_port_params */
+				if (m_rt->stream->type == SDW_STREAM_BPT)
+					continue;
 				sdw_compute_master_ports(m_rt, &params[i], &port_bo, hstop);
 			}
 
 			hstop = hstop - params[i].hwidth;
+			if (l == 0 && update_bpt_hstop && bus->params.bpt_hstop > hstop) {
+				/* Assume BPT stream uses lane 0 */
+				/*
+				 * hstart = hstop - params->hwidth + 1.
+				 * At this point after hstop = hstop - params[i].hwidth above,
+				 * the hstart is equal to hstop + 1, and bus->params.bpt_hstop
+				 * should be hstart - 1. so we can set bpt_hstop to hstop
+				 * directly.
+				 */
+				bus->params.bpt_hstop = hstop;
+			}
 		}
 	}
 }
@@ -253,9 +267,22 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 			 */
 			if (m_rt->stream->state != SDW_STREAM_ENABLED &&
 			    m_rt->stream->state != SDW_STREAM_PREPARED &&
-			    m_rt->stream->state != SDW_STREAM_DISABLED)
+			    m_rt->stream->state != SDW_STREAM_DISABLED) {
 				continue;
+			} else if (m_rt->stream->type == SDW_STREAM_BPT) {
+				/*
+				 * If any BPT stream is running or pause, exclude the BPT columns
+				 * BPT: col 0.. bus->params.bpt_hstop
+				 * Audio: col bus->params.bpt_hstop + 1 .. bus->params.col - 1
+				 */
+				sel_col = bus->params.col - bus->params.bpt_hstop - 1;
+			}
 		}
+
+		/* Don't count BPT stream bandwidth, it will use the remaining bandwidth */
+		if (m_rt->stream->type == SDW_STREAM_BPT)
+			continue;
+
 		list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
 			rate = m_rt->stream->params.rate;
 			bps = m_rt->stream->params.bps;
@@ -269,8 +296,16 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 	}
 
 	for (l = 0; l < SDW_MAX_LANES; l++) {
-		if (l > 0 && !bus->lane_used_bandwidth[l])
+		if (l > 0 && !bus->params.lane_used_bandwidth[l])
 			continue;
+
+		/*
+		 * Currently, BPT stream is only implemented on lane 0 which means all columns
+		 * are available for lane 1 and above. Set sel_col back.
+		 */
+		if (l > 0)
+			sel_col = bus->params.col;
+
 		/* reset column_needed for each lane */
 		column_needed = 0;
 		for (i = 0; i < group->count; i++) {
@@ -284,8 +319,13 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 			/* There is no control column for lane 1 and above */
 			if (column_needed > sel_col)
 				return -EINVAL;
-			/* Column 0 is control column on lane 0 */
-			if (params[i].lane == 0 && column_needed > sel_col - 1)
+			/*
+			 * Column 0 is the control column on lane 0. However, when sel_col is
+			 * reduced (e.g. due to a running BPT stream), sel_col already represents
+			 * usable audio columns.
+			 */
+			if (sel_col == bus->params.col && params[i].lane == 0 &&
+			    column_needed > sel_col - 1)
 				return -EINVAL;
 		}
 	}
@@ -354,6 +394,9 @@ static int sdw_get_group_count(struct sdw_bus *bus,
 	}
 
 	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		if (m_rt->stream->type == SDW_STREAM_BPT)
+			continue;
+
 		if (m_rt->stream->state == SDW_STREAM_DEPREPARED)
 			continue;
 
@@ -410,7 +453,7 @@ static int sdw_compute_port_params(struct sdw_bus *bus, struct sdw_stream_runtim
 	if (ret < 0)
 		goto free_params;
 
-	_sdw_compute_port_params(bus, params, group.count);
+	_sdw_compute_port_params(bus, params, group.count, stream->type == SDW_STREAM_BPT);
 
 free_params:
 	kfree(params);
@@ -509,7 +552,7 @@ static int get_manager_lane(struct sdw_bus *bus, struct sdw_master_runtime *m_rt
 					      m_rt->stream->params.bps;
 		}
 		if (required_bandwidth <=
-		    curr_dr_freq - bus->lane_used_bandwidth[l]) {
+		    curr_dr_freq - bus->params.lane_used_bandwidth[l]) {
 			/* Check if m_lane is connected to all Peripherals */
 			if (!is_lane_connected_to_all_peripherals(m_rt,
 				slave_prop->lane_maps[l])) {
@@ -520,7 +563,7 @@ static int get_manager_lane(struct sdw_bus *bus, struct sdw_master_runtime *m_rt
 			}
 			m_lane = slave_prop->lane_maps[l];
 			dev_dbg(&s_rt->slave->dev, "M lane %d is used\n", m_lane);
-			bus->lane_used_bandwidth[l] += required_bandwidth;
+			bus->params.lane_used_bandwidth[l] += required_bandwidth;
 			/*
 			 * Use non-zero manager lane, subtract the lane 0
 			 * bandwidth that is already calculated
@@ -548,8 +591,10 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 	struct sdw_master_runtime *m_rt;
 	struct sdw_slave_runtime *s_rt;
 	unsigned int curr_dr_freq = 0;
+	bool is_bpt_running = false;
 	int i, l, clk_values, ret;
 	bool is_gear = false;
+	int available_col;
 	int m_lane = 0;
 	u32 *clk_buf;
 
@@ -565,11 +610,34 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 		clk_buf = NULL;
 	}
 
+	/*
+	 * Use the maximum freq to get maximum bandwidth and no need to try another freq
+	 * if any BPT stream is running
+	 */
+	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		if (m_rt->stream->type == SDW_STREAM_BPT &&
+		    m_rt->stream->state < SDW_STREAM_DEPREPARED) {
+			clk_values = 1;
+			clk_buf = NULL;
+			/*
+			 * If any BPT stream is active, the available audio columns should exclude
+			 * the BPT columns
+			 */
+			if (m_rt->stream->state >= SDW_STREAM_PREPARED)
+				is_bpt_running = true;
+		}
+	}
+
 	/* If dynamic scaling is not supported, don't try higher freq */
 	if (!is_clock_scaling_supported(bus))
 		clk_values = 1;
 
+	if (!mstr_prop->default_frame_rate || !mstr_prop->default_row)
+		return -EINVAL;
+
 	for (i = 0; i < clk_values; i++) {
+		int total_col;
+
 		if (!clk_buf)
 			curr_dr_freq = bus->params.max_dr_freq;
 		else
@@ -577,11 +645,30 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 				(bus->params.max_dr_freq >>  clk_buf[i]) :
 				clk_buf[i] * SDW_DOUBLE_RATE_FACTOR;
 
-		if (curr_dr_freq * (mstr_prop->default_col - 1) >=
-		    bus->params.bandwidth * mstr_prop->default_col)
+		total_col = curr_dr_freq / mstr_prop->default_frame_rate / mstr_prop->default_row;
+
+		/*
+		 * available columns for audio stream on lane 0:
+		 * - exclude control column 0
+		 * - if BPT is active, also exclude columns 1..bpt_hstop used by DP0
+		 */
+		if (is_bpt_running)
+			available_col = total_col - bus->params.bpt_hstop - 1;
+		else
+			available_col = total_col - 1;
+
+		if (available_col <= 0)
+			continue;
+
+		/* Keep formula consistent with sdw_select_row_col() */
+		if (curr_dr_freq * available_col >=
+		    bus->params.bandwidth * total_col)
 			break;
 
 		list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+			/* BPT stream always uses lane 0 */
+			if (m_rt->stream->type == SDW_STREAM_BPT)
+				continue;
 			/*
 			 * Get the first s_rt that will be used to find the available lane that
 			 * can be used. No need to check all Peripherals because we can't use
@@ -637,9 +724,6 @@ out:
 		}
 	}
 
-	if (!mstr_prop->default_frame_rate || !mstr_prop->default_row)
-		return -EINVAL;
-
 	mstr_prop->default_col = curr_dr_freq / mstr_prop->default_frame_rate /
 				 mstr_prop->default_row;
 
@@ -653,6 +737,10 @@ out:
 	bus->params.curr_dr_freq = curr_dr_freq;
 	return 0;
 }
+
+#define SDW_DEFAULT_COL			4
+#define SDW_COL_RESERVED_FOR_AUDIO	2
+
 
 /**
  * sdw_compute_params: Compute bus, transport and port parameters
@@ -669,9 +757,25 @@ int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream)
 	if (ret < 0)
 		return ret;
 
-	if (stream->type == SDW_STREAM_BPT) {
-		sdw_compute_dp0_port_params(bus);
-		return 0;
+	/*
+	 * stream->state is set to SDW_STREAM_DEPREPARED at the beginning of _sdw_deprepare_stream
+	 * In other words, if the stream->type != SDW_STREAM_DEPAREPARED means sdw_compute_params()
+	 * is called from _sdw_prepare_stream() and the stream is preparing.
+	 */
+	if (stream->type == SDW_STREAM_BPT && stream->state != SDW_STREAM_DEPREPARED) {
+		/*
+		 * Set the initial bpt_hstop when the BPT stream is preparing and it will be
+		 * updated in sdw_compute_port_params() below.
+		 */
+		bus->params.bpt_hstop = bus->params.col - 1;
+		/*
+		 * Reserve 2 columns for future audio stream if the bus->params.col is greater
+		 * than SDW_DEFAULT_COL (4) + reserved columns (2). And don't reserve columns
+		 * for future use otherwise. This ensures that the BPT stream will not meet the
+		 * bandwidth issue when there is no audio stream is open.
+		 */
+		if (bus->params.col >= (SDW_DEFAULT_COL + SDW_COL_RESERVED_FOR_AUDIO))
+			bus->params.bpt_hstop -= SDW_COL_RESERVED_FOR_AUDIO;
 	}
 
 	/* Compute transport and port params */
@@ -679,6 +783,16 @@ int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream)
 	if (ret < 0) {
 		dev_err(bus->dev, "Compute transport params failed: %d\n", ret);
 		return ret;
+	}
+
+	if (stream->type == SDW_STREAM_BPT && stream->state != SDW_STREAM_DEPREPARED) {
+		/* No usable data columns left */
+		if (bus->params.bpt_hstop < 1) {
+			dev_err(bus->dev, "%s: No bandwidth for BPT stream\n",
+				__func__);
+			return -EAGAIN;
+		}
+		sdw_compute_dp0_port_params(bus);
 	}
 
 	return 0;
