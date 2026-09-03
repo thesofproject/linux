@@ -96,6 +96,17 @@
 #define ACP_SW_CLK_RESUME_DELAY_CNTR			0x0003184
 #define ACP_SW_BUS_RESET_CTRL				0x0003188
 #define ACP_SW_PRBS_ERR_STATUS				0x000318c
+#define ACP_SW_ERROR_REASON1					0x00031cc
+/*
+ * ACP_SW_I2S_ERROR_REASON is in the codec/I2S address space (not the SDW
+ * controller space) and must be accessed via acp_mmio (not mmio).
+ * Instance 0 and instance 1 have separate registers.
+ * bit 18: NAK response  bit 19: bus clash
+ * bits 26-30: BRA errors (header/footer/CRC/DMA/command response)
+ */
+#define ACP_SW_I2S_ERROR_REASON				0x000018b4
+#define ACP_P1_SW_I2S_ERROR_REASON			0x00001a50
+#define AMD_SDW_BRA_I2S_ERROR_MASK			0x7ffc0000
 #define ACP_SW_IMM_CMD_UPPER_WORD			0x0003230
 #define ACP_SW_IMM_CMD_LOWER_QWORD			0x0003234
 #define ACP_SW_IMM_RESP_UPPER_WORD			0x0003238
@@ -105,7 +116,6 @@
 #define ACP_SW_BRA_TRANSFER_SIZE			0x0003248
 #define ACP_SW_BRA_DMA_BUSY				0x000324c
 #define ACP_SW_BRA_RESP					0x0003250
-#define ACP_SW_BRA_RESP_FRAME_ADDR			0x0003254
 #define ACP_SW_BRA_CURRENT_TRANSFER_SIZE		0x0003258
 #define ACP_SW_STATE_CHANGE_STATUS_0TO7			0x000325c
 #define ACP_SW_STATE_CHANGE_STATUS_8TO11		0x0003260
@@ -117,6 +127,7 @@
 
 #define ACP_DELAY_US					10
 #define AMD_SDW_TIMEOUT					1000
+#define BRA_DMA_TIMEOUT_MS				1000
 #define AMD_SDW_DEFAULT_CLK_FREQ			12000000
 
 #define AMD_SDW_MCP_RESP_ACK				BIT(0)
@@ -154,6 +165,8 @@
 #define AMD_SDW_IRQ_MASK_0TO7		0x77777777
 #define AMD_SDW_IRQ_MASK_8TO11		0x000c7777
 #define AMD_SDW_IRQ_ERROR_MASK		0xff
+/* BRA DMA error interrupt bits [5:7] in ACP_SW_ERROR_INTR_MASK */
+#define AMD_SDW_BPT_ERR_INTR_MASK	(BIT(5) | BIT(6) | BIT(7))
 #define AMD_SDW_MAX_FREQ_NUM		1
 #define AMD_ACP63_SDW0_MAX_TX_PORTS		3
 #define AMD_ACP63_SDW0_MAX_RX_PORTS		3
@@ -189,6 +202,8 @@
 #define AMD_SDW0_PAD_KEEPER_DISABLE_MASK		0x1e
 #define AMD_SDW1_PAD_KEEPER_DISABLE_MASK		0xf
 #define AMD_SDW_PREQ_INTR_STAT				BIT(19)
+#define AMD_SDW_BRA_DMA_COMPLETION_STAT			BIT(18)
+#define AMD_SDW_CMD_RESP_INTR_STAT			BIT(17)
 #define AMD_SDW_CLK_STOP_DONE				1
 #define AMD_SDW_CLK_RESUME_REQ				2
 #define AMD_SDW_CLK_RESUME_DONE				3
@@ -202,6 +217,7 @@
 #define AMD_SDW_DEVICE_STATE_D0				0
 #define AMD_SDW_DEVICE_STATE_D3				3
 #define ACP_PME_EN					0x0001400
+
 
 struct sdw_manager_dp_reg {
 	u32 frame_fmt_reg;

@@ -889,6 +889,7 @@ static int amd_sof_sdw_probe(struct snd_sof_dev *sdev)
 	sdw_res.parent = sdev->dev;
 	sdw_res.dev = sdev->dev;
 	sdw_res.acp_lock = &acp_data->acp_lock;
+	sdw_res.acp_bra_lock = &acp_data->acp_bra_lock;
 	sdw_res.count = acp_data->info.count;
 	sdw_res.link_mask = acp_data->info.link_mask;
 	sdw_res.mmio_base = sdev->bar[ACP_DSP_BAR];
@@ -968,6 +969,7 @@ int amd_sof_acp_probe(struct snd_sof_dev *sdev)
 	adata->reg_range = chip->reg_end_addr - chip->reg_start_addr;
 	adata->pci_rev = pci->revision;
 	mutex_init(&adata->acp_lock);
+	mutex_init(&adata->acp_bra_lock);
 	sdev->pdata->hw_pdata = adata;
 
 	ret = acp_init(sdev);
