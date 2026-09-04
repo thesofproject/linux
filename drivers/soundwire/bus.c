@@ -161,7 +161,13 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 	bus->params.curr_dr_freq = bus->params.max_dr_freq;
 	bus->params.curr_bank = SDW_BANK0;
 	bus->params.next_bank = SDW_BANK1;
+	/*
+	 * Set is_present = true by default. It will be set to false when no peripherals
+	 * are attached on the bus.
+	 */
+	bus->is_present = true;
 
+	init_completion(&bus->enumeration_complete);
 	return 0;
 }
 EXPORT_SYMBOL(sdw_bus_master_add);
@@ -309,12 +315,12 @@ int sdw_transfer(struct sdw_bus *bus, struct sdw_msg *msg)
  * @bus: SDW bus
  * @sync_delay: Delay before reading status
  */
-void sdw_show_ping_status(struct sdw_bus *bus, bool sync_delay)
+int sdw_show_ping_status(struct sdw_bus *bus, bool sync_delay)
 {
 	u32 status;
 
 	if (!bus->ops->read_ping_status)
-		return;
+		return -ENOTSUPP;
 
 	/*
 	 * wait for peripheral to sync if desired. 10-15ms should be more than
@@ -329,10 +335,13 @@ void sdw_show_ping_status(struct sdw_bus *bus, bool sync_delay)
 
 	mutex_unlock(&bus->msg_lock);
 
-	if (!status)
+	if (!status) {
 		dev_warn(bus->dev, "%s: no peripherals attached\n", __func__);
-	else
-		dev_dbg(bus->dev, "PING status: %#x\n", status);
+		return 0;
+	}
+
+	dev_dbg(bus->dev, "PING status: %#x\n", status);
+	return 1;
 }
 EXPORT_SYMBOL(sdw_show_ping_status);
 
@@ -847,6 +856,7 @@ static int sdw_program_device_num(struct sdw_bus *bus, bool *programmed)
 		if (ret == -ENODATA) { /* end of device id reads */
 			dev_dbg(bus->dev, "No more devices to enumerate\n");
 			ret = 0;
+			complete_all(&bus->enumeration_complete);
 			break;
 		}
 		if (ret < 0) {

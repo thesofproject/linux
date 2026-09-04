@@ -901,7 +901,7 @@ int sdw_bus_master_add(struct sdw_bus *bus, struct device *parent,
 		       struct fwnode_handle *fwnode);
 void sdw_bus_master_delete(struct sdw_bus *bus);
 
-void sdw_show_ping_status(struct sdw_bus *bus, bool sync_delay);
+int sdw_show_ping_status(struct sdw_bus *bus, bool sync_delay);
 
 /**
  * struct sdw_port_config: Master or Slave Port configuration
@@ -1001,6 +1001,8 @@ struct sdw_stream_runtime {
  * transport and port parameters
  * @defer_msg: Defer message
  * @params: Current bus parameters
+ * @enumeration_complete: completion utility to control potential races between
+ * enumeration completion and peripheral presence checks.
  * @stream_refcount: number of streams currently using this bus
  * @bpt_stream_refcount: number of BTP streams currently using this bus (should
  * be zero or one, multiple streams per link is not supported).
@@ -1029,6 +1031,7 @@ struct sdw_stream_runtime {
  * are supported. This flag is populated by drivers after reading
  * appropriate firmware (ACPI/DT).
  * @lane_used_bandwidth: how much bandwidth in bits per second is used by each lane
+ * @is_present: indicates is there any peripheral present on the bus or not.
  */
 struct sdw_bus {
 	struct device *dev;
@@ -1042,6 +1045,7 @@ struct sdw_bus {
 	struct list_head m_rt_list;
 	struct sdw_defer defer_msg;
 	struct sdw_bus_params params;
+	struct completion enumeration_complete;
 	int stream_refcount;
 	int bpt_stream_refcount;
 	struct sdw_stream_runtime *bpt_stream;
@@ -1064,6 +1068,7 @@ struct sdw_bus {
 #endif
 	bool multi_link;
 	unsigned int lane_used_bandwidth[SDW_MAX_LANES];
+	bool is_present;
 };
 
 struct sdw_stream_runtime *sdw_alloc_stream(const char *stream_name, enum sdw_stream_type type);
