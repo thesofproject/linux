@@ -8,6 +8,7 @@
 #include <linux/acpi.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
+#include <linux/dmi.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -155,6 +156,62 @@ static void generic_new_peripheral_assigned(struct sdw_bus *bus,
 		sdw->link_res->hw_ops->program_sdi(sdw, dev_num);
 }
 
+/*
+ * Board-level overrides for the vendor-specific ACTMCTL timing fields.
+ *
+ * The _DSD values are patched in from NVS by the BIOS at _INI time and
+ * some boards ship values the attached peripherals cannot follow. On the
+ * HP OmniBook Ultra 14 (board 8EB4, BIOS F.06) the four TAS2783 amplifiers
+ * on links 1 and 2 only enumerate reliably with DOAIS=1 and DOAISE2=1;
+ * the BIOS provides DOAIS=3 and DOAISE2=0, with which three of the four
+ * amplifiers drop off the bus within a few hundred ms of attaching.
+ */
+struct sdw_intel_actmctl_quirk {
+	u8 link_mask;
+	u16 doais;
+	u16 doaise2;
+};
+
+static const struct sdw_intel_actmctl_quirk hp_omnibook_ultra_14_actmctl = {
+	.link_mask = BIT(1) | BIT(2),
+	.doais = 1,
+	.doaise2 = 1,
+};
+
+static const struct dmi_system_id sdw_intel_actmctl_quirk_table[] = {
+	{
+		/* HP OmniBook Ultra 14 (kd0xxx), 4x TAS2783 on links 1/2 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
+			DMI_MATCH(DMI_BOARD_NAME, "8EB4"),
+		},
+		.driver_data = (void *)&hp_omnibook_ultra_14_actmctl,
+	},
+	{}
+};
+
+static void sdw_intel_apply_actmctl_quirk(struct sdw_bus *bus,
+					  struct sdw_intel_prop *intel_prop)
+{
+	const struct sdw_intel_actmctl_quirk *quirk;
+	const struct dmi_system_id *id;
+
+	id = dmi_first_match(sdw_intel_actmctl_quirk_table);
+	if (!id)
+		return;
+
+	quirk = id->driver_data;
+	if (!(quirk->link_mask & BIT(bus->link_id)))
+		return;
+
+	dev_info(bus->dev, "ACTMCTL quirk: doais %#x -> %#x, doaise2 %#x -> %#x\n",
+		 intel_prop->doais, quirk->doais,
+		 intel_prop->doaise2, quirk->doaise2);
+
+	intel_prop->doais = quirk->doais;
+	intel_prop->doaise2 = quirk->doaise2;
+}
+
 static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 {
 	struct sdw_master_prop *prop = &bus->prop;
@@ -238,6 +295,9 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 	fwnode_property_read_u16(link,
 				 "intel-sdw-dods",
 				 &intel_prop->dods);
+
+	sdw_intel_apply_actmctl_quirk(bus, intel_prop);
+
 	bus->vendor_specific_prop = intel_prop;
 
 	dev_dbg(bus->dev, "doaise %#x doais %#x dodse %#x dods %#x\n",
