@@ -1258,18 +1258,10 @@ static struct sdw_master_runtime
 	struct sdw_master_runtime *m_rt, *walk_m_rt;
 	struct list_head *insert_after;
 
-	if (stream->type == SDW_STREAM_BPT) {
-		if (bus->stream_refcount > 0 || bus->bpt_stream_refcount > 0) {
-			dev_err(bus->dev, "%s: %d/%d audio/BPT stream already allocated\n",
-				__func__, bus->stream_refcount, bus->bpt_stream_refcount);
-			return ERR_PTR(-EBUSY);
-		}
-	} else {
-		if (bus->bpt_stream_refcount > 0) {
-			dev_err(bus->dev, "%s: BPT stream already allocated\n",
-				__func__);
-			return ERR_PTR(-EAGAIN);
-		}
+	if (stream->type == SDW_STREAM_BPT && bus->bpt_stream_refcount > 0) {
+		dev_err(bus->dev, "%s: BPT stream already allocated\n",
+			__func__);
+		return ERR_PTR(-EAGAIN);
 	}
 
 	m_rt = kzalloc_obj(*m_rt);
@@ -1487,26 +1479,47 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	struct sdw_master_runtime *m_rt;
 	struct sdw_bus *bus;
 	struct sdw_master_prop *prop;
-	struct sdw_bus_params params;
 	int ret;
+
+	/* Local structure to store backup params for error recovery */
+	struct {
+		struct list_head list_node;
+		struct sdw_bus *bus;
+		struct sdw_bus_params params;
+	} *params_entry, *temp_entry;
+
+	LIST_HEAD(params_backup_list);
 
 	/* Prepare  Master(s) and Slave(s) port(s) associated with stream */
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
 		bus = m_rt->bus;
 		prop = &bus->prop;
-		memcpy(&params, &bus->params, sizeof(params));
+
+		/* Allocate and save current params for error recovery */
+		params_entry = kzalloc_obj(*params_entry);
+		if (!params_entry) {
+			ret = -ENOMEM;
+			goto restore_params;
+		}
+		params_entry->bus = bus;
+		memcpy(&params_entry->params, &bus->params, sizeof(params_entry->params));
+		list_add_tail(&params_entry->list_node, &params_backup_list);
 
 		/* TODO: Support Asynchronous mode */
 		if ((prop->max_clk_freq % stream->params.rate) != 0) {
 			dev_err(bus->dev, "Async mode not supported\n");
-			return -EINVAL;
+			ret = -EINVAL;
+			goto restore_params;
 		}
 
 		if (update_params) {
 			/* Increment cumulative bus bandwidth */
 			/* TODO: Update this during Device-Device support */
-			bus->params.bandwidth += m_rt->stream->params.rate *
-				m_rt->ch_count * m_rt->stream->params.bps;
+			/* Don't count BPT stream bandwidth, it will use the remaining bandwidth */
+			if (m_rt->stream->type != SDW_STREAM_BPT) {
+				bus->params.bandwidth += m_rt->stream->params.rate *
+					m_rt->ch_count * m_rt->stream->params.bps;
+			}
 
 			/* Compute params */
 			if (bus->compute_params) {
@@ -1547,10 +1560,26 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 
 	stream->state = SDW_STREAM_PREPARED;
 
+	/* Free the backup list on success */
+	list_for_each_entry_safe(params_entry, temp_entry, &params_backup_list, list_node) {
+		list_del(&params_entry->list_node);
+		kfree(params_entry);
+	}
+
 	return ret;
 
 restore_params:
-	memcpy(&bus->params, &params, sizeof(params));
+	/* Restore all bus params from the backup list */
+	list_for_each_entry(params_entry, &params_backup_list, list_node) {
+		memcpy(&params_entry->bus->params, &params_entry->params,
+		       sizeof(params_entry->params));
+	}
+
+	/* Free the backup list on error */
+	list_for_each_entry_safe(params_entry, temp_entry, &params_backup_list, list_node) {
+		list_del(&params_entry->list_node);
+		kfree(params_entry);
+	}
 	return ret;
 }
 
@@ -1795,6 +1824,10 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 
 		multi_lane_bandwidth = 0;
 
+		/* Don't count BPT stream bandwidth, it will use the remaining bandwidth */
+		if (m_rt->stream->type == SDW_STREAM_BPT)
+			goto skip_bpt_stream;
+
 		list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
 			if (!p_rt->lane)
 				continue;
@@ -1802,14 +1835,15 @@ static int _sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 			bandwidth = m_rt->stream->params.rate * hweight32(p_rt->ch_mask) *
 				    m_rt->stream->params.bps;
 			multi_lane_bandwidth += bandwidth;
-			bus->lane_used_bandwidth[p_rt->lane] -= bandwidth;
-			if (!bus->lane_used_bandwidth[p_rt->lane])
+			bus->params.lane_used_bandwidth[p_rt->lane] -= bandwidth;
+			if (!bus->params.lane_used_bandwidth[p_rt->lane])
 				p_rt->lane = 0;
 		}
 		/* TODO: Update this during Device-Device support */
 		bandwidth = m_rt->stream->params.rate * m_rt->ch_count * m_rt->stream->params.bps;
 		bus->params.bandwidth -= bandwidth - multi_lane_bandwidth;
 
+skip_bpt_stream:
 		/* Compute params */
 		if (bus->compute_params) {
 			ret = bus->compute_params(bus, stream);
