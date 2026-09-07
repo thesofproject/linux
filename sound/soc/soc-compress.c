@@ -146,6 +146,8 @@ err_no_lock:
 static int soc_compr_alloc_fe_runtime(struct snd_soc_pcm_runtime *fe, int stream)
 {
 	struct snd_pcm_substream *fe_substream = snd_soc_dpcm_get_substream(fe, stream);
+	struct snd_pcm_hw_constraints *constrs;
+	int i;
 
 	if (!fe_substream || fe_substream->runtime)
 		return 0;
@@ -153,6 +155,23 @@ static int soc_compr_alloc_fe_runtime(struct snd_soc_pcm_runtime *fe, int stream
 	fe_substream->runtime = kzalloc_obj(*fe_substream->runtime);
 	if (!fe_substream->runtime)
 		return -ENOMEM;
+
+	/*
+	 * snd_pcm_open() initializes the constraints of a PCM runtime to
+	 * 'anything goes'. A zeroed one means an empty mask and a [0, 0]
+	 * interval instead, which the constraint helpers refine against and
+	 * reject, so initialize them the same way the PCM core does.
+	 *
+	 * The hw rules snd_pcm_hw_constraints_init() installs on top are only
+	 * evaluated by snd_pcm_hw_refine(), which never runs for this
+	 * substream, so they are not needed here.
+	 */
+	constrs = &fe_substream->runtime->hw_constraints;
+	for (i = SNDRV_PCM_HW_PARAM_FIRST_MASK; i <= SNDRV_PCM_HW_PARAM_LAST_MASK; i++)
+		snd_mask_any(constrs_mask(constrs, i));
+
+	for (i = SNDRV_PCM_HW_PARAM_FIRST_INTERVAL; i <= SNDRV_PCM_HW_PARAM_LAST_INTERVAL; i++)
+		snd_interval_any(constrs_interval(constrs, i));
 
 	return 0;
 }
