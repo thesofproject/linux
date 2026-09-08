@@ -406,6 +406,39 @@ struct snd_soc_component *snd_soc_lookup_component_by_name(const char *component
 }
 EXPORT_SYMBOL_GPL(snd_soc_lookup_component_by_name);
 
+/**
+ * snd_soc_lookup_component_walk - component lookup using callback.
+ * @cb: function to call for each component.
+ * @context: caller-defined value to be passed to callback function. Can
+ *           be NULL.
+ *
+ * Iterate over snd_soc_component items, calling @cb for each, until @cb
+ * returns a non-zero value. The @context pointer is a value defined by the
+ * caller and is passed to @cb.
+ *
+ * Return: struct snd_soc_component* if @cb returned >0.
+ *	   ERR_PTR(-ENOENT) if @cb returned 0 on every call.
+ * 	   ERR_PTR of value returned by @cb if @cb returned <0.
+ */
+struct snd_soc_component *snd_soc_lookup_component_walk(snd_soc_component_walk_fn cb,
+							void *context)
+{
+	struct snd_soc_component *component;
+	int ret;
+
+	guard(mutex)(&client_mutex);
+	for_each_component(component) {
+		ret = (cb)(component, context);
+		if (ret > 0)
+			return component;
+		if (ret < 0)
+			return ERR_PTR(ret);
+	}
+
+	return ERR_PTR(-ENOENT);
+}
+EXPORT_SYMBOL_GPL(snd_soc_lookup_component_walk);
+
 struct snd_soc_pcm_runtime
 *snd_soc_get_pcm_runtime(struct snd_soc_card *card,
 			 struct snd_soc_dai_link *dai_link)

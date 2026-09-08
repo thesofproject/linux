@@ -1089,12 +1089,14 @@ int sdw_bus_clk_stop(struct sdw_bus *bus);
 int sdw_bus_exit_clk_stop(struct sdw_bus *bus);
 
 int sdw_compare_devid(struct sdw_slave *slave, struct sdw_slave_id id);
-void sdw_extract_slave_id(struct sdw_bus *bus, u64 addr, struct sdw_slave_id *id);
+void sdw_extract_slave_id(u64 addr, struct sdw_slave_id *id);
 bool is_clock_scaling_supported_by_slave(struct sdw_slave *slave);
 
 int sdw_bpt_send_async(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_bpt_msg *msg);
 int sdw_bpt_wait(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_bpt_msg *msg);
 int sdw_bpt_send_sync(struct sdw_bus *bus, struct sdw_slave *slave, struct sdw_bpt_msg *msg);
+
+void sdw_debug_log_slave_id(struct device *dev, const struct sdw_slave_id *id);
 
 #if IS_ENABLED(CONFIG_SOUNDWIRE)
 
@@ -1214,6 +1216,14 @@ static inline int sdw_update_no_pm(struct sdw_slave *slave, u32 addr, u8 mask, u
 {
 	WARN_ONCE(1, "SoundWire API is disabled");
 	return -EINVAL;
+}
+
+static inline void sdw_extract_slave_id(u64 addr, struct sdw_slave_id *id)
+{
+}
+
+static inline void sdw_debug_log_slave_id(struct device *dev, const struct sdw_slave_id *id)
+{
 }
 
 #endif /* CONFIG_SOUNDWIRE */

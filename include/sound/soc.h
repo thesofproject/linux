@@ -469,6 +469,10 @@ struct snd_soc_component *snd_soc_lookup_component(struct device *dev,
 						   const char *driver_name);
 struct snd_soc_component *snd_soc_lookup_component_by_name(const char *component_name);
 
+typedef int (*snd_soc_component_walk_fn)(struct snd_soc_component *component, void *context);
+struct snd_soc_component *snd_soc_lookup_component_walk(snd_soc_component_walk_fn cb,
+							void *context);
+
 int soc_new_pcm(struct snd_soc_pcm_runtime *rtd);
 #ifdef CONFIG_SND_SOC_COMPRESS
 int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd);

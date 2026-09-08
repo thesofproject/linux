@@ -662,7 +662,8 @@ static int qcom_swrm_enumerate(struct sdw_bus *bus)
 			((u64)buf1[2] << 24) | ((u64)buf1[1] << 32) |
 			((u64)buf1[0] << 40);
 
-		sdw_extract_slave_id(bus, addr, &id);
+		sdw_extract_slave_id(addr, &id);
+		sdw_debug_log_slave_id(bus->dev, &id);
 		found = false;
 		ctrl->clock_stop_not_supported = false;
 		/* Now compare with entries */
