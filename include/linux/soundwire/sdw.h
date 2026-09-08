@@ -162,6 +162,7 @@ enum sdw_stream_type {
 	SDW_STREAM_PCM = 0,
 	SDW_STREAM_PDM = 1,
 	SDW_STREAM_BPT = 2,
+	SDW_STREAM_COMPANION = 3,
 };
 
 /**
