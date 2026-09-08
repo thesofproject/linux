@@ -1391,6 +1391,7 @@ static int sdw_config_stream(struct device *dev,
 	}
 
 	stream->type = stream_config->type;
+	stream->transport_type = stream_config->transport_type;
 	stream->params.rate = stream_config->frame_rate;
 	stream->params.bps = stream_config->bps;
 
