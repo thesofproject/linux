@@ -287,6 +287,7 @@ static int amd_sdw_probe(struct device *dev)
 	sdw_res.parent = dev;
 	sdw_res.dev = dev;
 	sdw_res.acp_lock = &acp_data->acp_lock;
+	sdw_res.acp_bra_lock = &acp_data->acp_bra_lock;
 	sdw_res.count = acp_data->info.count;
 	sdw_res.mmio_base = acp_data->acp63_base;
 	sdw_res.acp_rev = acp_data->acp_rev;
@@ -630,6 +631,7 @@ static int snd_acp63_probe(struct pci_dev *pci,
 	pci_set_master(pci);
 	pci_set_drvdata(pci, adata);
 	mutex_init(&adata->acp_lock);
+	mutex_init(&adata->acp_bra_lock);
 	ret = acp_hw_init_ops(adata, pci);
 	if (ret) {
 		dev_err(&pci->dev, "ACP hw ops init failed\n");
