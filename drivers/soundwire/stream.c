@@ -412,6 +412,9 @@ static int sdw_enable_disable_ports(struct sdw_master_runtime *m_rt, bool en)
 		}
 	}
 
+	if (m_rt->stream->transport_type == SDW_TRANSPORT_PERIPHERAL_PERIPHERAL)
+		return 0;
+
 	/* Enable/Disable Master port(s) */
 	list_for_each_entry(m_port, &m_rt->port_list, port_node) {
 		ret = sdw_enable_disable_master_ports(m_rt, m_port, en);
@@ -1391,6 +1394,7 @@ static int sdw_config_stream(struct device *dev,
 	}
 
 	stream->type = stream_config->type;
+	stream->transport_type = stream_config->transport_type;
 	stream->params.rate = stream_config->frame_rate;
 	stream->params.bps = stream_config->bps;
 
