@@ -370,8 +370,16 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 				.quirk = SOC_SDW_CODEC_MIC,
 				.quirk_exclude = true,
 			},
+			/* Companion amp */
+			{
+				.direction = {true, true},
+				.dai_name = "rt712-sdca-aif4",
+				.dai_type = SOC_SDW_DAI_TYPE_AMP,
+				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_AMP_IN_DAI_ID},
+				.quirk = SOC_SDW_COMPANION_AMPS,
+			},
 		},
-		.dai_num = 3,
+		.dai_num = 4,
 	},
 	{
 		.vendor_id = 0x025d,
@@ -535,8 +543,16 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 				.widgets = generic_dmic_widgets,
 				.num_widgets = ARRAY_SIZE(generic_dmic_widgets),
 			},
+			/* Companion amp */
+			{
+				.direction = {true, true},
+				.dai_name = "rt1320-aif3",
+				.dai_type = SOC_SDW_DAI_TYPE_AMP,
+				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_AMP_IN_DAI_ID},
+				.quirk = SOC_SDW_COMPANION_AMPS,
+			},
 		},
-		.dai_num = 2,
+		.dai_num = 3,
 	},
 	{
 		.vendor_id = 0x025d,
