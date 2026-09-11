@@ -629,6 +629,10 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 		if (!pipeline_list->pipelines)
 			goto sink_setup;
 
+		/* a widget which is not part of a pipeline has nothing to trigger */
+		if (!swidget->spipe)
+			goto sink_setup;
+
 		/*
 		 * Add the widget's pipe_widget to the list of pipelines to be triggered if not
 		 * already in the list. This will result in the pipelines getting added in the
@@ -641,8 +645,8 @@ static int sof_set_up_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_d
 		}
 
 		if (i == pipeline_list->count) {
-			pipeline_list->count++;
 			pipeline_list->pipelines[i] = swidget->spipe;
+			pipeline_list->count++;
 		}
 	}
 
