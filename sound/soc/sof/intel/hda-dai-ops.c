@@ -356,6 +356,64 @@ static struct hdac_ext_link *sdw_get_hlink(struct snd_sof_dev *sdev,
 	return hdac_bus_eml_sdw_get_hlink(bus);
 }
 
+/*
+ * For aggregate DAIs (num_cpus > 1), each CPU DAI owns its own independently
+ * allocated link DMA (its own hdac_ext_stream / PPLC register block, see
+ * hda_link_stream_assign()). The firmware pipeline's RUNNING IPC starts all
+ * of the aggregate's physical links on the DSP side in one shot, so it must
+ * not be sent until every one of those link DMAs has actually been armed on
+ * the host side. Only one CPU DAI in the aggregate typically owns a real
+ * firmware pipeline object (see is_aggregated_dai() in sof-audio.c), so this
+ * check is intentionally independent of any per-DAI pipeline/spipe
+ * association -- it only cares about the host-side link DMA state.
+ */
+static bool hda_ipc4_all_link_dmas_running(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *dai;
+	int i;
+
+	for_each_rtd_cpu_dais(rtd, i, dai) {
+		struct hdac_ext_stream *hext_stream;
+
+		hext_stream = snd_soc_dai_get_dma_data(dai, substream);
+		if (!hext_stream ||
+		    !(readl(hext_stream->pplc_addr + AZX_REG_PPLCCTL) & AZX_PPLCCTL_RUN))
+			return false;
+	}
+
+	return true;
+}
+
+/*
+ * For aggregate DAIs (num_cpus > 1), only one CPU DAI actually owns a
+ * firmware pipeline object -- see is_aggregated_dai() in sof-audio.c. The
+ * other member(s) have their own widget, but their pipe_widget->instance_id
+ * stays unset since their pipeline is never set up in firmware. Since ASoC
+ * triggers each CPU DAI of the aggregate sequentially and the owning DAI is
+ * not guaranteed to be triggered last, search the aggregate's sibling CPU
+ * DAIs for the one that does own a valid pipeline, so its state transition
+ * can be completed regardless of which DAI is currently being triggered.
+ */
+static struct snd_sof_widget *
+hda_ipc4_find_owning_pipe_widget(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *dai;
+	int i;
+
+	for_each_rtd_cpu_dais(rtd, i, dai) {
+		struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(dai,
+								       substream->stream);
+		struct snd_sof_widget *sw = w ? w->dobj.private : NULL;
+
+		if (sw && sw->spipe->pipe_widget->instance_id >= 0)
+			return sw;
+	}
+
+	return NULL;
+}
+
 static int hda_ipc4_pre_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
 				struct snd_pcm_substream *substream, int cmd)
 {
@@ -369,10 +427,16 @@ static int hda_ipc4_pre_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cp
 	w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
 	swidget = w->dobj.private;
 	pipe_widget = swidget->spipe->pipe_widget;
-	pipeline = pipe_widget->private;
 
-	if (pipe_widget->instance_id < 0)
-		return 0;
+	if (pipe_widget->instance_id < 0) {
+		swidget = hda_ipc4_find_owning_pipe_widget(substream);
+		if (!swidget)
+			return 0;
+
+		pipe_widget = swidget->spipe->pipe_widget;
+	}
+
+	pipeline = pipe_widget->private;
 
 	guard(mutex)(&ipc4_data->pipeline_state_mutex);
 
@@ -383,13 +447,22 @@ static int hda_ipc4_pre_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cp
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
+		/*
+		 * For aggregate DAIs with shared pipelines, the state check
+		 * deduplicates: the first DAI sends the IPC, subsequent DAIs
+		 * sharing the same pipeline see it already paused and skip.
+		 * For aggregate DAIs with different pipelines, each DAI pauses
+		 * its own pipeline independently.
+		 */
+		if (pipeline->state == SOF_IPC4_PIPE_PAUSED)
+			break;
+
 		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
 						  SOF_IPC4_PIPE_PAUSED);
 		if (ret < 0)
 			return ret;
 
 		pipeline->state = SOF_IPC4_PIPE_PAUSED;
-
 		break;
 	default:
 		dev_err(sdev->dev, "unknown trigger command %d\n", cmd);
@@ -436,25 +509,42 @@ static int hda_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
 static int hda_ipc4_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
 				 struct snd_pcm_substream *substream, int cmd)
 {
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
 	struct snd_sof_widget *swidget;
 	struct snd_soc_dapm_widget *w;
+	int num_cpus = rtd->dai_link->num_cpus;
 	int ret = 0;
 
 	w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
 	swidget = w->dobj.private;
 	pipe_widget = swidget->spipe->pipe_widget;
-	pipeline = pipe_widget->private;
 
-	if (pipe_widget->instance_id < 0)
-		return 0;
+	if (pipe_widget->instance_id < 0) {
+		swidget = hda_ipc4_find_owning_pipe_widget(substream);
+		if (!swidget)
+			return 0;
+
+		pipe_widget = swidget->spipe->pipe_widget;
+	}
+
+	pipeline = pipe_widget->private;
 
 	guard(mutex)(&ipc4_data->pipeline_state_mutex);
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
+		/*
+		 * For aggregated DAIs (num_cpus > 1), defer the RUNNING IPC
+		 * until every CPU DAI's link DMA has been armed via
+		 * hda_trigger(): the firmware starts all of the aggregate's
+		 * physical links as soon as it sees this one IPC.
+		 */
+		if (num_cpus > 1 && !hda_ipc4_all_link_dmas_running(substream))
+			break;
+
 		if (pipeline->state != SOF_IPC4_PIPE_PAUSED) {
 			ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
 							  SOF_IPC4_PIPE_PAUSED);
@@ -473,6 +563,9 @@ static int hda_ipc4_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *c
 		swidget->spipe->started_count++;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		if (num_cpus > 1 && !hda_ipc4_all_link_dmas_running(substream))
+			break;
+
 		ret = sof_ipc4_set_pipeline_state(sdev, pipe_widget->instance_id,
 						  SOF_IPC4_PIPE_RUNNING);
 		if (ret < 0)
