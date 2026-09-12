@@ -87,6 +87,26 @@ static const char *get_sdca_function_name(u32 function_type)
 	}
 }
 
+/*
+ * Some platform firmware declares the Function Topology control (0x05)
+ * with a read-only access mode and no DisCo constant, so the function
+ * type can only be learned by reading it from the hardware. Fall back to
+ * a table of known peripherals in that case.
+ *
+ * HP OmniBook Ultra 14 (board 8EB4) does this for its four TI TAS2783
+ * amplifiers, while its RT712 provides a DC value.
+ */
+static int sdca_fallback_function_type(struct sdw_slave *slave, u32 *function_type)
+{
+	/* Texas Instruments TAS2783 smart amplifier */
+	if (slave->id.mfg_id == 0x0102 && slave->id.part_id == 0x0000) {
+		*function_type = SDCA_FUNCTION_TYPE_SMART_AMP;
+		return 0;
+	}
+
+	return -ENODEV;
+}
+
 static int find_sdca_function(struct acpi_device *adev, void *data)
 {
 	struct fwnode_handle *function_node = acpi_fwnode_handle(adev);
@@ -135,8 +155,11 @@ static int find_sdca_function(struct acpi_device *adev, void *data)
 	fwnode_handle_put(control5);
 
 	if (ret < 0) {
-		dev_err(dev, "function type only supported as DisCo constant\n");
-		return ret;
+		if (sdca_fallback_function_type(slave, &function_type)) {
+			dev_err(dev, "function type only supported as DisCo constant\n");
+			return ret;
+		}
+		dev_info(dev, "function type not a DisCo constant, using fallback for known peripheral\n");
 	}
 
 	if (!sdca_device_quirk_match(slave, SDCA_QUIRKS_SKIP_FUNC_TYPE_PATCHING)) {
