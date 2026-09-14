@@ -65,6 +65,7 @@ enum sdca_quirk {
 void sdca_lookup_functions(struct sdw_slave *slave);
 void sdca_lookup_swft(struct sdw_slave *slave);
 void sdca_lookup_interface_revision(struct sdw_slave *slave);
+int sdca_get_mic_count(struct sdw_slave *slave, struct sdca_function_desc *function);
 bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk);
 int sdca_dev_register_functions(struct sdw_slave *slave);
 void sdca_dev_unregister_functions(struct sdw_slave *slave);
@@ -74,6 +75,10 @@ void sdca_dev_unregister_functions(struct sdw_slave *slave);
 static inline void sdca_lookup_functions(struct sdw_slave *slave) {}
 static inline void sdca_lookup_swft(struct sdw_slave *slave) {}
 static inline void sdca_lookup_interface_revision(struct sdw_slave *slave) {}
+static inline int sdca_get_mic_count(struct sdw_slave *slave, struct sdca_function_desc *function)
+{
+	return 0;
+}
 static inline bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk)
 {
 	return false;
