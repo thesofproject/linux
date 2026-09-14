@@ -1087,6 +1087,13 @@ static int create_sdw_dailink(struct snd_soc_card *card,
 					      name, sdw_mic_num);
 			if (!name)
 				return -ENOMEM;
+
+			/* Update card components for sdw dmic components */
+			card->components = devm_kasprintf(card->dev, GFP_KERNEL,
+							  "%s cfg-sdw-dmic:%d",
+							  card->components, sdw_mic_num);
+			if (!card->components)
+				return -ENOMEM;
 			break;
 		default:
 			dev_warn(dev, "mic count %d is not supported\n", sdw_mic_num);
@@ -1585,6 +1592,11 @@ static int mc_probe(struct platform_device *pdev)
 	for (i = 0; i < ctx->codec_info_list_count; i++)
 		codec_info_list[i].amp_num = 0;
 
+	/* Create an empty card->components */
+	card->components = "";
+	if (!card->components)
+		return -ENOMEM;
+
 	ret = sof_card_dai_links_create(card);
 	if (ret < 0)
 		return ret;
@@ -1598,7 +1610,7 @@ static int mc_probe(struct platform_device *pdev)
 		amp_num += codec_info_list[i].amp_num;
 
 	card->components = devm_kasprintf(&pdev->dev, GFP_KERNEL,
-					  " cfg-amp:%d", amp_num);
+					  "%s cfg-amp:%d", card->components, amp_num);
 	if (!card->components)
 		return -ENOMEM;
 
