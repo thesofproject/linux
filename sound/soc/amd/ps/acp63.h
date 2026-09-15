@@ -322,6 +322,7 @@ struct acp_hw_ops {
  * sdw_dma_dev: platform device for SoundWire DMA controller
  * @mach_dev: platform device for machine driver to support ACP PDM/SoundWire configuration
  * @acp_lock: used to protect acp common registers
+ * @acp_bra_lock: protect the SoundWire BRA transfer against the other manager instance
  * @info: SoundWire AMD information found in ACPI tables
  * @sdw: SoundWire context for all SoundWire manager instances
  * @machine: ACPI machines for SoundWire interface
@@ -356,6 +357,7 @@ struct acp63_dev_data {
 	struct platform_device *sdw_dma_dev;
 	struct platform_device *mach_dev;
 	struct mutex acp_lock; /* protect shared registers */
+	struct mutex acp_bra_lock; /* protect BRA transfer vs the other manager instance */
 	struct sdw_amd_acpi_info info;
 	/* sdw context allocated by SoundWire driver */
 	struct sdw_amd_ctx *sdw;
