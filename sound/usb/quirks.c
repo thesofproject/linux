@@ -851,6 +851,27 @@ static int snd_usb_accessmusic_boot_quirk(struct usb_device *dev)
 }
 
 /*
+ * A post configuration device descriptor read is needed to make the CM1A
+ * operational after reenumeration.
+ */
+static int snd_usb_cm1a_boot_quirk(struct usb_device *dev)
+{
+	struct usb_device_descriptor *desc __free(kfree) = kmalloc_obj(*desc);
+	int err;
+
+	if (!desc)
+		return -ENOMEM;
+
+	err = usb_get_descriptor(dev, USB_DT_DEVICE, 0, desc, sizeof(*desc));
+	if (err < 0) {
+		dev_err(&dev->dev, "failed to read device descriptor: %d\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
+/*
  * Some sound cards from Native Instruments are in fact compliant to the USB
  * audio standard of version 2 and other approved USB standards, even though
  * they come up as vendor-specific device when first connected.
@@ -1586,22 +1607,60 @@ static int s1810c_skip_setting_quirk(struct snd_usb_audio *chip,
 	return 0;
 }
 
+static int hp_elite_x3_lap_dock_skip_setting_quirk(struct snd_usb_audio *chip,
+						   int iface, int altno)
+{
+	/*
+	 * 1:1 - Capture, S16_LE, 8000/32000/44100/48000Hz
+	 * 2:1 - Playback, S16_LE, 48000Hz
+	 * 2:2 - Playback, S24_3LE, 48000Hz
+	 *
+	 * 2:2 is broken because:
+	 * - it doesn't accept SET_CUR(SAMPLE_RATE). QUIRK_FLAG_FIXED_RATE works
+	 *   around it, however...
+	 * - it constantly produces severe harmonic distortion once the capture
+	 *   stream is also opened. The interface 2 must be closed and reopened
+	 *   to make it recover. IOW, simply closing the capture stream makes no
+	 *   difference.
+	 *
+	 * Considering that S24_3LE offers no additional benefit on small
+	 * speakers compared to S16_LE, and 2:1 is always usable as an
+	 * alternative, skip 2:2 to get rid of the trouble.
+	 *
+	 * Setting chip->setup to any non-default value disables the fixup and
+	 * reenables 2:2 (in this case QUIRK_FLAG_FIXED_RATE is required).
+	 */
+	if (!chip->setup && iface == 2 && altno == 2) {
+		usb_audio_info(chip,
+			       "%d:%d: skipping broken altsetting on HP Elite x3 Lap Dock\n",
+			       iface, altno);
+		return 1;
+	}
+
+	return 0;
+}
+
 int snd_usb_apply_interface_quirk(struct snd_usb_audio *chip,
 				  int iface,
 				  int altno)
 {
-	/* audiophile usb: skip altsets incompatible with device_setup */
-	if (chip->usb_id == USB_ID(0x0763, 0x2003))
-		return audiophile_skip_setting_quirk(chip, iface, altno);
+	switch (chip->usb_id) {
+	/* HP Elite x3 Lap Dock: skip broken altsets */
+	case USB_ID(0x03f0, 0x0c56):
+		return hp_elite_x3_lap_dock_skip_setting_quirk(chip, iface, altno);
 	/* quattro usb: skip altsets incompatible with device_setup */
-	if (chip->usb_id == USB_ID(0x0763, 0x2001))
+	case USB_ID(0x0763, 0x2001):
 		return quattro_skip_setting_quirk(chip, iface, altno);
+	/* audiophile usb: skip altsets incompatible with device_setup */
+	case USB_ID(0x0763, 0x2003):
+		return audiophile_skip_setting_quirk(chip, iface, altno);
 	/* fasttrackpro usb: skip altsets incompatible with device_setup */
-	if (chip->usb_id == USB_ID(0x0763, 0x2012))
+	case USB_ID(0x0763, 0x2012):
 		return fasttrackpro_skip_setting_quirk(chip, iface, altno);
 	/* presonus studio 1810c: skip altsets incompatible with device_setup */
-	if (chip->usb_id == USB_ID(0x194f, 0x010c))
+	case USB_ID(0x194f, 0x010c):
 		return s1810c_skip_setting_quirk(chip, iface, altno);
+	}
 
 	return 0;
 }
@@ -1682,6 +1741,8 @@ int snd_usb_apply_boot_quirk_once(struct usb_device *dev,
 	switch (id) {
 	case USB_ID(0x07fd, 0x0008): /* MOTU M Series, 1st hardware version */
 		return snd_usb_motu_m_series_boot_quirk(dev);
+	case USB_ID(0x1397, 0x1234): /* Behringer CM1A */
+		return snd_usb_cm1a_boot_quirk(dev);
 	}
 
 	return 0;
@@ -1765,6 +1826,62 @@ static void set_format_emu_quirk(struct snd_usb_substream *subs,
 	}
 	snd_emuusb_set_samplerate(subs->stream->chip, emu_samplerate_id);
 	subs->pkt_offset_adj = (emu_samplerate_id >= EMU_QUIRK_SR_176400HZ) ? 4 : 0;
+}
+
+/*
+ * The DDJ-SZ needs a vendor "arm" sequence before its capture path
+ * produces real audio; without it capture runs with no USB or ALSA error
+ * but delivers a hard zero on every channel. The sequence is replicated
+ * byte-for-byte from a USB capture of the Windows driver: each write is
+ * followed by a status read whose content is a fixed value regardless of
+ * what was written, but the read is replicated too, since it is unclear
+ * whether the device requires it to process the preceding write.
+ *
+ * This runs from snd_usb_set_format_quirk(), i.e. on every format setup
+ * rather than once per device. Re-arming is harmless in practice and
+ * keeps the device armed if it is reset behind our back.
+ */
+static void ddj_sz_arm_quirk(struct usb_device *dev)
+{
+	static const struct {
+		u16 value;
+		u16 index;
+		u8 read_len;
+	} cmds[] = {
+		{ 0x0100, 0x8002, 6 },
+		{ 0x0200, 0x8002, 6 },
+		{ 0x0303, 0x8002, 6 },
+		{ 0x0403, 0x8002, 6 },
+		{ 0x050a, 0x8002, 6 },
+		{ 0x0000, 0x8003, 2 },
+	};
+	u8 buf[6];
+	unsigned int i;
+	int err;
+
+	for (i = 0; i < ARRAY_SIZE(cmds); i++) {
+		err = snd_usb_ctl_msg(dev, usb_sndctrlpipe(dev, 0), 3,
+				      USB_DIR_OUT | USB_TYPE_VENDOR |
+				      USB_RECIP_DEVICE,
+				      cmds[i].value, cmds[i].index, NULL, 0);
+		if (err < 0)
+			goto err_out;
+
+		err = snd_usb_ctl_msg(dev, usb_rcvctrlpipe(dev, 0), 0,
+				      USB_DIR_IN | USB_TYPE_VENDOR |
+				      USB_RECIP_DEVICE,
+				      0x0000, cmds[i].index, buf,
+				      cmds[i].read_len);
+		if (err < 0)
+			goto err_out;
+	}
+
+	return;
+
+err_out:
+	dev_warn(&dev->dev,
+		 "DDJ-SZ: arm sequence step %u failed (%d), capture may be silent\n",
+		 i, err);
 }
 
 static int pioneer_djm_set_format_quirk(struct snd_usb_substream *subs,
@@ -1947,6 +2064,10 @@ void snd_usb_set_format_quirk(struct snd_usb_substream *subs,
 	case USB_ID(0x08e4, 0x017f): /* Pioneer DJM-750 */
 	case USB_ID(0x08e4, 0x0163): /* Pioneer DJM-850 */
 		pioneer_djm_set_format_quirk(subs, 0x0086);
+		break;
+	case USB_ID(0x08e4, 0x0191): /* Pioneer DDJ-SZ */
+		ddj_sz_arm_quirk(subs->dev);
+		pioneer_djm_set_format_quirk(subs, 0x0082);
 		break;
 	case USB_ID(0x0dba, 0x5000):
 		mbox3_set_format_quirk(subs, fmt); /* Digidesign Mbox 3 */
@@ -2287,6 +2408,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
 	DEVICE_FLG(0x0124, 0x0c21, /* Generic USB Headphone */
 		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
+	DEVICE_FLG(0x03f0, 0x0c56, /* HP Elite x3 Lap Dock */
+		   QUIRK_FLAG_FIXED_RATE),
 	DEVICE_FLG(0x03f0, 0x654a, /* HP 320 FHD Webcam */
 		   QUIRK_FLAG_GET_SAMPLE_RATE | QUIRK_FLAG_MIC_RES_16),
 	DEVICE_FLG(0x041e, 0x3000, /* Creative SB Extigy */
@@ -2464,6 +2587,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_PLAYBACK_FIRST | QUIRK_FLAG_GENERIC_IMPLICIT_FB),
 	DEVICE_FLG(0x1397, 0x050c, /* Behringer Flow 8 */
 		   QUIRK_FLAG_IFB_SILENCE_ON_EMPTY),
+	DEVICE_FLG(0x1397, 0x0510, /* Behringer UV1 */
+		   QUIRK_FLAG_PLAYBACK_FIRST | QUIRK_FLAG_GENERIC_IMPLICIT_FB),
 	DEVICE_FLG(0x13e5, 0x0001, /* Serato Phono */
 		   QUIRK_FLAG_IGNORE_CTL_ERROR),
 	DEVICE_FLG(0x152a, 0x85dd, /* SMSL USB DAC */

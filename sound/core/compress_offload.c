@@ -113,7 +113,7 @@ static int snd_compr_open(struct inode *inode, struct file *f)
 		goto __error;
 	}
 
-	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	data = kzalloc_obj(*data);
 	if (!data) {
 		ret = -ENOMEM;
 		goto __error;
@@ -126,7 +126,7 @@ static int snd_compr_open(struct inode *inode, struct file *f)
 	data->stream.direction = dirn;
 	data->stream.private_data = compr->private_data;
 	data->stream.device = compr;
-	runtime = kzalloc(sizeof(*runtime), GFP_KERNEL);
+	runtime = kzalloc_obj(*runtime);
 	if (!runtime) {
 		ret = -ENOMEM;
 		goto __error;
