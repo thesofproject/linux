@@ -80,6 +80,9 @@ struct snd_ipc4_nhlt {
  * @fw_context_save: Firmware supports full context save and restore
  * @libraries_restored: The libraries have been retained during firmware boot
  * @nhlt_list: The NHLT tables from the BIOS and the topology manifest
+ * @uaol_supported: The firmware has been built with UAOL support
+ * @uaol_caps: UAOL capabilities reported by the firmware, NULL if they were not
+ *	       reported
  *
  * @codec_info: Information about the available codecs in booted firmware. The
  *		data is to be used by the code for compressed support.
@@ -98,6 +101,8 @@ struct sof_ipc4_fw_data {
 	bool fw_context_save;
 	bool libraries_restored;
 	struct list_head nhlt_list;
+	bool uaol_supported;
+	struct sof_ipc4_intel_uaol_caps *uaol_caps;
 
 	void *codec_info;
 
