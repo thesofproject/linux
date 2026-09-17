@@ -1581,7 +1581,7 @@ int sdw_prepare_stream(struct sdw_stream_runtime *stream)
 	if (stream->state != SDW_STREAM_CONFIGURED &&
 	    stream->state != SDW_STREAM_DEPREPARED &&
 	    stream->state != SDW_STREAM_DISABLED) {
-		pr_err("%s: %s: inconsistent state state %d\n",
+		pr_err("%s: %s: inconsistent state %d\n",
 		       __func__, stream->name, stream->state);
 		ret = -EINVAL;
 		goto state_err;
@@ -1665,7 +1665,7 @@ int sdw_enable_stream(struct sdw_stream_runtime *stream)
 
 	if (stream->state != SDW_STREAM_PREPARED &&
 	    stream->state != SDW_STREAM_DISABLED) {
-		pr_err("%s: %s: inconsistent state state %d\n",
+		pr_err("%s: %s: inconsistent state %d\n",
 		       __func__, stream->name, stream->state);
 		ret = -EINVAL;
 		goto state_err;
@@ -1752,7 +1752,7 @@ int sdw_disable_stream(struct sdw_stream_runtime *stream)
 	}
 
 	if (stream->state != SDW_STREAM_ENABLED) {
-		pr_err("%s: %s: inconsistent state state %d\n",
+		pr_err("%s: %s: inconsistent state %d\n",
 		       __func__, stream->name, stream->state);
 		ret = -EINVAL;
 		goto state_err;
@@ -1858,7 +1858,7 @@ int sdw_deprepare_stream(struct sdw_stream_runtime *stream)
 
 	if (stream->state != SDW_STREAM_PREPARED &&
 	    stream->state != SDW_STREAM_DISABLED) {
-		pr_err("%s: %s: inconsistent state state %d\n",
+		pr_err("%s: %s: inconsistent state %d\n",
 		       __func__, stream->name, stream->state);
 		ret = -EINVAL;
 		goto state_err;

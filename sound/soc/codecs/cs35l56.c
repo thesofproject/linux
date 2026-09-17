@@ -18,9 +18,11 @@
 #include <linux/interrupt.h>
 #include <linux/math.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
 #include <linux/property.h>
+#include <linux/reboot.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
@@ -36,6 +38,13 @@
 
 #include "wm_adsp.h"
 #include "cs35l56.h"
+
+/*
+ * snd_soc_register_component() can call component_probe() on all instances
+ * in a card, so deferred registration must be protected across all instances.
+ */
+static DEFINE_MUTEX(cs35l56_component_register_lock);
+static bool cs35l56_shutting_down;
 
 void cs35l56_mask_soundwire_interrupts(struct cs35l56_private *cs35l56)
 {
@@ -604,12 +613,22 @@ static int cs35l56_asp_dai_set_sysclk(struct snd_soc_dai *dai,
 	return 0;
 }
 
+static const u64 cs35l56_selectable_formats =
+	SND_SOC_POSSIBLE_DAIFMT_I2S	|
+	SND_SOC_POSSIBLE_DAIFMT_DSP_A	|
+	SND_SOC_POSSIBLE_DAIFMT_NB_NF	|
+	SND_SOC_POSSIBLE_DAIFMT_NB_IF	|
+	SND_SOC_POSSIBLE_DAIFMT_IB_NF	|
+	SND_SOC_POSSIBLE_DAIFMT_IB_IF;
+
 static const struct snd_soc_dai_ops cs35l56_ops = {
 	.probe = cs35l56_asp_dai_probe,
 	.set_fmt = cs35l56_asp_dai_set_fmt,
 	.set_tdm_slot = cs35l56_asp_dai_set_tdm_slot,
 	.hw_params = cs35l56_asp_dai_hw_params,
 	.set_sysclk = cs35l56_asp_dai_set_sysclk,
+	.auto_selectable_formats = &cs35l56_selectable_formats,
+	.num_auto_selectable_formats = 1,
 };
 
 static void cs35l56_sdw_dai_shutdown(struct snd_pcm_substream *substream,
@@ -1957,6 +1976,11 @@ static void cs35l56_component_register_work(struct work_struct *work)
 						       component_register_work);
 	int ret;
 
+	guard(mutex)(&cs35l56_component_register_lock);
+
+	if (cs35l56_shutting_down)
+		return;
+
 	PM_RUNTIME_ACQUIRE_AUTOSUSPEND(cs35l56->base.dev, pm_err);
 	ret = PM_RUNTIME_ACQUIRE_ERR(&pm_err);
 	if (ret) {
@@ -2216,6 +2240,37 @@ EXPORT_NS_GPL_DEV_PM_OPS(cs35l56_pm_ops_i2c_spi, SND_SOC_CS35L56_CORE) = {
 	NOIRQ_SYSTEM_SLEEP_PM_OPS(cs35l56_system_suspend_no_irq, cs35l56_system_resume_no_irq)
 };
 #endif
+
+static int cs35l56_reboot_notify(struct notifier_block *nb,
+				 unsigned long action, void *data)
+{
+	guard(mutex)(&cs35l56_component_register_lock);
+	cs35l56_shutting_down = true;
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block cs35l56_reboot_notifier = {
+	.notifier_call = cs35l56_reboot_notify,
+};
+
+static int __init cs35l56_modinit(void)
+{
+	/*
+	 * Use reboot notifier to prevent race between shutdown and
+	 * snd_soc_register_component(). Driver shutdown() callback would
+	 * run too late, after device_shutdown() is already walking the
+	 * device list that component registration can modify.
+	 */
+	return register_reboot_notifier(&cs35l56_reboot_notifier);
+}
+module_init(cs35l56_modinit);
+
+static void __exit cs35l56_modexit(void)
+{
+	unregister_reboot_notifier(&cs35l56_reboot_notifier);
+}
+module_exit(cs35l56_modexit);
 
 MODULE_DESCRIPTION("ASoC CS35L56 driver");
 MODULE_IMPORT_NS("SND_SOC_CS35L56_SHARED");
