@@ -135,7 +135,8 @@ static bool find_slave(struct sdw_bus *bus,
 	if (link_id != bus->link_id)
 		return false;
 
-	sdw_extract_slave_id(bus, addr, id);
+	sdw_extract_slave_id(addr, id);
+	sdw_debug_log_slave_id(bus->dev, id);
 
 	return true;
 }
