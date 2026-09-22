@@ -830,6 +830,32 @@ static void pin_cvt_fixup(struct hda_codec *codec,
 		spec->ops.pin_cvt_fixup(codec, per_pin, cvt_nid);
 }
 
+/*
+ * Repeat the narrowing of the PCM as hw_constraints for a codec which asked for
+ * it. The runtime->hw of such a codec is overwritten after this open returns,
+ * losing everything set there, while nothing touches the constraints. A DSP
+ * driver exposing the PCM as an ASoC dynamic PCM backend is the case that needs
+ * it, the frontend being what userspace negotiates against there.
+ */
+static void hdmi_pcm_add_constraints(struct hda_pcm_stream *hinfo,
+				     struct snd_pcm_substream *substream,
+				     struct hdmi_eld *eld)
+{
+	snd_pcm_hw_constraint_mask64(substream->runtime,
+				     SNDRV_PCM_HW_PARAM_FORMAT, hinfo->formats);
+	snd_pcm_hw_constraint_minmax(substream->runtime,
+				     SNDRV_PCM_HW_PARAM_CHANNELS,
+				     hinfo->channels_min, hinfo->channels_max);
+	/*
+	 * The rates a converter supports are a mask, which no constraint can
+	 * take, so they are left to the caps the PCM was created with. The ELD
+	 * rates are a finer restriction than @hinfo can express anyway, being
+	 * correlated with the channel count.
+	 */
+	if (eld)
+		snd_pcm_hw_constraint_eld(substream->runtime, eld->eld_buffer);
+}
+
 /* called in hdmi_pcm_open when no pin is assigned to the PCM */
 static int hdmi_pcm_open_no_pin(struct hda_pcm_stream *hinfo,
 			 struct hda_codec *codec,
@@ -870,6 +896,9 @@ static int hdmi_pcm_open_no_pin(struct hda_pcm_stream *hinfo,
 	runtime->hw.channels_max = hinfo->channels_max;
 	runtime->hw.formats = hinfo->formats;
 	runtime->hw.rates = hinfo->rates;
+
+	if (codec->constrain_pcms)
+		hdmi_pcm_add_constraints(hinfo, substream, NULL);
 
 	snd_pcm_hw_constraint_step(substream->runtime, 0,
 				   SNDRV_PCM_HW_PARAM_CHANNELS, 2);
@@ -956,6 +985,12 @@ static int hdmi_pcm_open(struct hda_pcm_stream *hinfo,
 	runtime->hw.channels_max = hinfo->channels_max;
 	runtime->hw.formats = hinfo->formats;
 	runtime->hw.rates = hinfo->rates;
+
+	if (codec->constrain_pcms) {
+		if (static_hdmi_pcm || !eld->eld_valid)
+			eld = NULL;
+		hdmi_pcm_add_constraints(hinfo, substream, eld);
+	}
 
 	snd_pcm_hw_constraint_step(substream->runtime, 0,
 				   SNDRV_PCM_HW_PARAM_CHANNELS, 2);

@@ -181,6 +181,15 @@ static int hda_codec_probe(struct snd_sof_dev *sdev, int address)
 	hda_priv->dev_index = address;
 	dev_set_drvdata(&codec->core.dev, hda_priv);
 
+	/*
+	 * Every codec here is exposed as a dynamic PCM backend, and the ASoC
+	 * core overwrites the runtime->hw of those with what topology says,
+	 * after the codec has set it up. Ask for hw_constraints instead, which
+	 * survive, so that a restriction only the codec knows about reaches the
+	 * frontend that userspace negotiates against.
+	 */
+	codec->constrain_pcms = 1;
+
 	if ((resp & 0xFFFF0000) == IDISP_VID_INTEL) {
 		if (!hbus->core.audio_component) {
 			dev_dbg(sdev->dev,
