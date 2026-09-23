@@ -248,7 +248,8 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	 * suspended, it is brought back to full power and then
 	 * suspended again
 	 */
-	if (tplg_ops && tplg_ops->tear_down_all_pipelines && (old_state == SOF_DSP_PM_D0))
+	if (tplg_ops && tplg_ops->tear_down_all_pipelines && (old_state == SOF_DSP_PM_D0) &&
+	    (target_state != SOF_DSP_PM_D0))
 		tplg_ops->tear_down_all_pipelines(sdev, false);
 
 	if (sdev->fw_state != SOF_FW_BOOT_COMPLETE)
