@@ -683,9 +683,15 @@ static int hda_dsp_set_power_state(struct snd_sof_dev *sdev,
 		ret = hda_dsp_set_D0_state(sdev, target_state);
 		break;
 	case SOF_DSP_PM_D3:
-		/* The only allowed transition is: D0I0 -> D3 */
+		/*
+		 * The only allowed transition is D0I0 -> D3. If the firmware
+		 * crashed, the D0I3 -> D0I0 IPC cannot succeed, but the DSP can
+		 * still be powered down directly.
+		 */
 		if (sdev->dsp_power_state.state == SOF_DSP_PM_D0 &&
-		    sdev->dsp_power_state.substate == SOF_HDA_DSP_PM_D0I0) {
+		    (sdev->dsp_power_state.substate == SOF_HDA_DSP_PM_D0I0 ||
+		     sdev->fw_state == SOF_FW_CRASHED ||
+		     sdev->fw_state == SOF_FW_BOOT_FAILED)) {
 			struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 			const struct sof_intel_dsp_desc *chip = hda->desc;
 			int ret, j;
