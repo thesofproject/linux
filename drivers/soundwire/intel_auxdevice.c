@@ -641,6 +641,7 @@ static int __maybe_unused intel_suspend(struct device *dev)
 	u32 clock_stop_quirks;
 	int ret;
 
+	cdns->peripheral_int_mask = CDNS_MCP_INT_SLAVE_ALERT;
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
 		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
 			bus->link_id);
@@ -690,6 +691,7 @@ static int __maybe_unused intel_suspend_runtime(struct device *dev)
 	u32 clock_stop_quirks;
 	int ret;
 
+	cdns->peripheral_int_mask = CDNS_MCP_INT_SLAVE_ALERT;
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
 		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
 			bus->link_id);
@@ -728,6 +730,7 @@ static int __maybe_unused intel_resume(struct device *dev)
 	struct sdw_bus *bus = &cdns->bus;
 	int ret;
 
+	cdns->peripheral_int_mask = CDNS_MCP_INT_SLAVE_MASK;
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
 		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
 			bus->link_id);
@@ -785,6 +788,7 @@ static int __maybe_unused intel_resume_runtime(struct device *dev)
 	u32 clock_stop_quirks;
 	int ret;
 
+	cdns->peripheral_int_mask = CDNS_MCP_INT_SLAVE_MASK;
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
 		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
 			bus->link_id);

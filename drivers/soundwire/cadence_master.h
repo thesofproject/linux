@@ -17,6 +17,12 @@
 
 #define SDW_CADENCE_MCP_IP_OFFSET	0x4000
 
+#define CDNS_MCP_INT_SLAVE_RSVD			BIT(15)
+#define CDNS_MCP_INT_SLAVE_ALERT		BIT(14)
+#define CDNS_MCP_INT_SLAVE_ATTACH		BIT(13)
+#define CDNS_MCP_INT_SLAVE_NATTACH		BIT(12)
+#define CDNS_MCP_INT_SLAVE_MASK			GENMASK(15, 12)
+
 /**
  * struct sdw_cdns_pdi: PDI (Physical Data Interface) instance
  *
@@ -108,6 +114,7 @@ struct sdw_cdns_dai_runtime {
  * @dev: Linux device
  * @bus: Bus handle
  * @instance: instance number
+ * @peripheral_int_mask: Peripheral interrupt mask
  * @ip_offset: version-dependent offset to access IP_MCP registers and fields
  * @response_buf: SoundWire response buffer
  * @tx_complete: Tx completion
@@ -125,6 +132,7 @@ struct sdw_cdns {
 	struct device *dev;
 	struct sdw_bus bus;
 	unsigned int instance;
+	unsigned int peripheral_int_mask;
 
 	u32 ip_offset;
 
