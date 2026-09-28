@@ -1041,7 +1041,7 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 {
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct snd_soc_acpi_mach_params *mach_params;
-	struct snd_soc_acpi_mach *hda_mach;
+	struct snd_soc_acpi_mach *hda_mach, *mach_alt;
 	struct snd_sof_pdata *pdata = sdev->pdata;
 	const char *tplg_filename;
 	int codec_num = 0;
@@ -1094,6 +1094,15 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 			 */
 			if (!pdata->tplg_filename)
 				tplg_fixup = true;
+
+			if (hda_mach->machine_quirk) {
+				mach_alt = hda_mach->machine_quirk(hda_mach);
+				if (mach_alt) {
+					hda_mach = mach_alt;
+					tplg_fixup = false;
+					dev_dbg(bus->dev, "using quirk for HDA machine driver\n");
+				}
+			}
 
 			if (tplg_fixup &&
 			    codec_num == 1 && HDA_IDISP_CODEC(bus->codec_mask)) {
