@@ -2949,6 +2949,74 @@ static int sof_ipc4_process_add_base_cfg_extn(struct snd_sof_widget *swidget)
 	return 0;
 }
 
+/*
+ * Look up the output format of a process module for the path being prepared.
+ * @in_fmt is the selected input format, NULL for modules without input formats.
+ */
+static int sof_ipc4_process_output_fmt(struct snd_sof_dev *sdev,
+				       struct snd_sof_widget *swidget,
+				       struct sof_ipc4_base_module_cfg *base_config,
+				       struct sof_ipc4_available_audio_format *available_fmt,
+				       struct sof_ipc4_audio_format *in_fmt,
+				       struct snd_pcm_hw_params *fe_params, int dir)
+{
+	u32 ref_rate, ref_channels;
+	int ref_valid_bits, ref_type;
+
+	if (in_fmt) {
+		/*
+		 * The process module can change parameters and their operation
+		 * depends on the direction:
+		 * Playback: typically they have single output format. This is
+		 *	     to 'force' the conversion from input to output.
+		 *	     Use the input format as reference since the single
+		 *	     format is going to be picked.
+		 * Capture: typically they have multiple output formats to
+		 *	    convert from dai (input) to FE (output) parameters.
+		 *          Use the input format as base and replace the param
+		 *	    which is changed by the module with the FE parameter
+		 *	    Reason: we can have module which changes the
+		 *	            parameters in path, we cannot use the full
+		 *		    FE param set for the module output lookup.
+		 */
+		ref_rate = in_fmt->sampling_frequency;
+		ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
+		ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
+		ref_type = sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg);
+	} else {
+		/* for modules without input formats, use FE params as reference */
+		ref_rate = params_rate(fe_params);
+		ref_channels = params_channels(fe_params);
+		ref_type = sof_ipc4_get_sample_type(sdev, fe_params);
+		if (ref_type < 0)
+			return ref_type;
+
+		ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
+		if (ref_valid_bits < 0)
+			return ref_valid_bits;
+	}
+
+	if (dir == SNDRV_PCM_STREAM_CAPTURE) {
+		if (available_fmt->changed_params & BIT(SNDRV_PCM_HW_PARAM_RATE))
+			ref_rate = params_rate(fe_params);
+		if (available_fmt->changed_params & BIT(SNDRV_PCM_HW_PARAM_CHANNELS))
+			ref_channels = params_channels(fe_params);
+		if (available_fmt->changed_params & BIT(SNDRV_PCM_HW_PARAM_FORMAT)) {
+			ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
+			if (ref_valid_bits < 0)
+				return ref_valid_bits;
+
+			ref_type = sof_ipc4_get_sample_type(sdev, fe_params);
+			if (ref_type < 0)
+				return ref_type;
+		}
+	}
+
+	return sof_ipc4_init_output_audio_fmt(sdev, swidget, base_config, available_fmt,
+					      ref_rate, ref_channels, ref_valid_bits,
+					      ref_type);
+}
+
 static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 					   struct snd_pcm_hw_params *fe_params,
 					   struct snd_sof_platform_stream_params *platform_params,
@@ -2965,15 +3033,26 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 
 	if (available_fmt->num_input_formats) {
 		if (swidget->prepared) {
+			/* the module is instantiated, do not modify its base config */
+			struct sof_ipc4_base_module_cfg scratch = process->base_config;
+			struct sof_ipc4_audio_format *in_fmt = &process->base_config.audio_fmt;
+
 			if (!available_fmt->num_output_formats)
 				return 0;
 
+			/* a multi-output module can be shared by paths using different pins */
+			output_fmt_index = sof_ipc4_process_output_fmt(sdev, swidget, &scratch,
+								       available_fmt, in_fmt,
+								       fe_params, dir);
+			if (output_fmt_index < 0)
+				return output_fmt_index;
+
 			/* modify the pipeline params with the output format */
 			return sof_ipc4_update_hw_params(sdev, pipeline_params,
-							&process->output_format,
-							BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
-							BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
-							BIT(SNDRV_PCM_HW_PARAM_RATE));
+					&available_fmt->output_pin_fmts[output_fmt_index].audio_fmt,
+					BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
+					BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
+					BIT(SNDRV_PCM_HW_PARAM_RATE));
 		}
 
 		input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
@@ -2986,88 +3065,31 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 
 	/* Configure output audio format only if the module supports output */
 	if (available_fmt->num_output_formats) {
-		struct sof_ipc4_audio_format *in_fmt;
+		struct sof_ipc4_audio_format *in_fmt = NULL;
 		struct sof_ipc4_pin_format *pin_fmt;
-		u32 ref_rate, ref_channels;
-		int ref_valid_bits, ref_type;
 
-		if (available_fmt->num_input_formats) {
-			/*
-			 * The process module can change parameters and their operation
-			 * depends on the direction:
-			 * Playback: typically they have single output format. This is
-			 *	     to 'force' the conversion from input to output.
-			 *	     Use the input format as reference since the single
-			 *	     format is going to be picked.
-			 * Capture: typically they have multiple output formats to
-			 *	    convert from dai (input) to FE (output) parameters.
-			 *          Use the input format as base and replace the param
-			 *	    which is changed by the module with the FE parameter
-			 *	    Reason: we can have module which changes the
-			 *	            parameters in path, we cannot use the full
-			 *		    FE param set for the module output lookup.
-			 */
+		if (available_fmt->num_input_formats)
 			in_fmt = &available_fmt->input_pin_fmts[input_fmt_index].audio_fmt;
 
-			ref_rate = in_fmt->sampling_frequency;
-			ref_channels =
-				SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
-			ref_valid_bits =
-				SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
-			ref_type = sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg);
-		} else {
-			/* for modules without input formats, use FE params as reference */
-			ref_rate = params_rate(fe_params);
-			ref_channels = params_channels(fe_params);
-			ret = sof_ipc4_get_sample_type(sdev, fe_params);
-			if (ret < 0)
-				return ret;
-			ref_type = (u32)ret;
-
-			ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
-			if (ref_valid_bits < 0)
-				return ref_valid_bits;
-		}
-
-		if (dir == SNDRV_PCM_STREAM_CAPTURE) {
-			if (available_fmt->changed_params & BIT(SNDRV_PCM_HW_PARAM_RATE))
-				ref_rate = params_rate(fe_params);
-			if (available_fmt->changed_params & BIT(SNDRV_PCM_HW_PARAM_CHANNELS))
-				ref_channels = params_channels(fe_params);
-			if (available_fmt->changed_params & BIT(SNDRV_PCM_HW_PARAM_FORMAT)) {
-				ref_valid_bits = sof_ipc4_get_valid_bits(sdev, fe_params);
-				if (ref_valid_bits < 0)
-					return ref_valid_bits;
-
-				ref_type = sof_ipc4_get_sample_type(sdev, fe_params);
-				if (ref_type < 0)
-					return ref_type;
-			}
-		}
-		output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
-								  &process->base_config,
-								  available_fmt,
-								  ref_rate,
-								  ref_channels,
-								  ref_valid_bits,
-								  ref_type);
+		output_fmt_index = sof_ipc4_process_output_fmt(sdev, swidget,
+							       &process->base_config,
+							       available_fmt, in_fmt,
+							       fe_params, dir);
 		if (output_fmt_index < 0)
 			return output_fmt_index;
 
 		pin_fmt = &available_fmt->output_pin_fmts[output_fmt_index];
 
 		/* copy Pin output format for Pin 0 only */
-		if (pin_fmt->pin_index == 0) {
+		if (pin_fmt->pin_index == 0)
 			memcpy(&process->output_format, &pin_fmt->audio_fmt,
 			       sizeof(struct sof_ipc4_audio_format));
 
-			/* modify the pipeline params with the output format */
-			ret = sof_ipc4_update_hw_params(sdev, pipeline_params,
-							&process->output_format,
-							available_fmt->changed_params);
-			if (ret)
-				return ret;
-		}
+		/* modify the pipeline params with the output format of the selected pin */
+		ret = sof_ipc4_update_hw_params(sdev, pipeline_params, &pin_fmt->audio_fmt,
+						available_fmt->changed_params);
+		if (ret)
+			return ret;
 
 		/* set base cfg to match the first output format if there are no input formats */
 		if (!available_fmt->num_input_formats) {
