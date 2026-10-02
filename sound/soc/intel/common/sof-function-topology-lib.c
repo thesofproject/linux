@@ -64,7 +64,6 @@ static bool tplg_files_exist(struct device *dev, const char *tplg_files)
 	dev_warn(dev,
 		 "download it from https://github.com/thesofproject/sof-bin/\n");
 	return false;
-
 }
 
 static char *get_tplg_filename(struct device *dev, const char *prefix,
@@ -122,7 +121,7 @@ static int get_ssp_tplg_dev(struct device *dev, struct snd_soc_dai_link *dai_lin
 {
 	unsigned int ssp_port;
 
-	if (sscanf(dai_link->name, "SSP%d", &ssp_port) != 1) {
+	if (sscanf(dai_link->name, "SSP%u", &ssp_port) != 1) {
 		dev_err(dev, "Can't get SSP port from dai_link->name %s\n", dai_link->name);
 		return -EINVAL;
 	}

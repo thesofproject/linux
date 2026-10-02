@@ -872,6 +872,49 @@ static int snd_usb_cm1a_boot_quirk(struct usb_device *dev)
 }
 
 /*
+ * The Xiaomi audio connector ignores UAC2 volume changes after reconnecting
+ * until the device and configuration descriptors have been read again.
+ */
+#define XIAOMI_AUDIO_MAX_CONFIG_SIZE 1024
+
+static void snd_usb_xiaomi_boot_quirk(struct usb_device *dev)
+{
+	u8 *buf __free(kfree) = kmalloc(XIAOMI_AUDIO_MAX_CONFIG_SIZE, GFP_KERNEL);
+	struct usb_config_descriptor *config;
+	unsigned int length;
+	int ret;
+
+	if (!buf)
+		return;
+
+	ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, buf,
+				 USB_DT_DEVICE_SIZE);
+	if (ret != USB_DT_DEVICE_SIZE) {
+		dev_warn(&dev->dev, "device descriptor re-read failed: %d\n", ret);
+		return;
+	}
+
+	ret = usb_get_descriptor(dev, USB_DT_CONFIG, 0, buf,
+				 USB_DT_CONFIG_SIZE);
+	if (ret != USB_DT_CONFIG_SIZE) {
+		dev_warn(&dev->dev, "configuration header re-read failed: %d\n", ret);
+		return;
+	}
+
+	config = (struct usb_config_descriptor *)buf;
+	length = le16_to_cpu(config->wTotalLength);
+	if (length < USB_DT_CONFIG_SIZE ||
+	    length > XIAOMI_AUDIO_MAX_CONFIG_SIZE) {
+		dev_warn(&dev->dev, "unexpected configuration length: %u\n", length);
+		return;
+	}
+
+	ret = usb_get_descriptor(dev, USB_DT_CONFIG, 0, buf, length);
+	if (ret != (int)length)
+		dev_warn(&dev->dev, "configuration descriptor re-read failed: %d\n", ret);
+}
+
+/*
  * Some sound cards from Native Instruments are in fact compliant to the USB
  * audio standard of version 2 and other approved USB standards, even though
  * they come up as vendor-specific device when first connected.
@@ -1741,9 +1784,14 @@ int snd_usb_apply_boot_quirk_once(struct usb_device *dev,
 	switch (id) {
 	case USB_ID(0x07fd, 0x0008): /* MOTU M Series, 1st hardware version */
 		return snd_usb_motu_m_series_boot_quirk(dev);
-	case USB_ID(0x1397, 0x1234): /* Behringer CM1A */
-		return snd_usb_cm1a_boot_quirk(dev);
+	case USB_ID(0x2717, 0xd005): /* Xiaomi audio connector */
+		snd_usb_xiaomi_boot_quirk(dev);
+		return 0;
 	}
+
+	/* Behringer devices may need explicit device descriptor read at boot */
+	if (USB_ID_VENDOR(id) == 0x1397)
+		return snd_usb_cm1a_boot_quirk(dev);
 
 	return 0;
 }
@@ -2540,6 +2588,10 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_CTL_MSG_DELAY_1M),
 	DEVICE_FLG(0x0a73, 0x003a, /* Mackie DLZ Creator XS */
 		   QUIRK_FLAG_ALWAYS_SET_RATE),
+	DEVICE_FLG(0x0b05, 0x1826, /* ASUS SupremeFX Hi-Fi */
+		   QUIRK_FLAG_DISABLE_AUTOSUSPEND),
+	DEVICE_FLG(0x0b05, 0x1827, /* ASUS SupremeFX Hi-Fi */
+		   QUIRK_FLAG_DISABLE_AUTOSUSPEND),
 	DEVICE_FLG(0x0b05, 0x18a6, /* ASUSTek Computer, Inc. */
 		   QUIRK_FLAG_MIXER_CAPTURE_MIN_MUTE),
 	DEVICE_FLG(0x0b0e, 0x0349, /* Jabra 550a */
@@ -2684,8 +2736,6 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
 	DEVICE_FLG(0x262a, 0x9302, /* ddHiFi TC44C */
 		   QUIRK_FLAG_DSD_RAW),
-	DEVICE_FLG(0x2708, 0x0002, /* Audient iD14 */
-		   QUIRK_FLAG_IGNORE_CTL_ERROR),
 	DEVICE_FLG(0x2772, 0x0502, /* Musical Fidelity M6s DAC */
 		   0), /* for avoiding QUIRK_FLAG_DSD_RAW with vendor match */
 	DEVICE_FLG(0x2912, 0x30c8, /* Audioengine D1 */
@@ -2716,6 +2766,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_IGNORE_CTL_ERROR),
 	DEVICE_FLG(0x3255, 0x0000, /* Luxman D-10X */
 		   QUIRK_FLAG_ITF_USB_DSD_DAC | QUIRK_FLAG_CTL_MSG_DELAY),
+	DEVICE_FLG(0x32bb, 0x0004, /* HiBy FC4 */
+		   QUIRK_FLAG_DSD_RAW),
 	DEVICE_FLG(0x3302, 0x17c2, /* TTGK Technology USB-C Audio */
 		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
 	DEVICE_FLG(0x339b, 0x3a07, /* Synaptics HONOR USB-C HEADSET */
@@ -2724,6 +2776,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_GET_SAMPLE_RATE | QUIRK_FLAG_MIC_RES_16),
 	DEVICE_FLG(0x36f9, 0xc009, /* XIBERIA K03S */
 		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
+	DEVICE_FLG(0x3703, 0x2000, /* NUX NAI-24 */
+		   QUIRK_FLAG_SWAP_RATES),
 	DEVICE_FLG(0x3c20, 0x3d21, /* AB13X USB Audio */
 		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
 	DEVICE_FLG(0x413c, 0xa506, /* Dell AE515 sound bar */
@@ -2782,6 +2836,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_DSD_RAW),
 	VENDOR_FLG(0x2622, /* IAG Limited devices */
 		   QUIRK_FLAG_DSD_RAW),
+	VENDOR_FLG(0x2708, /* Audient devices */
+		   QUIRK_FLAG_IGNORE_CTL_ERROR),
 	VENDOR_FLG(0x2772, /* Musical Fidelity devices */
 		   QUIRK_FLAG_DSD_RAW),
 	VENDOR_FLG(0x278b, /* Rotel? */
@@ -2849,6 +2905,7 @@ static const char *const snd_usb_audio_quirk_flag_names[] = {
 	QUIRK_STRING_ENTRY(MIXER_GET_CUR_OK),
 	QUIRK_STRING_ENTRY(PLAYBACK_URB_FIXUP),
 	QUIRK_STRING_ENTRY(ALWAYS_SET_RATE),
+	QUIRK_STRING_ENTRY(SWAP_RATES),
 	NULL
 };
 
