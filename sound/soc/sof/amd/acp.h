@@ -245,6 +245,8 @@ struct acp_dev_data {
 	struct platform_device *dmic_dev;
 	/* mutex lock to protect ACP common registers access */
 	struct mutex acp_lock;
+	/* protect the SoundWire BRA transfer vs the other manager instance */
+	struct mutex acp_bra_lock;
 	/* ACPI information stored between scan and probe steps */
 	struct sdw_amd_acpi_info info;
 	/* sdw context allocated by SoundWire driver */
