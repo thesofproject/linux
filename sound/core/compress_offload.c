@@ -33,6 +33,7 @@
 #include <sound/compress_params.h>
 #include <sound/compress_offload.h>
 #include <sound/compress_driver.h>
+#include <sound/memalloc.h>
 
 /* struct snd_compr_codec_caps overflows the ioctl bit size for some
  * architectures, so we need to disable the relevant ioctls.
@@ -310,6 +311,48 @@ static int snd_compr_ioctl_avail(struct snd_compr_stream *stream,
 	return 0;
 }
 
+static int snd_compr_ioctl_ack(struct snd_compr_stream *stream, unsigned long arg)
+{
+	__u64 bytes;
+	size_t avail;
+	int ret = 0;
+
+	if (copy_from_user(&bytes, (void __user *)arg, sizeof(bytes)))
+		return -EFAULT;
+
+	if (bytes == 0)
+		return 0;
+
+	switch (stream->runtime->state) {
+	case SNDRV_PCM_STATE_SETUP:
+	case SNDRV_PCM_STATE_PREPARED:
+	case SNDRV_PCM_STATE_RUNNING:
+		break;
+	default:
+		return -EBADFD;
+	}
+
+	avail = snd_compr_get_avail(stream);
+	if (bytes > avail)
+		return -EINVAL;
+
+	if (stream->ops->ack) {
+		ret = stream->ops->ack(stream, bytes);
+		if (ret < 0)
+			return ret;
+	}
+
+	stream->runtime->total_bytes_available += bytes;
+
+	if (stream->runtime->state == SNDRV_PCM_STATE_SETUP) {
+		stream->runtime->state = SNDRV_PCM_STATE_PREPARED;
+		pr_debug("stream prepared, Houston we are good to go\n");
+	}
+
+	wake_up(&stream->runtime->sleep);
+	return 0;
+}
+
 static int snd_compr_write_data(struct snd_compr_stream *stream,
 	       const char __user *buf, size_t count)
 {
@@ -439,6 +482,33 @@ static ssize_t snd_compr_read(struct file *f, char __user *buf,
 
 static int snd_compr_mmap(struct file *f, struct vm_area_struct *vma)
 {
+	struct snd_compr_file *data = f->private_data;
+	struct snd_compr_stream *stream;
+	struct snd_compr_runtime *runtime;
+
+	if (snd_BUG_ON(!data))
+		return -EINVAL;
+
+	stream = &data->stream;
+	runtime = stream->runtime;
+
+	if (!runtime)
+		return -ENODATA;
+
+	if (stream->direction == SND_COMPRESS_PLAYBACK) {
+		if (!(vma->vm_flags & (VM_WRITE | VM_READ)))
+			return -EINVAL;
+	} else {
+		if (!(vma->vm_flags & VM_READ))
+			return -EINVAL;
+	}
+
+	if (stream->ops->mmap)
+		return stream->ops->mmap(stream, vma);
+
+	if (runtime->dma_buffer_p)
+		return snd_dma_buffer_mmap(runtime->dma_buffer_p, vma);
+
 	return -ENXIO;
 }
 
@@ -1383,6 +1453,8 @@ static long snd_compr_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		return snd_compr_ioctl_avail(stream, arg, true);
 	case SNDRV_COMPRESS_AVAIL64:
 		return snd_compr_ioctl_avail(stream, arg, false);
+	case SNDRV_COMPRESS_ACK:
+		return snd_compr_ioctl_ack(stream, arg);
 	case SNDRV_COMPRESS_PAUSE:
 		return snd_compr_pause(stream);
 	case SNDRV_COMPRESS_RESUME:
