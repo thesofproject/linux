@@ -657,6 +657,12 @@ static int soc_compr_get_metadata(struct snd_compr_stream *cstream,
 	return snd_soc_component_compr_get_metadata(cstream, metadata);
 }
 
+static int soc_compr_mmap(struct snd_compr_stream *cstream,
+			  struct vm_area_struct *vma)
+{
+	return snd_soc_component_compr_mmap(cstream, vma);
+}
+
 /* ASoC Compress operations */
 static struct snd_compr_ops soc_compr_ops = {
 	.open		= soc_compr_open,
@@ -668,6 +674,7 @@ static struct snd_compr_ops soc_compr_ops = {
 	.trigger	= soc_compr_trigger,
 	.pointer	= soc_compr_pointer,
 	.ack		= soc_compr_ack,
+	.mmap		= soc_compr_mmap,
 	.get_caps	= snd_soc_component_compr_get_caps,
 	.get_codec_caps = snd_soc_component_compr_get_codec_caps,
 };
@@ -683,6 +690,7 @@ static struct snd_compr_ops soc_compr_dyn_ops = {
 	.trigger	= soc_compr_trigger_fe,
 	.pointer	= soc_compr_pointer,
 	.ack		= soc_compr_ack,
+	.mmap		= soc_compr_mmap,
 	.get_caps	= snd_soc_component_compr_get_caps,
 	.get_codec_caps = snd_soc_component_compr_get_codec_caps,
 };

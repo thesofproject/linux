@@ -644,6 +644,30 @@ int snd_soc_component_compr_copy(struct snd_compr_stream *cstream,
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_copy);
 
+int snd_soc_component_compr_mmap(struct snd_compr_stream *cstream,
+				 struct vm_area_struct *vma)
+{
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_soc_component *component;
+	int i, ret = -ENXIO;
+
+	snd_soc_dpcm_mutex_lock(rtd);
+
+	for_each_rtd_components(rtd, i, component) {
+		if (component->driver->compress_ops &&
+		    component->driver->compress_ops->mmap) {
+			ret = component->driver->compress_ops->mmap(
+				component, cstream, vma);
+			break;
+		}
+	}
+
+	snd_soc_dpcm_mutex_unlock(rtd);
+
+	return soc_component_ret(component, ret);
+}
+EXPORT_SYMBOL_GPL(snd_soc_component_compr_mmap);
+
 int snd_soc_component_compr_set_metadata(struct snd_compr_stream *cstream,
 					 struct snd_compr_metadata *metadata)
 {
