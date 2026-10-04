@@ -107,6 +107,9 @@ static int sof_ipc4_compr_stream_free(struct snd_sof_dev *sdev,
 	int ret = 0;
 	int err = 0;
 
+	if (!pcm_ops)
+		return -EINVAL;
+
 	if (spcm->prepared[dir]) {
 		if (spcm->pending_stop[dir])
 			pcm_ops->trigger(sdev->component, NULL, spcm,
@@ -538,6 +541,9 @@ static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 	int dir = cstream->direction;
 	bool trigger_platform = false;
 	int ret = 0;
+
+	if (!pcm_ops || !pcm_ops->trigger)
+		return -EINVAL;
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm) {
