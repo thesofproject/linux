@@ -135,6 +135,9 @@ hda_link_dma_cleanup(struct snd_pcm_substream *substream,
 	if (!hlink)
 		return -EINVAL;
 
+	hda_stream = hstream_to_sof_hda_stream(hext_stream);
+	hda_stream->suspend_ignored = false;
+
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		stream_tag = hdac_stream(hext_stream)->stream_tag;
 		snd_hdac_ext_bus_link_clear_stream_id(hlink, stream_tag);
@@ -157,7 +160,6 @@ hda_link_dma_cleanup(struct snd_pcm_substream *substream,
 	hext_stream->link_prepared = 0;
 
 	/* free the host DMA channel reserved by hostless streams */
-	hda_stream = hstream_to_sof_hda_stream(hext_stream);
 	hda_stream->host_reserved = 0;
 
 	return 0;
@@ -280,6 +282,32 @@ static int __maybe_unused hda_dai_hw_params(struct snd_pcm_substream *substream,
 	return hda_dai_hw_params_data(substream, params, dai, &data, flags);
 }
 
+static bool hda_dai_has_wov_fe(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dpcm *dpcm;
+	struct snd_sof_pcm *spcm;
+
+	if (substream->stream != SNDRV_PCM_STREAM_CAPTURE)
+		return false;
+
+	/*
+	 * Only retain the BE for a connected WoV capture FE that is running
+	 * or has already ignored its suspend trigger. An idle WoV FE may
+	 * still be connected to the BE.
+	 */
+	for_each_dpcm_fe(rtd, SNDRV_PCM_STREAM_CAPTURE, dpcm) {
+		spcm = snd_sof_find_spcm_dai(sdev->component, dpcm->fe);
+		if (spcm && spcm->stream[SNDRV_PCM_STREAM_CAPTURE].d0i3_compatible &&
+		    spcm->stream[SNDRV_PCM_STREAM_CAPTURE].dsp_max_burst_size_in_ms <= 1 &&
+		    (dpcm->fe->dpcm[SNDRV_PCM_STREAM_CAPTURE].state == SND_SOC_DPCM_STATE_START ||
+		     spcm->stream[SNDRV_PCM_STREAM_CAPTURE].suspend_ignored))
+			return true;
+	}
+
+	return false;
+}
+
 /*
  * In contrast to IPC3, the dai trigger in IPC4 mixes pipeline state changes
  * (over IPC channel) and DMA state change (direct host register changes).
@@ -289,6 +317,7 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 {
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, dai);
 	struct hdac_ext_stream *hext_stream;
+	struct sof_intel_hda_stream *hda_stream;
 	struct snd_sof_dev *sdev;
 	int ret;
 
@@ -305,6 +334,24 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 	hext_stream = ops->get_hext_stream(sdev, dai, substream);
 	if (!hext_stream)
 		return -EINVAL;
+	hda_stream = hstream_to_sof_hda_stream(hext_stream);
+
+	if (cmd == SNDRV_PCM_TRIGGER_RESUME && hda_stream->suspend_ignored) {
+		hda_stream->suspend_ignored = false;
+		return 0;
+	}
+
+	/*
+	 * Set the suspend_ignored flag for BE which is used with
+	 * D0I3-compatible streams used for WoV to keep the firmware pipeline
+	 * running.
+	 */
+	if (cmd == SNDRV_PCM_TRIGGER_SUSPEND &&
+	    sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
+	    hda_dai_has_wov_fe(sdev, substream)) {
+		hda_stream->suspend_ignored = true;
+		return 0;
+	}
 
 	if (ops->pre_trigger) {
 		ret = ops->pre_trigger(sdev, dai, substream, cmd);

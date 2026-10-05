@@ -601,6 +601,7 @@ struct sof_intel_hda_stream {
 	struct hdac_ext_stream hext_stream;
 	struct sof_intel_stream sof_intel_stream;
 	int host_reserved; /* reserve host DMA channel */
+	bool suspend_ignored;
 	u32 flags;
 	struct completion ioc;
 };
