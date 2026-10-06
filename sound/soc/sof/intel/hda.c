@@ -58,6 +58,76 @@ static int sdw_clock_stop_quirks = SDW_INTEL_CLK_STOP_BUS_RESET;
 module_param(sdw_clock_stop_quirks, int, 0444);
 MODULE_PARM_DESC(sdw_clock_stop_quirks, "SOF SoundWire clock stop quirks");
 
+void hda_dsp_set_sdw_ignore_suspend(struct snd_sof_dev *sdev,
+				    struct snd_pcm_substream *substream,
+				    bool active)
+{
+	struct snd_soc_pcm_runtime *fe = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dpcm *be_link;
+	int dir = substream->stream;
+
+	if (dir != SNDRV_PCM_STREAM_CAPTURE)
+		return;
+
+	for_each_dpcm_be(fe, dir, be_link) {
+		struct snd_soc_pcm_runtime *be = be_link->be;
+		struct snd_soc_dpcm *fe_link;
+		struct snd_soc_dai *dai;
+		bool ignore_suspend = false;
+		int i;
+
+		for_each_dpcm_fe(be, dir, fe_link) {
+			struct snd_soc_pcm_runtime *other_fe = fe_link->fe;
+			struct snd_pcm_substream *fe_substream;
+			struct snd_sof_pcm *spcm;
+			bool fe_active;
+
+			if (fe_link->state == SND_SOC_DPCM_LINK_STATE_FREE)
+				continue;
+
+			fe_substream = snd_soc_dpcm_get_substream(other_fe, dir);
+			if (!fe_substream || !fe_substream->runtime)
+				continue;
+
+			spcm = snd_sof_find_spcm_dai(sdev->component, other_fe);
+			if (!spcm || !spcm->stream[dir].d0i3_compatible ||
+			    spcm->stream[dir].dsp_max_burst_size_in_ms > 1)
+				continue;
+
+			if (other_fe == fe)
+				fe_active = active;
+			else
+				fe_active = spcm->stream[dir].suspend_ignored ||
+					other_fe->dpcm[dir].state == SND_SOC_DPCM_STATE_START;
+
+			if (fe_active) {
+				ignore_suspend = true;
+				break;
+			}
+		}
+
+		for_each_rtd_cpu_dais(be, i, dai) {
+			struct snd_soc_dapm_widget *w;
+			struct snd_sof_widget *swidget;
+			struct snd_sof_dai *sof_dai;
+			struct sdw_stream_runtime *sdw_stream;
+
+			w = snd_soc_dai_get_widget(dai, dir);
+			if (!w || !w->dobj.private)
+				continue;
+
+			swidget = w->dobj.private;
+			sof_dai = swidget->private;
+			if (!sof_dai || sof_dai->type != SOF_DAI_INTEL_ALH)
+				continue;
+
+			sdw_stream = snd_soc_dai_get_stream(dai, dir);
+			if (!IS_ERR_OR_NULL(sdw_stream))
+				sdw_stream->ignore_suspend = ignore_suspend;
+		}
+	}
+}
+
 static int sdw_params_stream(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data)
 {
@@ -70,6 +140,7 @@ static int sdw_params_stream(struct device *dev,
 			d->name);
 		return -EINVAL;
 	}
+
 	data.dai_index = (params_data->link_id << 8) | d->id;
 	data.dai_data = params_data->alh_stream_id;
 	data.dai_node_id = data.dai_data;
@@ -415,6 +486,10 @@ static inline bool hda_dsp_sdw_check_mic_privacy_irq(struct snd_sof_dev *sdev)
 }
 
 static inline void hda_dsp_sdw_process_mic_privacy(struct snd_sof_dev *sdev) { }
+
+void hda_dsp_set_sdw_ignore_suspend(struct snd_sof_dev *sdev,
+				    struct snd_pcm_substream *substream,
+				    bool active) { }
 
 #endif /* IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE) */
 

@@ -252,6 +252,10 @@ struct snd_sof_dsp_ops {
 	int (*pcm_trigger)(struct snd_sof_dev *sdev,
 			   struct snd_pcm_substream *substream,
 			   int cmd); /* optional */
+	/* update SoundWire BE ignore_suspend state from an SOF FE trigger */
+	void (*pcm_set_sdw_ignore_suspend)(struct snd_sof_dev *sdev,
+					   struct snd_pcm_substream *substream,
+					   bool active); /* optional */
 
 	/* host stream pointer */
 	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,

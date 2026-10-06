@@ -303,6 +303,7 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: hw_free\n");
 
+	snd_sof_pcm_platform_set_sdw_ignore_suspend(sdev, substream, false);
 	ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
 
 	/* unprepare and free the list of DAPM widgets */
@@ -422,6 +423,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			 * remained enabled in D0ix.
 			 */
 			spcm->stream[substream->stream].suspend_ignored = false;
+			snd_sof_pcm_platform_set_sdw_ignore_suspend(sdev, substream, true);
 			return 0;
 		}
 
@@ -431,6 +433,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	case SNDRV_PCM_TRIGGER_RESUME:
 		if (spcm->stream[substream->stream].suspend_ignored) {
 			spcm->stream[substream->stream].suspend_ignored = false;
+			snd_sof_pcm_platform_set_sdw_ignore_suspend(sdev, substream, true);
 			return 0;
 		}
 		spcm_err(spcm, substream->stream, "RESUME trigger is not supported\n");
@@ -449,6 +452,7 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		    spcm->stream[substream->stream].d0i3_compatible &&
 		    spcm->stream[substream->stream].dsp_max_burst_size_in_ms <= 1) {
 			spcm->stream[substream->stream].suspend_ignored = true;
+			snd_sof_pcm_platform_set_sdw_ignore_suspend(sdev, substream, true);
 			return 0;
 		}
 		/* On suspend the DMA must be stopped in DSPless mode */
@@ -502,6 +506,21 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
 	if (!ret && reset_hw_params)
 		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, false);
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		snd_sof_pcm_platform_set_sdw_ignore_suspend(sdev, substream, !ret);
+		break;
+	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		snd_sof_pcm_platform_set_sdw_ignore_suspend(sdev, substream, false);
+		break;
+	default:
+		break;
+	}
 
 	return ret;
 }
@@ -626,6 +645,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: close\n");
 
+	snd_sof_pcm_platform_set_sdw_ignore_suspend(sdev, substream, false);
 	err = snd_sof_pcm_platform_close(sdev, substream);
 	if (err < 0) {
 		spcm_err(spcm, substream->stream,
