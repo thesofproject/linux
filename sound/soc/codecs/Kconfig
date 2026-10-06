@@ -123,6 +123,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_ES8328_I2C
 	imply SND_SOC_ES8375
 	imply SND_SOC_ES8389
+	imply SND_SOC_ES9039Q2M
 	imply SND_SOC_ES9356
 	imply SND_SOC_ES7134
 	imply SND_SOC_ES7241
@@ -1317,6 +1318,19 @@ config SND_SOC_ES8389
 	tristate "Everest Semi ES8389 CODEC"
 	depends on I2C
 
+config SND_SOC_ES9039Q2M
+	tristate "ESS Technology ES9039Q2M CODEC"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Enable support for the ESS Technology ES9039Q2M, a 32-bit
+	  two-channel audio DAC with an asynchronous sample rate converter,
+	  supporting PCM, DSD, DoP and S/PDIF input. This driver covers the
+	  I2C control interface, which the MODE pin selects.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called snd-soc-es9039q2m.
+
 config SND_SOC_ES9356
 	tristate "Everest Semi ES9356 CODEC SDW"
 	depends on SND_SOC_SDCA
@@ -1991,9 +2005,7 @@ config SND_SOC_RT715_SDCA_SDW
 config SND_SOC_RT766_SDCA_SDW
 	tristate "Realtek RT766 SDCA Codec - SDW"
 	depends on SOUNDWIRE
-	depends on SND_SOC_SDCA
-	select SND_SOC_SDCA_HID
-	select SND_SOC_SDCA_IRQ
+	depends on SND_SOC_SDCA_CLASS
 	select REGMAP_SOUNDWIRE
 	select REGMAP_SOUNDWIRE_MBQ
 
@@ -2539,6 +2551,17 @@ config SND_SOC_WCD939X_SDW
 	help
 	  The WCD9390/9395 is a audio codec IC Integrated in
 	  Qualcomm SoCs like SM8650.
+
+config SND_SOC_WCD9378_SDCA
+	tristate "Qualcomm Tambora (WCD9378) SDCA codec"
+	depends on SOUNDWIRE
+	depends on SND_SOC_SDCA_CLASS
+	help
+	  This enables support for the Qualcomm Tambora (WCD9378) headset
+	  codec when driven via the SDCA class driver on ARM platforms
+	  without ACPI/DisCo tables. It provides the static SDCA topology
+	  and SoundWire data port properties transcribed from the factory
+	  ACPI tables.
 
 config SND_SOC_WM0010
 	tristate

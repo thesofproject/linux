@@ -140,6 +140,7 @@ snd-soc-es8328-i2c-y := es8328-i2c.o
 snd-soc-es8328-spi-y := es8328-spi.o
 snd-soc-es8375-y := es8375.o
 snd-soc-es8389-y := es8389.o
+snd-soc-es9039q2m-y := es9039q2m.o
 snd-soc-es9356-y := es9356.o
 snd-soc-framer-y := framer-codec.o
 snd-soc-fs-amp-lib-y := fs-amp-lib.o
@@ -368,6 +369,7 @@ snd-soc-wcd938x-y := wcd938x.o
 snd-soc-wcd938x-sdw-y := wcd938x-sdw.o
 snd-soc-wcd939x-y := wcd939x.o
 snd-soc-wcd939x-sdw-y := wcd939x-sdw.o
+snd-soc-wcd9378-y := wcd9378-sdw.o wcd9378-sdca.o
 snd-soc-wm-adsp-y := wm_adsp.o
 snd-soc-wm-adsp-test-y := wm_adsp_fw_find_test.o
 snd-soc-wm0010-y := wm0010.o
@@ -586,6 +588,7 @@ obj-$(CONFIG_SND_SOC_ES8328_I2C)+= snd-soc-es8328-i2c.o
 obj-$(CONFIG_SND_SOC_ES8328_SPI)+= snd-soc-es8328-spi.o
 obj-$(CONFIG_SND_SOC_ES8375)    += snd-soc-es8375.o
 obj-$(CONFIG_SND_SOC_ES8389)    += snd-soc-es8389.o
+obj-$(CONFIG_SND_SOC_ES9039Q2M)	+= snd-soc-es9039q2m.o
 obj-$(CONFIG_SND_SOC_ES9356)    += snd-soc-es9356.o
 obj-$(CONFIG_SND_SOC_FRAMER)	+= snd-soc-framer.o
 obj-$(CONFIG_SND_SOC_FS_AMP_LIB)+= snd-soc-fs-amp-lib.o
@@ -823,6 +826,7 @@ ifdef CONFIG_SND_SOC_WCD939X_SDW
 # avoid link failure by forcing sdw code built-in when needed
 obj-$(CONFIG_SND_SOC_WCD939X) += snd-soc-wcd939x-sdw.o
 endif
+obj-$(CONFIG_SND_SOC_WCD9378_SDCA) += snd-soc-wcd9378.o
 obj-$(CONFIG_SND_SOC_WM0010)	+= snd-soc-wm0010.o
 obj-$(CONFIG_SND_SOC_WM1250_EV1) += snd-soc-wm1250-ev1.o
 obj-$(CONFIG_SND_SOC_WM2000)	+= snd-soc-wm2000.o

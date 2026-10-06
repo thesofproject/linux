@@ -224,10 +224,8 @@ static int cs35l45_sync_en_put(struct snd_kcontrol *kcontrol,
 		return 0;
 	}
 
-	if ((bool)ucontrol->value.integer.value[0])
-		regmap_set_bits(cs35l45->regmap, CS35L45_BLOCK_ENABLES2, CS35L45_SYNC_EN_MASK);
-	else
-		regmap_clear_bits(cs35l45->regmap, CS35L45_BLOCK_ENABLES2, CS35L45_SYNC_EN_MASK);
+	regmap_assign_bits(cs35l45->regmap, CS35L45_BLOCK_ENABLES2, CS35L45_SYNC_EN_MASK,
+			   (bool)ucontrol->value.integer.value[0]);
 
 	cs35l45->sync_en = (bool)ucontrol->value.integer.value[0];
 
