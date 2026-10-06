@@ -1132,6 +1132,6 @@ int snd_sof_compr_create_page_table(struct snd_soc_component *component,
 		return -EINVAL;
 
 	return snd_sof_create_page_table(component->dev, dmab,
-					 spcm->stream[dir].page_table.area, size);
+					 &spcm->stream[dir].page_table, size);
 }
 #endif

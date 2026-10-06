@@ -194,7 +194,7 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 		struct snd_dma_buffer *dmab = snd_pcm_get_dma_buf(substream);
 
 		ret = snd_sof_create_page_table(component->dev, dmab,
-				spcm->stream[substream->stream].page_table.area,
+				&spcm->stream[substream->stream].page_table,
 				runtime->dma_bytes);
 		if (ret < 0)
 			return ret;
