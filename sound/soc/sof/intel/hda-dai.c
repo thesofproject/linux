@@ -308,6 +308,27 @@ static bool hda_dai_has_wov_fe(struct snd_sof_dev *sdev, struct snd_pcm_substrea
 	return false;
 }
 
+static void hda_dai_set_sdw_ignore_suspend(struct snd_soc_dai *dai, int dir,
+					   bool ignore_suspend)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(dai, dir);
+	struct sdw_stream_runtime *sdw_stream;
+	struct snd_sof_widget *swidget;
+	struct snd_sof_dai *sof_dai;
+
+	if (!w || !w->dobj.private)
+		return;
+
+	swidget = w->dobj.private;
+	sof_dai = swidget->private;
+	if (!sof_dai || sof_dai->type != SOF_DAI_INTEL_ALH)
+		return;
+
+	sdw_stream = snd_soc_dai_get_stream(dai, dir);
+	if (!IS_ERR_OR_NULL(sdw_stream))
+		sdw_stream->ignore_suspend = ignore_suspend;
+}
+
 /*
  * In contrast to IPC3, the dai trigger in IPC4 mixes pipeline state changes
  * (over IPC channel) and DMA state change (direct host register changes).
@@ -691,6 +712,16 @@ EXPORT_SYMBOL_NS(sdw_hda_dai_hw_free, "SND_SOC_SOF_INTEL_HDA_COMMON");
 int sdw_hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 			struct snd_soc_dai *cpu_dai)
 {
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	bool retain = false;
+
+	if (cmd == SNDRV_PCM_TRIGGER_SUSPEND)
+		retain = sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
+			 hda_dai_has_wov_fe(sdev, substream);
+
+	if (cmd == SNDRV_PCM_TRIGGER_SUSPEND || cmd == SNDRV_PCM_TRIGGER_STOP)
+		hda_dai_set_sdw_ignore_suspend(cpu_dai, substream->stream, retain);
+
 	return hda_dai_trigger(substream, cmd, cpu_dai);
 }
 EXPORT_SYMBOL_NS(sdw_hda_dai_trigger, "SND_SOC_SOF_INTEL_HDA_COMMON");
