@@ -947,8 +947,10 @@ static int snd_compress_wait_for_drain(struct snd_compr_stream *stream)
 	 * It is expected that driver will notify the drain completion and then
 	 * stream will be moved to SETUP state, even if draining resulted in an
 	 * error. We can trigger next track after this.
+	 *
+	 * The state has been set to SNDRV_PCM_STATE_DRAINING by the caller,
+	 * before the drain trigger was issued.
 	 */
-	stream->runtime->state = SNDRV_PCM_STATE_DRAINING;
 	mutex_unlock(&stream->device->lock);
 
 	/* we wait for drain to complete here, drain can return when
@@ -973,6 +975,7 @@ static int snd_compress_wait_for_drain(struct snd_compr_stream *stream)
 
 static int snd_compr_drain(struct snd_compr_stream *stream)
 {
+	snd_pcm_state_t state;
 	int retval;
 
 	switch (stream->runtime->state) {
@@ -987,9 +990,20 @@ static int snd_compr_drain(struct snd_compr_stream *stream)
 		break;
 	}
 
+	/*
+	 * The state must be set to draining before the trigger is issued as the
+	 * drain can be completed by the driver either from the trigger callback
+	 * itself or from a different context as soon as the trigger is called.
+	 * A snd_compr_drain_notify() arriving before the state is updated would
+	 * be lost and the wait for the drain to finish would never be woken up.
+	 */
+	state = stream->runtime->state;
+	stream->runtime->state = SNDRV_PCM_STATE_DRAINING;
+
 	retval = stream->ops->trigger(stream, SND_COMPR_TRIGGER_DRAIN);
 	if (retval) {
 		pr_debug("SND_COMPR_TRIGGER_DRAIN failed %d\n", retval);
+		stream->runtime->state = state;
 		wake_up(&stream->runtime->sleep);
 		return retval;
 	}
@@ -1025,6 +1039,7 @@ static int snd_compr_next_track(struct snd_compr_stream *stream)
 
 static int snd_compr_partial_drain(struct snd_compr_stream *stream)
 {
+	snd_pcm_state_t state;
 	int retval;
 
 	switch (stream->runtime->state) {
@@ -1048,9 +1063,16 @@ static int snd_compr_partial_drain(struct snd_compr_stream *stream)
 		return -EPERM;
 
 	stream->partial_drain = true;
+
+	/* See the comment in snd_compr_drain() on the state handling */
+	state = stream->runtime->state;
+	stream->runtime->state = SNDRV_PCM_STATE_DRAINING;
+
 	retval = stream->ops->trigger(stream, SND_COMPR_TRIGGER_PARTIAL_DRAIN);
 	if (retval) {
 		pr_debug("Partial drain returned failure\n");
+		stream->partial_drain = false;
+		stream->runtime->state = state;
 		wake_up(&stream->runtime->sleep);
 		return retval;
 	}
