@@ -6,6 +6,7 @@
 #include <sound/sof.h>
 #include <sound/compress_driver.h>
 #include <sound/pcm_params.h>
+#include <sound/memalloc.h>
 #include "sof-audio.h"
 #include "sof-priv.h"
 #include "sof-utils.h"
@@ -14,8 +15,8 @@
 #include "ipc4-topology.h"
 #include "ipc4-fw-reg.h"
 
-/* Maximum processing size of the decoder/encoder is 2048 bytes */
-#define SOF_IPC4_COMPR_MAX_PROCESSING_SIZE		(SZ_2K)
+/* Minimum fragment size aligned to Intel HDA/ACE DMA burst hardware (128 bytes) */
+#define SOF_IPC4_COMPR_MIN_FRAGMENT_SIZE		(128)
 
 #define SOF_IPC4_COMPR_MIN_FRAGMENTS			3
 #define SOF_IPC4_COMPR_MAX_FRAGMENT_SIZE		(SZ_128K)
@@ -58,10 +59,13 @@ static u32 sof_ipc4_compr_calc_min_fragment_size(struct snd_sof_pcm_stream *sps)
 	host_buffer_estimate = snd_pcm_format_size(SNDRV_PCM_FORMAT_S32_LE, 2 * 48);
 	host_buffer_estimate *= sps->dsp_max_burst_size_in_ms;
 	/*
-	 * The minimum fragment size must not be smaller than the processing size
-	 * or in case of deep buffer on host side, the host DMA buffer size.
+	 * The minimum fragment size must align with HDA DMA burst boundary (128 bytes)
+	 * or cover the deep buffer host DMA buffer size if configured.
 	 */
-	return max(SOF_IPC4_COMPR_MAX_PROCESSING_SIZE, host_buffer_estimate);
+	if (host_buffer_estimate)
+		return max_t(u32, SOF_IPC4_COMPR_MIN_FRAGMENT_SIZE, host_buffer_estimate);
+
+	return SOF_IPC4_COMPR_MIN_FRAGMENT_SIZE;
 }
 
 static int sof_ipc4_compr_open(struct snd_soc_component *component,
@@ -108,16 +112,18 @@ static int sof_ipc4_compr_stream_free(struct snd_sof_dev *sdev,
 	int err = 0;
 
 	if (spcm->prepared[dir]) {
-		if (spcm->pending_stop[dir])
+		if (spcm->pending_stop[dir] && pcm_ops && pcm_ops->trigger)
 			pcm_ops->trigger(sdev->component, NULL, spcm,
 					 SNDRV_PCM_TRIGGER_STOP, dir);
 
 		snd_sof_compr_platform_trigger(sdev, cstream,
 					       SNDRV_PCM_TRIGGER_STOP);
 
-		err = pcm_ops->hw_free(sdev->component, NULL, spcm, dir);
-		if (err < 0)
-			spcm_err(spcm, dir, "pcm_ops->hw_free failed %d\n", err);
+		if (pcm_ops && pcm_ops->hw_free) {
+			err = pcm_ops->hw_free(sdev->component, NULL, spcm, dir);
+			if (err < 0)
+				spcm_err(spcm, dir, "pcm_ops->hw_free failed %d\n", err);
+		}
 	}
 
 	spcm->prepared[dir] = false;
@@ -570,10 +576,12 @@ static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, dir, "Entry: trigger (cmd: %d)\n", cmd);
 
-	ret = pcm_ops->trigger(component, NULL, spcm, cmd, dir);
-	if (ret < 0) {
-		spcm_err(spcm, dir, "pcm_ops->trigger failed for cmd %d\n", cmd);
-		return ret;
+	if (pcm_ops && pcm_ops->trigger) {
+		ret = pcm_ops->trigger(component, NULL, spcm, cmd, dir);
+		if (ret < 0) {
+			spcm_err(spcm, dir, "pcm_ops->trigger failed for cmd %d\n", cmd);
+			return ret;
+		}
 	}
 
 	if (!ret && trigger_platform) {
@@ -764,6 +772,28 @@ void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev, void *ipc_message)
 		snd_compr_drain_notify(spcm->stream[dir].cstream);
 }
 
+static int sof_ipc4_compr_mmap(struct snd_soc_component *component,
+			       struct snd_compr_stream *stream,
+			       struct vm_area_struct *vma)
+{
+	struct snd_compr_runtime *runtime = stream->runtime;
+
+	if (!runtime || !runtime->dma_area)
+		return -ENXIO;
+
+	if (runtime->dma_buffer_p)
+		return snd_dma_buffer_mmap(runtime->dma_buffer_p, vma);
+
+	return snd_dma_buffer_mmap(&stream->dma_buffer, vma);
+}
+
+static int sof_ipc4_compr_ack(struct snd_soc_component *component,
+			      struct snd_compr_stream *cstream,
+			      size_t bytes)
+{
+	return 0;
+}
+
 const struct snd_compress_ops sof_ipc4_compressed_ops = {
 	.open		= sof_ipc4_compr_open,
 	.free		= sof_ipc4_compr_free,
@@ -772,5 +802,7 @@ const struct snd_compress_ops sof_ipc4_compressed_ops = {
 	.get_params	= sof_ipc4_compr_get_params,
 	.trigger	= sof_ipc4_compr_trigger,
 	.pointer	= sof_ipc4_compr_pointer,
+	.mmap		= sof_ipc4_compr_mmap,
+	.ack		= sof_ipc4_compr_ack,
 	.copy		= sof_ipc4_compr_copy,
 };
