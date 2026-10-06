@@ -1679,6 +1679,24 @@ state_err:
 }
 EXPORT_SYMBOL(sdw_enable_stream);
 
+bool sdw_bus_ignore_suspend(struct sdw_bus *bus)
+{
+	struct sdw_master_runtime *m_rt;
+	bool ret = false;
+
+	mutex_lock(&bus->bus_lock);
+	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+		if (m_rt->stream->ignore_suspend) {
+			ret = true;
+			break;
+		}
+	}
+	mutex_unlock(&bus->bus_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL(sdw_bus_ignore_suspend);
+
 static int _sdw_disable_stream(struct sdw_stream_runtime *stream)
 {
 	struct sdw_master_runtime *m_rt;
