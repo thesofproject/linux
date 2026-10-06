@@ -1902,6 +1902,10 @@ int asoc_sdw_trigger(struct snd_pcm_substream *substream, int cmd)
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_RESUME:
+		if (sdw_stream->state == SDW_STREAM_ENABLED) {
+			ret = 0;
+			break;
+		}
 		/*
 		 * The peripherals lose their port configuration when the
 		 * controller is power-gated during system suspend, and an
@@ -1923,9 +1927,11 @@ int asoc_sdw_trigger(struct snd_pcm_substream *substream, int cmd)
 		break;
 
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
 		ret = sdw_disable_stream(sdw_stream);
+		break;
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+		ret = sdw_stream->ignore_suspend ? 0 : sdw_disable_stream(sdw_stream);
 		break;
 	default:
 		ret = -EINVAL;
