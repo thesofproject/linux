@@ -953,6 +953,9 @@ static int intel_component_dais_suspend(struct snd_soc_component *component)
 		struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
 		struct sdw_cdns_dai_runtime *dai_runtime;
 
+		if (sdw_bus_ignore_suspend(&cdns->bus))
+			continue;
+
 		dai_runtime = cdns->dai_runtime_array[dai->id];
 
 		if (dai_runtime)
