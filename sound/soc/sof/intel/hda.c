@@ -58,6 +58,51 @@ static int sdw_clock_stop_quirks = SDW_INTEL_CLK_STOP_BUS_RESET;
 module_param(sdw_clock_stop_quirks, int, 0444);
 MODULE_PARM_DESC(sdw_clock_stop_quirks, "SOF SoundWire clock stop quirks");
 
+static bool sdw_be_ignore_suspend(struct snd_sof_dev *sdev,
+				  struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *be = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dpcm *dpcm;
+	int dir = substream->stream;
+
+	if (dir != SNDRV_PCM_STREAM_CAPTURE)
+		return false;
+
+	for_each_dpcm_fe(be, dir, dpcm) {
+		struct snd_soc_pcm_runtime *fe = dpcm->fe;
+		struct snd_pcm_substream *fe_substream;
+		struct snd_sof_pcm *spcm;
+
+		if (dpcm->state == SND_SOC_DPCM_LINK_STATE_FREE)
+			continue;
+
+		fe_substream = snd_soc_dpcm_get_substream(fe, dir);
+		if (!fe_substream || !fe_substream->runtime)
+			continue;
+
+		list_for_each_entry(spcm, &sdev->pcm_list, list) {
+			if (!strcmp(spcm->pcm.pcm_name, fe->dai_link->name))
+				break;
+		}
+
+		if (!list_entry_is_head(spcm, &sdev->pcm_list, list) &&
+		    spcm->stream[dir].d0i3_compatible &&
+		    spcm->stream[dir].dsp_max_burst_size_in_ms <= 1)
+			return true;
+	}
+
+	return false;
+}
+
+static void sdw_set_stream_ignore_suspend(struct snd_sof_dev *sdev, struct snd_soc_dai *dai,
+					  struct snd_pcm_substream *substream)
+{
+	struct sdw_stream_runtime *sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
+
+	if (!IS_ERR_OR_NULL(sdw_stream))
+		sdw_stream->ignore_suspend = sdw_be_ignore_suspend(sdev, substream);
+}
+
 static int sdw_params_stream(struct device *dev,
 			     struct sdw_intel_stream_params_data *params_data)
 {
@@ -70,6 +115,9 @@ static int sdw_params_stream(struct device *dev,
 			d->name);
 		return -EINVAL;
 	}
+
+	sdw_set_stream_ignore_suspend(widget_to_sdev(w), d, params_data->substream);
+
 	data.dai_index = (params_data->link_id << 8) | d->id;
 	data.dai_data = params_data->alh_stream_id;
 	data.dai_node_id = data.dai_data;
@@ -108,6 +156,14 @@ struct sdw_intel_ops sdw_callback = {
 static int sdw_ace2x_params_stream(struct device *dev,
 				   struct sdw_intel_stream_params_data *params_data)
 {
+	struct snd_soc_dai *d = params_data->dai;
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(d, params_data->substream->stream);
+
+	if (!w)
+		return -EINVAL;
+
+	sdw_set_stream_ignore_suspend(widget_to_sdev(w), d, params_data->substream);
+
 	return sdw_hda_dai_hw_params(params_data->substream,
 				     params_data->hw_params,
 				     params_data->dai,

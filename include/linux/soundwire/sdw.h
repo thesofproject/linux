@@ -976,6 +976,7 @@ struct sdw_stream_params {
  * @master_list: List of Master runtime(s) in this stream.
  * master_list can contain only one m_rt per Master instance
  * for a stream
+ * @ignore_suspend: stream keeps running during system suspend
  */
 struct sdw_stream_runtime {
 	const char *name;
@@ -984,6 +985,7 @@ struct sdw_stream_runtime {
 	enum sdw_stream_type type;
 	int m_rt_count;
 	struct list_head master_list;
+	bool ignore_suspend;
 };
 
 /**
@@ -1086,6 +1088,7 @@ int sdw_stream_remove_master(struct sdw_bus *bus,
 int sdw_startup_stream(void *sdw_substream);
 int sdw_prepare_stream(struct sdw_stream_runtime *stream);
 int sdw_enable_stream(struct sdw_stream_runtime *stream);
+bool sdw_bus_ignore_suspend(struct sdw_bus *bus);
 int sdw_disable_stream(struct sdw_stream_runtime *stream);
 int sdw_deprepare_stream(struct sdw_stream_runtime *stream);
 void sdw_shutdown_stream(void *sdw_substream);
