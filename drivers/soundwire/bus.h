@@ -155,6 +155,8 @@ struct sdw_slave_runtime {
  *
  * @bus: Bus handle
  * @stream: Stream runtime handle
+ * @params_backup: Snapshot of original bus parameters saved before stream
+ * preparation, used for rollback recovery on failure.
  * @direction: Data direction for Master
  * @ch_count: Number of channels handled by the Master for
  * this stream, can be zero.
@@ -166,6 +168,7 @@ struct sdw_slave_runtime {
 struct sdw_master_runtime {
 	struct sdw_bus *bus;
 	struct sdw_stream_runtime *stream;
+	struct sdw_bus_params params_backup;
 	enum sdw_data_direction direction;
 	unsigned int ch_count;
 	struct list_head slave_rt_list;

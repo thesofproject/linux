@@ -1487,19 +1487,22 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	struct sdw_master_runtime *m_rt;
 	struct sdw_bus *bus;
 	struct sdw_master_prop *prop;
-	struct sdw_bus_params params;
 	int ret, ret1;
+
+	/* Pre-pass: snapshot original bus parameters for all masters */
+	list_for_each_entry(m_rt, &stream->master_list, stream_node)
+		m_rt->params_backup = m_rt->bus->params;
 
 	/* Prepare  Master(s) and Slave(s) port(s) associated with stream */
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
 		bus = m_rt->bus;
 		prop = &bus->prop;
-		memcpy(&params, &bus->params, sizeof(params));
 
 		/* TODO: Support Asynchronous mode */
 		if ((prop->max_clk_freq % stream->params.rate) != 0) {
 			dev_err(bus->dev, "Async mode not supported\n");
-			return -EINVAL;
+			ret = -EINVAL;
+			goto restore_params;
 		}
 
 		if (update_params) {
@@ -1554,13 +1557,18 @@ revert_bank:
 	 * The bank values are already switched in do_bank_switch(), so we need to switch
 	 * curr_bank and next_bank back to reflect the actual bank.
 	 */
-	params.curr_bank = !params.curr_bank;
-	params.next_bank = !params.next_bank;
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		m_rt->params_backup.curr_bank = !m_rt->params_backup.curr_bank;
+		m_rt->params_backup.next_bank = !m_rt->params_backup.next_bank;
+	}
 
 restore_params:
-	memcpy(&bus->params, &params, sizeof(params));
-
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		/*
+		 * Revert all masters to their snapshotted original parameters.
+		 * Any master that was not modified will safely revert to its own original state.
+		 */
+		m_rt->bus->params = m_rt->params_backup;
 		ret1 = sdw_program_params(m_rt->bus, true);
 		if (ret1 < 0) {
 			dev_err(m_rt->bus->dev,
