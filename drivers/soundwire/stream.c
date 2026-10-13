@@ -1488,7 +1488,7 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 	struct sdw_bus *bus;
 	struct sdw_master_prop *prop;
 	struct sdw_bus_params params;
-	int ret;
+	int ret, ret1;
 
 	/* Prepare  Master(s) and Slave(s) port(s) associated with stream */
 	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
@@ -1559,6 +1559,21 @@ revert_bank:
 
 restore_params:
 	memcpy(&bus->params, &params, sizeof(params));
+
+	list_for_each_entry(m_rt, &stream->master_list, stream_node) {
+		ret1 = sdw_program_params(m_rt->bus, true);
+		if (ret1 < 0) {
+			dev_err(m_rt->bus->dev,
+				"Program params failed: %d after restoring params\n",
+				ret1);
+			/* No need to do bank switch and return the original error code */
+			return ret;
+		}
+	}
+	ret1 = do_bank_switch(stream);
+	if (ret1 < 0)
+		pr_err("%s: do_bank_switch failed: %d after restoring params\n", __func__, ret1);
+
 	return ret;
 }
 
