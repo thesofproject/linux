@@ -1541,13 +1541,21 @@ static int _sdw_prepare_stream(struct sdw_stream_runtime *stream,
 		if (ret < 0) {
 			dev_err(bus->dev, "Prepare port(s) failed ret = %d\n",
 				ret);
-			goto restore_params;
+			goto revert_bank;
 		}
 	}
 
 	stream->state = SDW_STREAM_PREPARED;
 
 	return ret;
+
+revert_bank:
+	/*
+	 * The bank values are already switched in do_bank_switch(), so we need to switch
+	 * curr_bank and next_bank back to reflect the actual bank.
+	 */
+	params.curr_bank = !params.curr_bank;
+	params.next_bank = !params.next_bank;
 
 restore_params:
 	memcpy(&bus->params, &params, sizeof(params));
