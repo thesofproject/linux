@@ -106,12 +106,8 @@ int hda_dsp_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct sof_ipc4_msg *msg_data = msg->msg_data;
 
-	if (hda_ipc4_tx_is_busy(sdev)) {
-		hdev->delayed_ipc_tx_msg = msg;
+	if (!hda_ipc4_proceed_sending(sdev, msg))
 		return 0;
-	}
-
-	hdev->delayed_ipc_tx_msg = NULL;
 
 	/* send the message via mailbox */
 	if (msg_data->data_size)
@@ -536,7 +532,7 @@ void hda_ipc4_dump(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL_NS(hda_ipc4_dump, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
-bool hda_ipc4_tx_is_busy(struct snd_sof_dev *sdev)
+static bool hda_ipc4_tx_is_busy(struct snd_sof_dev *sdev)
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	const struct sof_intel_dsp_desc *chip = hda->desc;
@@ -546,4 +542,34 @@ bool hda_ipc4_tx_is_busy(struct snd_sof_dev *sdev)
 
 	return !!(val & chip->ipc_req_mask);
 }
-EXPORT_SYMBOL_NS(hda_ipc4_tx_is_busy, "SND_SOC_SOF_INTEL_HDA_COMMON");
+
+bool hda_ipc4_proceed_sending(struct snd_sof_dev *sdev,
+			      struct snd_sof_ipc_msg *msg)
+{
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+
+	if (hda_ipc4_tx_is_busy(sdev)) {
+		struct sof_ipc4_msg *msg_data = msg->msg_data;
+
+		dev_dbg(sdev->dev, "Delaying message: %#x|%#x",
+			msg_data->primary, msg_data->extension);
+		hdev->delayed_ipc_tx_msg = msg;
+		return false;
+	} else if (hdev->delayed_ipc_tx_msg == msg) {
+		struct sof_ipc4_msg *msg_data = msg->msg_data;
+
+		dev_dbg(sdev->dev, "Sending delayed message: %#x|%#x",
+			msg_data->primary, msg_data->extension);
+	} else if (unlikely(hdev->delayed_ipc_tx_msg)) {
+		struct sof_ipc4_msg *msg_data = msg->msg_data;
+
+		dev_dbg(sdev->dev,
+			"Stale delayed message dropped, sending %#x|%#x",
+			msg_data->primary, msg_data->extension);
+	}
+
+	hdev->delayed_ipc_tx_msg = NULL;
+
+	return true;
+}
+EXPORT_SYMBOL_NS(hda_ipc4_proceed_sending, "SND_SOC_SOF_INTEL_HDA_COMMON");

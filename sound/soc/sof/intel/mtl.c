@@ -101,12 +101,8 @@ static int mtl_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *ms
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct sof_ipc4_msg *msg_data = msg->msg_data;
 
-	if (hda_ipc4_tx_is_busy(sdev)) {
-		hdev->delayed_ipc_tx_msg = msg;
+	if (!hda_ipc4_proceed_sending(sdev, msg))
 		return 0;
-	}
-
-	hdev->delayed_ipc_tx_msg = NULL;
 
 	/* send the message via mailbox */
 	if (msg_data->data_size)
