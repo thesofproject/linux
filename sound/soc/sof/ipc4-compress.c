@@ -64,6 +64,12 @@ static u32 sof_ipc4_compr_calc_min_fragment_size(struct snd_sof_pcm_stream *sps)
 	return max(SOF_IPC4_COMPR_MAX_PROCESSING_SIZE, host_buffer_estimate);
 }
 
+/* The buffer must be described by the page table allocated for the stream */
+static u64 sof_ipc4_compr_calc_max_buffer_size(struct snd_sof_pcm_stream *sps)
+{
+	return (u64)SOF_PAGE_TABLE_MAX_PFNS(sps->page_table.bytes) * PAGE_SIZE;
+}
+
 static int sof_ipc4_compr_open(struct snd_soc_component *component,
 			       struct snd_compr_stream *cstream)
 {
@@ -193,6 +199,8 @@ static int sof_ipc4_compr_get_caps(struct snd_soc_component *component,
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_codec_info_data *codec_info = ipc4_data->codec_info;
 	int dir = cstream->direction;
+	u64 max_buffer_size;
+	u64 max_fragments;
 	struct snd_sof_pcm *spcm;
 	int i;
 
@@ -233,6 +241,14 @@ static int sof_ipc4_compr_get_caps(struct snd_soc_component *component,
 
 	caps->min_fragments = SOF_IPC4_COMPR_MIN_FRAGMENTS;
 	caps->max_fragments = SOF_IPC4_COMPR_MAX_FRAGMENTS;
+	/*
+	 * A buffer of max_fragments number of max_fragment_size fragments must
+	 * be describable by the page table allocated for the stream
+	 */
+	max_buffer_size = sof_ipc4_compr_calc_max_buffer_size(&spcm->stream[dir]);
+	max_fragments = div_u64(max_buffer_size, caps->max_fragment_size);
+	if (caps->max_fragments > max_fragments)
+		caps->max_fragments = max_fragments;
 
 	spcm_dbg(spcm, dir,
 		 "num_codecs: %u, fragment_size: %u-%u, fragments: %u-%u\n",
@@ -248,6 +264,7 @@ static int sof_ipc4_compr_alloc_pages(struct device *dev,
 				      struct snd_compr_stream *cstream)
 {
 	u32 min_fragment_size = sof_ipc4_compr_calc_min_fragment_size(sps);
+	u64 max_buffer_size = sof_ipc4_compr_calc_max_buffer_size(sps);
 	struct snd_compr_runtime *crtd = cstream->runtime;
 	u64 fragments = crtd->buffer_size;
 	int ret;
@@ -256,6 +273,12 @@ static int sof_ipc4_compr_alloc_pages(struct device *dev,
 		dev_err(dev, "%s: Buffer size is too small: %llu (minimum is %u)\n",
 			__func__, crtd->buffer_size,
 			SOF_IPC4_COMPR_MIN_BUFFER_SIZE(min_fragment_size));
+		return -EINVAL;
+	}
+
+	if (crtd->buffer_size > max_buffer_size) {
+		dev_err(dev, "%s: Buffer size is too big: %llu (maximum is %llu)\n",
+			__func__, crtd->buffer_size, max_buffer_size);
 		return -EINVAL;
 	}
 
