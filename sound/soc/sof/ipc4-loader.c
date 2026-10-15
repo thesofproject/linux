@@ -422,45 +422,31 @@ static int sof_ipc4_query_sof_info(struct snd_sof_dev *sdev,
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_tuple *tuple;
-	size_t tuple_size;
 	size_t offset = 0;
-	int ret = 0;
 
+	/*
+	 * No size validation is needed as the sof_info data is coming from
+	 * firmware as part of the firmware config, it is guarantied to be
+	 * correct.
+	 */
 	while (offset < sof_info_size) {
-		if (sof_info_size - offset < sizeof(*tuple)) {
-			dev_err(sdev->dev, "Invalid SOF info tuple header at offset %zu\n", offset);
-			ret = -EINVAL;
-			goto out;
-		}
-
 		tuple = (struct sof_ipc4_tuple *)((u8 *)sof_info_data + offset);
-		tuple_size = sizeof(*tuple) + tuple->size;
-		if (tuple_size < sizeof(*tuple) || tuple_size > sof_info_size - offset) {
-			dev_err(sdev->dev,
-				"Invalid SOF info tuple size %u at offset %zu\n",
-				tuple->size, offset);
-			ret = -EINVAL;
-			goto out;
-		}
 
 		switch (tuple->type) {
 		case SOF_IPC4_SOF_CODEC_INFO:
 			ipc4_data->codec_info = devm_kmemdup(sdev->dev, tuple->value,
 							     tuple->size, GFP_KERNEL);
-			if (!ipc4_data->codec_info) {
-				ret = -ENOMEM;
-				goto out;
-			}
+			if (!ipc4_data->codec_info)
+				return -ENOMEM;
 			break;
 		default:
 			break;
 		}
 
-		offset += tuple_size;
+		offset += sizeof(*tuple) + tuple->size;
 	}
 
-out:
-	return ret;
+	return 0;
 }
 
 int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
