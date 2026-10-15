@@ -586,10 +586,11 @@ static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		break;
 	case SND_COMPR_TRIGGER_DRAIN:
-	case SND_COMPR_TRIGGER_PARTIAL_DRAIN:
 		spcm->pending_stop[dir] = true;
 		break;
+	case SND_COMPR_TRIGGER_PARTIAL_DRAIN:
 	case SND_COMPR_TRIGGER_NEXT_TRACK:
+		/* Gapless playback is not supported */
 		spcm_dbg(spcm, dir, "Unsupported trigger cmd: %d\n", cmd);
 		return -EOPNOTSUPP;
 	default:
