@@ -419,9 +419,6 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		return 0;
 
 	spipe = pipeline_list->pipelines[0];
-	if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
-		return 0;
-
 	pipe_widget = spipe->pipe_widget;
 	pipeline = pipe_widget->private;
 
@@ -485,16 +482,12 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	if (state == SOF_IPC4_PIPE_RUNNING || state == SOF_IPC4_PIPE_RESET)
 		for (i = pipeline_list->count - 1; i >= 0; i--) {
 			spipe = pipeline_list->pipelines[i];
-			if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
-				continue;
 			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
 							      pipe_priority);
 		}
 	else
 		for (i = 0; i < pipeline_list->count; i++) {
 			spipe = pipeline_list->pipelines[i];
-			if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
-				continue;
 			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
 							      pipe_priority);
 		}
@@ -535,8 +528,6 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	/* update PAUSED state for all pipelines just triggered */
 	for (i = 0; i < pipeline_list->count ; i++) {
 		spipe = pipeline_list->pipelines[i];
-		if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
-			continue;
 		sof_ipc4_update_pipeline_state(sdev, SOF_IPC4_PIPE_PAUSED, cmd, spipe,
 					       trigger_list);
 	}
@@ -580,8 +571,6 @@ skip_pause_transition:
 	/* update RUNNING/RESET state for all pipelines that were just triggered */
 	for (i = 0; i < pipeline_list->count; i++) {
 		spipe = pipeline_list->pipelines[i];
-		if (!spipe || !spipe->pipe_widget || !spipe->pipe_widget->private)
-			continue;
 		sof_ipc4_update_pipeline_state(sdev, state, cmd, spipe, trigger_list);
 	}
 
