@@ -437,9 +437,15 @@ static int soc_compr_trigger_fe(struct snd_compr_stream *cstream, int cmd)
 	bool fe_first;
 	int ret;
 
-	if (cmd == SND_COMPR_TRIGGER_PARTIAL_DRAIN ||
-	    cmd == SND_COMPR_TRIGGER_DRAIN)
+	/* FE only triggers */
+	switch (cmd) {
+	case SND_COMPR_TRIGGER_PARTIAL_DRAIN:
+	case SND_COMPR_TRIGGER_NEXT_TRACK:
+	case SND_COMPR_TRIGGER_DRAIN:
 		return snd_soc_component_compr_trigger(cstream, cmd);
+	default:
+		break;
+	}
 
 	if (fe->dai_link->trigger[stream] == SND_SOC_DPCM_TRIGGER_POST)
 		fe_first = false;
