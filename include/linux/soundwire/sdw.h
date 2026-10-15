@@ -592,6 +592,7 @@ enum sdw_port_prep_ops {
  * @bandwidth: Current bandwidth
  * @col: Active columns
  * @row: Active rows
+ * @lane_used_bandwidth: how much bandwidth in bits per second is used by each lane
  * @s_data_mode: NORMAL, STATIC or PRBS mode for all Slave ports
  * @m_data_mode: NORMAL, STATIC or PRBS mode for all Master ports. The value
  * should be the same to detect transmission issues, but can be different to
@@ -605,6 +606,7 @@ struct sdw_bus_params {
 	unsigned int bandwidth;
 	unsigned int col;
 	unsigned int row;
+	unsigned int lane_used_bandwidth[SDW_MAX_LANES];
 	int s_data_mode;
 	int m_data_mode;
 };
@@ -1030,7 +1032,6 @@ struct sdw_stream_runtime {
  * @multi_link: Store bus property that indicates if multi links
  * are supported. This flag is populated by drivers after reading
  * appropriate firmware (ACPI/DT).
- * @lane_used_bandwidth: how much bandwidth in bits per second is used by each lane
  * @is_present: indicates whether any peripheral is present on the bus.
  */
 struct sdw_bus {
@@ -1067,7 +1068,6 @@ struct sdw_bus {
 	struct dentry *debugfs;
 #endif
 	bool multi_link;
-	unsigned int lane_used_bandwidth[SDW_MAX_LANES];
 	bool is_present;
 };
 
