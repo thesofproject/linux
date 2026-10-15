@@ -100,6 +100,7 @@ static int sof_ipc4_compr_open(struct snd_soc_component *component,
 	spcm->stream[dir].posn.dai_posn = 0;
 	spcm->prepared[dir] = false;
 	spcm->pending_stop[dir] = false;
+	spcm->compr_started[dir] = false;
 
 	return 0;
 }
@@ -128,6 +129,7 @@ static int sof_ipc4_compr_stream_free(struct snd_sof_dev *sdev,
 
 	spcm->prepared[dir] = false;
 	spcm->pending_stop[dir] = false;
+	spcm->compr_started[dir] = false;
 	spcm->stream[dir].cstream = NULL;
 
 	/* reset the DMA */
@@ -574,16 +576,28 @@ static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 		return -EINVAL;
 	}
 
-	spcm->pending_stop[dir] = false;
-
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
+		/*
+		 * The host DMA is left running on stop and drain to match the
+		 * firmware, which only pauses the pipeline, and it is only
+		 * stopped during hw_free. A stream restarted after stop or
+		 * drain - which the compress core allows for capture - would
+		 * continue from a position the two sides no longer agree on.
+		 */
+		if (spcm->compr_started[dir]) {
+			spcm_err(spcm, dir, "Stream restart is not supported\n");
+			return -EINVAL;
+		}
+		fallthrough;
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		spcm->pending_stop[dir] = false;
 		trigger_platform = true;
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		spcm->pending_stop[dir] = false;
 		break;
 	case SND_COMPR_TRIGGER_DRAIN:
 		spcm->pending_stop[dir] = true;
@@ -613,6 +627,9 @@ static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 				 "platform compress trigger start failed %d\n",
 				 ret);
 	}
+
+	if (!ret && cmd == SNDRV_PCM_TRIGGER_START)
+		spcm->compr_started[dir] = true;
 
 	return ret;
 }

@@ -363,6 +363,7 @@ struct snd_sof_pcm {
 	bool prepared[2]; /* PCM_PARAMS set successfully */
 	bool setup_done[2]; /* the setup of the SOF PCM device is done */
 	bool pending_stop[2]; /* only used if (!pcm_ops->platform_stop_during_hw_free) */
+	bool compr_started[2]; /* compress stream has been started */
 
 	/* Must be last - ends in a flex-array member. */
 	struct snd_soc_tplg_pcm pcm;
