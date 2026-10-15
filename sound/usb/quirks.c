@@ -2198,6 +2198,16 @@ void snd_usb_endpoint_start_quirk(struct snd_usb_endpoint *ep)
 	     ep->chip->usb_id == USB_ID(0x1852, 0x5034)) && /* T+A Dac8 */
 	    ep->syncmaxsize == 4)
 		ep->tenor_fb_quirk = 1;
+
+	/*
+	 * Mayflower ARC AMP DAC (MAG Technology USB front-end): the
+	 * feedback can get stuck at nominal+1 sample per frame, causing
+	 * pops every 1-2 sec until stream restart.  Snap implausible
+	 * feedback to nominal.
+	 */
+	if (ep->chip->usb_id == USB_ID(0x0493, 0x4170) &&
+	    ep->type == SND_USB_ENDPOINT_TYPE_SYNC)
+		ep->snap_fb_quirk = 1;
 }
 
 /* quirk applied after snd_usb_ctl_msg(); not applied during boot quirks */
@@ -2332,6 +2342,21 @@ void snd_usb_audioformat_attributes_quirk(struct snd_usb_audio *chip,
 					  int stream)
 {
 	switch (chip->usb_id) {
+	case USB_ID(0x0499, 0x5500): /* Yamaha 01V96i */
+		/*
+		 * The 01V96i declares its audio streaming interfaces as
+		 * vendor-specific (class 0xff) and provides no class-specific
+		 * endpoint descriptor.  parse_uac_endpoint_attributes() therefore
+		 * returns no attributes, and the driver never issues the SET_CUR
+		 * sampling-frequency request the hardware needs to engage its USB
+		 * stream: playback and capture PCMs report RUNNING, but the desk
+		 * passes no audio.
+		 *
+		 * Force the attribute on so the stream is initialised the same way
+		 * the Windows driver does it.
+		 */
+		fp->attributes |= UAC_EP_CS_ATTR_SAMPLE_RATE;
+		break;
 	case USB_ID(0x0a92, 0x0053): /* AudioTrak Optoplay */
 		/* Optoplay sets the sample rate attribute although
 		 * it seems not supporting it in fact.
@@ -2363,6 +2388,14 @@ void snd_usb_audioformat_attributes_quirk(struct snd_usb_audio *chip,
 		 * MaxPacketsOnly attribute is erroneously set in endpoint
 		 * descriptors. As a result this card produces noise with
 		 * all sample rates other than 96 kHz.
+		 */
+		fp->attributes &= ~UAC_EP_CS_ATTR_FILL_MAX;
+		break;
+	case USB_ID(0x0a12, 0x1244):  /* Shanling UP4 */
+		/*
+		 * MaxPacketsOnly is set, but the device expects nominal-size
+		 * packets. Filling 48 frames per packet at 44.1 kHz results
+		 * in silence. No effect at 48 kHz, where both sizes match.
 		 */
 		fp->attributes &= ~UAC_EP_CS_ATTR_FILL_MAX;
 		break;
@@ -2471,6 +2504,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_DISABLE_AUTOSUSPEND),
 	DEVICE_FLG(0x045e, 0x070f, /* MS LifeChat LX-3000 Headset */
 		   QUIRK_FLAG_MIXER_PLAYBACK_MIN_MUTE),
+	DEVICE_FLG(0x046d, 0x0802, /* Logitech Webcam C200 */
+		   QUIRK_FLAG_CTL_MSG_DELAY_1M | QUIRK_FLAG_MIC_RES_384),
 	DEVICE_FLG(0x046d, 0x0807, /* Logitech Webcam C500 */
 		   QUIRK_FLAG_CTL_MSG_DELAY_1M | QUIRK_FLAG_MIC_RES_384),
 	DEVICE_FLG(0x046d, 0x0808, /* Logitech Webcam C600 */
@@ -2543,6 +2578,9 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 	DEVICE_FLG(0x0644, 0x8044, /* Esoteric D-05X */
 		   QUIRK_FLAG_ITF_USB_DSD_DAC | QUIRK_FLAG_CTL_MSG_DELAY |
 		   QUIRK_FLAG_IFACE_DELAY | QUIRK_FLAG_FORCE_IFACE_RESET),
+	DEVICE_FLG(0x0644, 0x8047, /* TASCAM US-16x08 */
+		   QUIRK_FLAG_CTL_MSG_DELAY | QUIRK_FLAG_IFACE_DELAY |
+		   QUIRK_FLAG_FORCE_IFACE_RESET),
 	DEVICE_FLG(0x0644, 0x804a, /* TEAC UD-301 */
 		   QUIRK_FLAG_ITF_USB_DSD_DAC | QUIRK_FLAG_CTL_MSG_DELAY |
 		   QUIRK_FLAG_IFACE_DELAY),
@@ -2624,6 +2662,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_MIXER_PLAYBACK_MIN_MUTE),
 	DEVICE_FLG(0x1101, 0x0003, /* Audioengine D1 */
 		   QUIRK_FLAG_GET_SAMPLE_RATE),
+	DEVICE_FLG(0x1237, 0x17b8, /* rongyuan GS20 */
+		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
 	DEVICE_FLG(0x12d1, 0x3a07, /* HUAWEI USB-C HEADSET */
 		   QUIRK_FLAG_MIXER_PLAYBACK_MIN_MUTE | QUIRK_FLAG_MIXER_CAPTURE_MIN_MUTE |
 		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
@@ -2730,6 +2770,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_DSD_RAW),
 	DEVICE_FLG(0x21b4, 0x0232, /* Ayre QX-5 Twenty */
 		   QUIRK_FLAG_DSD_RAW),
+	DEVICE_FLG(0x22e8, 0xca10, /* Cambridge Audio streamers */
+		   QUIRK_FLAG_DSD_RAW),
 	DEVICE_FLG(0x2522, 0x0007, /* LH Labs Geek Out HD Audio 1V5 */
 		   QUIRK_FLAG_SET_IFACE_FIRST),
 	DEVICE_FLG(0x25aa, 0x600b, /* TAE1159 */
@@ -2774,6 +2816,8 @@ static const struct usb_audio_quirk_flags_table quirk_flags_table[] = {
 		   QUIRK_FLAG_MIXER_PLAYBACK_MIN_MUTE),
 	DEVICE_FLG(0x3443, 0x930d, /* NexiGo N930W 60fps Webcam */
 		   QUIRK_FLAG_GET_SAMPLE_RATE | QUIRK_FLAG_MIC_RES_16),
+	DEVICE_FLG(0x35d8, 0x011d, /* MOONDROP DAWN PRO2 */
+		   QUIRK_FLAG_DSD_RAW),
 	DEVICE_FLG(0x36f9, 0xc009, /* XIBERIA K03S */
 		   QUIRK_FLAG_FORCE_IFACE_RESET | QUIRK_FLAG_IFACE_DELAY),
 	DEVICE_FLG(0x3703, 0x2000, /* NUX NAI-24 */

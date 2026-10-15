@@ -176,8 +176,11 @@ static irqreturn_t rt766_sdca_irq_jd_handler(int irq, void *data)
 	if (!rt766->hs_jack)
 		return IRQ_HANDLED;
 
-	if (!rt766->component->card || !rt766->component->card->instantiated)
+	if (!rt766->component->card || !rt766->component->card->instantiated) {
+		/* trigger again if card is not instantiated */
+		regmap_write(rt766->regmap, RT766_GE_DET_IRQ_MNL, 0x01);
 		return IRQ_HANDLED;
+	}
 
 	mutex_lock(&rt766->disable_irq_lock);
 	if (!rt766->disable_irq)
@@ -304,6 +307,9 @@ static int rt766_sdca_set_jack_detect(struct snd_soc_component *component,
 		if (rt766->hid_func_data)
 			rt766_sdca_irq_ctl(rt766, rt766->hid_func_data,
 				rt766->component, rt766->irq_info, false);
+	} else {
+		/* trigger GE interrupt */
+		regmap_write(rt766->regmap, RT766_GE_DET_IRQ_MNL, 0x01);
 	}
 
 	pm_runtime_put_autosuspend(component->dev);

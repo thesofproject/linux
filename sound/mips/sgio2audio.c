@@ -859,30 +859,24 @@ static int snd_sgio2audio_create(struct snd_card *card,
 
 static int snd_sgio2audio_probe(struct platform_device *pdev)
 {
-	struct snd_card *card;
+	struct snd_card *card __free(snd_card_free) = NULL;
 	struct snd_sgio2audio *chip;
 	int err;
 
-	err = snd_card_new(&pdev->dev, index, id, THIS_MODULE, 0, &card);
+	err = snd_devm_card_new(&pdev->dev, index, id, THIS_MODULE, 0, &card);
 	if (err < 0)
 		return err;
 
 	err = snd_sgio2audio_create(card, &chip);
-	if (err < 0) {
-		snd_card_free(card);
+	if (err < 0)
 		return err;
-	}
 
 	err = snd_sgio2audio_new_pcm(chip);
-	if (err < 0) {
-		snd_card_free(card);
+	if (err < 0)
 		return err;
-	}
 	err = snd_sgio2audio_new_mixer(chip);
-	if (err < 0) {
-		snd_card_free(card);
+	if (err < 0)
 		return err;
-	}
 
 	strscpy(card->driver, "SGI O2 Audio");
 	strscpy(card->shortname, "SGI O2 Audio");
@@ -892,24 +886,16 @@ static int snd_sgio2audio_probe(struct platform_device *pdev)
 		MACEISA_AUDIO3_MERR_IRQ);
 
 	err = snd_card_register(card);
-	if (err < 0) {
-		snd_card_free(card);
+	if (err < 0)
 		return err;
-	}
+
 	platform_set_drvdata(pdev, card);
+	card = NULL; /* probe succeeded, don't release as error */
 	return 0;
-}
-
-static void snd_sgio2audio_remove(struct platform_device *pdev)
-{
-	struct snd_card *card = platform_get_drvdata(pdev);
-
-	snd_card_free(card);
 }
 
 static struct platform_driver sgio2audio_driver = {
 	.probe	= snd_sgio2audio_probe,
-	.remove	= snd_sgio2audio_remove,
 	.driver	= {
 		.name	= "sgio2audio",
 	}
