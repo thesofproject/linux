@@ -75,6 +75,22 @@ err:
 	return NULL;
 }
 
+/* Return the current vdev of sb->udev, or NULL if it was freed or reallocated */
+static struct xhci_virt_device *
+sideband_to_vdev(struct xhci_sideband *sb)
+{
+	struct xhci_virt_device *vdev;
+
+	if (!sb->udev || !sb->udev->slot_id)
+		return NULL;
+
+	vdev = sb->xhci->devs[sb->udev->slot_id];
+	if (vdev && vdev->sideband == sb)
+		return vdev;
+
+	return NULL;
+}
+
 /* Caller must hold sb->mutex */
 static void
 __xhci_sideband_remove_endpoint(struct xhci_sideband *sb, struct xhci_virt_ep *ep)
@@ -146,16 +162,18 @@ int
 xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 			   struct usb_host_endpoint *host_ep)
 {
+	struct xhci_virt_device *vdev;
 	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
 
 	guard(mutex)(&sb->mutex);
 
-	if (!sb->vdev)
+	vdev = sideband_to_vdev(sb);
+	if (!vdev)
 		return -ENODEV;
 
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
-	ep = &sb->vdev->eps[ep_index];
+	ep = &vdev->eps[ep_index];
 
 	if (ep->ep_state & EP_HAS_STREAMS)
 		return -EINVAL;
@@ -202,9 +220,10 @@ xhci_sideband_remove_endpoint(struct xhci_sideband *sb,
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
 	ep = sb->eps[ep_index];
 
-	if (!ep || !ep->sideband || ep->sideband != sb)
+	if (!sideband_to_vdev(sb) || !ep || ep->sideband != sb) {
+		sb->eps[ep_index] = NULL;
 		return -ENODEV;
-
+	}
 	__xhci_sideband_remove_endpoint(sb, ep);
 
 	return 0;
@@ -221,7 +240,7 @@ xhci_sideband_stop_endpoint(struct xhci_sideband *sb,
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
 	ep = sb->eps[ep_index];
 
-	if (!ep || !ep->sideband || ep->sideband != sb)
+	if (!sideband_to_vdev(sb) || !ep || ep->sideband != sb)
 		return -EINVAL;
 
 	return xhci_stop_endpoint_sync(sb->xhci, ep, 0, GFP_KERNEL);
@@ -251,7 +270,7 @@ xhci_sideband_get_endpoint_buffer(struct xhci_sideband *sb,
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
 	ep = sb->eps[ep_index];
 
-	if (!ep || !ep->ring || !ep->sideband || ep->sideband != sb)
+	if (!sideband_to_vdev(sb) || !ep || !ep->ring || ep->sideband != sb)
 		return NULL;
 
 	return xhci_ring_to_sgtable(sb, ep->ring);
@@ -329,7 +348,7 @@ xhci_sideband_create_interrupter(struct xhci_sideband *sb, int num_seg,
 
 	guard(mutex)(&sb->mutex);
 
-	if (!sb->vdev)
+	if (!sideband_to_vdev(sb))
 		return -ENODEV;
 
 	if (sb->ir)
@@ -436,7 +455,7 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 	}
 
 	sb->xhci = xhci;
-	sb->vdev = vdev;
+	sb->udev = udev;
 	sb->intf = intf;
 	sb->type = type;
 	sb->notify_client = notify_client;
@@ -471,22 +490,21 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 	xhci = sb->xhci;
 
 	scoped_guard(mutex, &sb->mutex) {
-		vdev = sb->vdev;
-		if (!vdev)
-			return;
+		vdev = sideband_to_vdev(sb);
 
 		for (i = 0; i < EP_CTX_PER_DEV; i++)
-			if (sb->eps[i])
+			if (vdev && sb->eps[i])
 				__xhci_sideband_remove_endpoint(sb, sb->eps[i]);
 
 		__xhci_sideband_remove_interrupter(sb);
 
-		sb->vdev = NULL;
+		sb->udev = NULL;
 	}
 
 	spin_lock_irq(&xhci->lock);
 	sb->xhci = NULL;
-	vdev->sideband = NULL;
+	if (vdev)
+		vdev->sideband = NULL;
 	spin_unlock_irq(&xhci->lock);
 
 	kfree(sb);
