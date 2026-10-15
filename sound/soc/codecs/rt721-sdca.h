@@ -29,6 +29,10 @@ struct  rt721_sdca_priv {
 	/* For Headset jack & Headphone */
 	unsigned int scp_sdca_stat1;
 	unsigned int scp_sdca_stat2;
+	unsigned int int_cnt;
+	bool imp_sensing_ongoing;
+	bool imp_sensing_done;
+	int last_real_JD;
 	struct snd_soc_jack *hs_jack;
 	struct delayed_work jack_detect_work;
 	struct delayed_work jack_btn_check_work;
@@ -54,8 +58,10 @@ struct rt721_sdca_dmic_kctrl_priv {
 /* NID */
 #define RT721_ANA_POW_PART			0x01
 #define RT721_DAC_CTRL				0x04
+#define RT721_MIC_BIAS_CTRL			0x08
 #define RT721_JD_CTRL				0x09
 #define RT721_CBJ_CTRL				0x0a
+#define RT721_CHARGE_PUMP_CTRL		0x0b
 #define RT721_CAP_PORT_CTRL			0x0c
 #define RT721_CLASD_AMP_CTRL			0x0d
 #define RT721_BOOST_CTRL			0x0f
@@ -81,17 +87,28 @@ struct rt721_sdca_dmic_kctrl_priv {
 #define RT721_DAC_2CH_CTRL3			0x02
 #define RT721_DAC_2CH_CTRL4			0x03
 
+/* Index (NID:08h) */
+#define RT721_MIC_BIAS_TOP_CTRL2		0x02
+
 /* Index (NID:09h) */
+#define RT721_JD_1PIN_TOP_CTRL3			0x04
+#define RT721_JD_1PIN_GAT_CTRL1			0x06
 #define RT721_JD_1PIN_GAT_CTRL2			0x07
+#define RT721_JD_1PIN_GAT_STA1			0x09
 
 /* Index (NID:0ah) */
 #define RT721_CBJ_A0_GAT_CTRL1			0x04
 #define RT721_CBJ_A0_GAT_CTRL2			0x05
 
+/* Index (NID:0bh) */
+#define RT721_CHGPMP_GAT_CTRL1			0x01
+
 /* Index (NID:0Ch) */
 #define RT721_HP_AMP_2CH_CAL1			0x05
+#define RT721_HP_AMP_2CH_CAL2			0x06
 #define RT721_HP_AMP_2CH_CAL4			0x08
 #define RT721_HP_AMP_2CH_CAL18			0x1b
+#define RT721_HP_AMP_2CH_CAL27			0x24
 
 /* Index (NID:0dh) */
 #define RT721_CLASD_AMP_2CH_CAL			0x14
@@ -129,10 +146,13 @@ struct rt721_sdca_dmic_kctrl_priv {
 
 /* Index (NID:5fh) */
 #define RT721_MISC_POWER_CTL0			0x00
+#define RT721_MISC_POWER_CTL10			0x10
 #define RT721_MISC_POWER_CTL31			0x31
+#define RT721_UAJ_TOP_TCON12			0x43
 #define RT721_UAJ_TOP_TCON13			0x44
 #define RT721_UAJ_TOP_TCON14			0x45
 #define RT721_UAJ_TOP_TCON17			0x48
+#define RT721_UAJ_TOP_TCON_ANY			0x70
 
 /* Index (NID:61h) */
 #define RT721_HDA_LEGACY_MUX_CTL0		0x00
@@ -180,6 +200,13 @@ struct rt721_sdca_dmic_kctrl_priv {
 /* Buffer address for HID */
 #define RT721_BUF_ADDR_HID1			0x44030000
 #define RT721_BUF_ADDR_HID2			0x44030020
+
+/* Impedance Sensing Control */
+#define RT721_IMP_SEN_CTRL11		0x5b10017
+#define RT721_IMP_SEN_CTRL13		0x5b1001b
+
+/* ADC Bias Control 3 */
+#define RT721_ADC_BIAS_CTRL3		0x0910202
 
 /* RT721 SDCA Control - function number */
 #define FUNC_NUM_JACK_CODEC			0x01

@@ -1625,7 +1625,6 @@ static int cpcap_soc_probe(struct snd_soc_component *component)
 	struct cpcap_audio *cpcap = dev_get_drvdata(component->dev);
 	int err;
 
-	snd_soc_component_set_drvdata(component, cpcap);
 	cpcap->component = component;
 
 	err = snd_soc_card_jack_new(card, "Headphones",

@@ -275,7 +275,7 @@ static int twl4030_get_hw_params(struct device *dev,
 	return 0;
 }
 
-static int twl4030_init_chip(struct snd_soc_component *component)
+static int twl4030_soc_probe(struct snd_soc_component *component)
 {
 	struct twl4030_priv *twl4030 = snd_soc_component_get_drvdata(component);
 	struct twl4030_board_params *board_params = twl4030->board_params;
@@ -2171,15 +2171,6 @@ static struct snd_soc_dai_driver twl4030_dai[] = {
 	.ops = &twl4030_dai_voice_ops,
 },
 };
-
-static int twl4030_soc_probe(struct snd_soc_component *component)
-{
-	struct twl4030_priv *twl4030 = dev_get_drvdata(component->dev);
-
-	snd_soc_component_set_drvdata(component, twl4030);
-
-	return twl4030_init_chip(component);
-}
 
 static const struct snd_soc_component_driver soc_component_dev_twl4030 = {
 	.probe			= twl4030_soc_probe,
