@@ -399,6 +399,12 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 	/* Use correct format based on the used codec */
 	switch (params->codec.id) {
 	case SND_AUDIOCODEC_PCM:
+		/* The format is provided by user space, it must be validated */
+		if (snd_pcm_format_width((snd_pcm_format_t)params->codec.format) <= 0) {
+			spcm_err(spcm, dir, "Invalid PCM format: %u\n",
+				 params->codec.format);
+			return -EINVAL;
+		}
 		snd_mask_set_format(fmt, (snd_pcm_format_t)params->codec.format);
 		break;
 	case SND_AUDIOCODEC_VORBIS:
