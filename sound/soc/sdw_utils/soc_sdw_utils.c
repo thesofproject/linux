@@ -1880,6 +1880,9 @@ int asoc_sdw_prepare(struct snd_pcm_substream *substream)
 		return PTR_ERR(sdw_stream);
 	}
 
+	if (sdw_stream->state == SDW_STREAM_ENABLED)
+		return 0;
+
 	return sdw_prepare_stream(sdw_stream);
 }
 EXPORT_SYMBOL_NS(asoc_sdw_prepare, "SND_SOC_SDW_UTILS");
