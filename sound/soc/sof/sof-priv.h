@@ -252,6 +252,10 @@ struct snd_sof_dsp_ops {
 	int (*pcm_trigger)(struct snd_sof_dev *sdev,
 			   struct snd_pcm_substream *substream,
 			   int cmd); /* optional */
+	/* update SoundWire BE ignore_suspend state from an SOF FE trigger */
+	void (*pcm_set_sdw_ignore_suspend)(struct snd_sof_dev *sdev,
+					   struct snd_pcm_substream *substream,
+					   bool active); /* optional */
 
 	/* host stream pointer */
 	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,
@@ -405,6 +409,13 @@ struct snd_sof_dfsentry {
 		void __iomem *io_mem;
 		void *buf;
 	};
+};
+
+/* DAPM widget whose ignore_suspend flag was set by a WoV PCM */
+struct snd_sof_ignore_suspend_widget {
+	struct snd_soc_dapm_widget *widget;
+	unsigned int refcount;
+	struct list_head list;
 };
 
 /* Debug mapping for any DSP memory or registers that can used for debug */
@@ -653,6 +664,7 @@ struct snd_sof_dev {
 	struct list_head dai_list;
 	struct list_head dai_link_list;
 	struct list_head route_list;
+	struct list_head ignore_suspend_widget_list; /* list of widgets marked ignore_suspend by WoV PCMs */
 	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 	bool led_present;
