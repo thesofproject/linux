@@ -282,26 +282,46 @@ static int __maybe_unused hda_dai_hw_params(struct snd_pcm_substream *substream,
 	return hda_dai_hw_params_data(substream, params, dai, &data, flags);
 }
 
+/*
+ * The FE retention flag is set by the FE trigger, which may run after the BE trigger, so
+ * it is only used for an FE which is already suspended. A WoV FE which is retained is
+ * either running (its SUSPEND is being handled) or already suspended with
+ * suspend_ignored set and its PCM still prepared. PREPARED or PAUSED PCMs are also
+ * marked SUSPENDED without a SUSPEND trigger, so suspend_ignored is required for them.
+ * Its DPCM state is not updated until the trigger completes.
+ */
+static bool hda_dai_fe_retains(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *fe)
+{
+	const int dir = SNDRV_PCM_STREAM_CAPTURE;
+	struct snd_pcm_substream *fe_substream;
+	struct snd_sof_pcm *spcm;
+
+	spcm = snd_sof_find_spcm_dai(sdev->component, fe);
+	if (!spcm || !spcm->stream[dir].d0i3_compatible ||
+	    spcm->stream[dir].dsp_max_burst_size_in_ms > 1)
+		return false;
+
+	if (fe->dpcm[dir].state == SND_SOC_DPCM_STATE_START)
+		return true;
+
+	fe_substream = snd_soc_dpcm_get_substream(fe, dir);
+
+	return spcm->stream[dir].suspend_ignored && spcm->prepared[dir] &&
+	       fe_substream && fe_substream->runtime &&
+	       fe_substream->runtime->state == SNDRV_PCM_STATE_SUSPENDED;
+}
+
 static bool hda_dai_has_wov_fe(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dpcm *dpcm;
-	struct snd_sof_pcm *spcm;
 
 	if (substream->stream != SNDRV_PCM_STREAM_CAPTURE)
 		return false;
 
-	/*
-	 * Only retain the BE for a connected WoV capture FE that is running
-	 * or has already ignored its suspend trigger. An idle WoV FE may
-	 * still be connected to the BE.
-	 */
+	/* An idle WoV FE may still be connected to the BE, only retain for an active one. */
 	for_each_dpcm_fe(rtd, SNDRV_PCM_STREAM_CAPTURE, dpcm) {
-		spcm = snd_sof_find_spcm_dai(sdev->component, dpcm->fe);
-		if (spcm && spcm->stream[SNDRV_PCM_STREAM_CAPTURE].d0i3_compatible &&
-		    spcm->stream[SNDRV_PCM_STREAM_CAPTURE].dsp_max_burst_size_in_ms <= 1 &&
-		    (dpcm->fe->dpcm[SNDRV_PCM_STREAM_CAPTURE].state == SND_SOC_DPCM_STATE_START ||
-		     spcm->stream[SNDRV_PCM_STREAM_CAPTURE].suspend_ignored))
+		if (hda_dai_fe_retains(sdev, dpcm->fe))
 			return true;
 	}
 
@@ -340,6 +360,7 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 	struct hdac_ext_stream *hext_stream;
 	struct sof_intel_hda_stream *hda_stream;
 	struct snd_sof_dev *sdev;
+	bool skip_fw_ipc;
 	int ret;
 
 	if (!ops) {
@@ -351,13 +372,20 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 		dai->name, substream->stream);
 
 	sdev = dai_to_sdev(substream, dai);
+	/*
+	 * Firmware IPC is unavailable after a crash, but STOP/SUSPEND must
+	 * still clean up the host-side DMA resources below.
+	 */
+	skip_fw_ipc = sdev->fw_state != SOF_FW_BOOT_COMPLETE &&
+		(cmd == SNDRV_PCM_TRIGGER_STOP || cmd == SNDRV_PCM_TRIGGER_SUSPEND);
 
 	hext_stream = ops->get_hext_stream(sdev, dai, substream);
 	if (!hext_stream)
 		return -EINVAL;
 	hda_stream = hstream_to_sof_hda_stream(hext_stream);
 
-	if (cmd == SNDRV_PCM_TRIGGER_RESUME && hda_stream->suspend_ignored) {
+	if ((cmd == SNDRV_PCM_TRIGGER_START || cmd == SNDRV_PCM_TRIGGER_RESUME) &&
+	    hda_stream->suspend_ignored) {
 		hda_stream->suspend_ignored = false;
 		return 0;
 	}
@@ -374,7 +402,7 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 		return 0;
 	}
 
-	if (ops->pre_trigger) {
+	if (ops->pre_trigger && !skip_fw_ipc) {
 		ret = ops->pre_trigger(sdev, dai, substream, cmd);
 		if (ret < 0)
 			return ret;
