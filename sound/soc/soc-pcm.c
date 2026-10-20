@@ -2266,14 +2266,20 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			be->dpcm[stream].state = SND_SOC_DPCM_STATE_START;
 			break;
 		case SNDRV_PCM_TRIGGER_RESUME:
-			if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_SUSPEND))
+			if (!be->dpcm[stream].be_start &&
+			    be->dpcm[stream].state != SND_SOC_DPCM_STATE_SUSPEND &&
+			    be->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED)
 				goto next;
 
 			be->dpcm[stream].be_start++;
 			if (be->dpcm[stream].be_start != 1)
 				goto next;
 
-			ret = soc_pcm_trigger(be_substream, cmd);
+			if (be->dpcm[stream].state == SND_SOC_DPCM_STATE_PAUSED)
+				ret = soc_pcm_trigger(be_substream,
+						      SNDRV_PCM_TRIGGER_PAUSE_RELEASE);
+			else
+				ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret) {
 				be->dpcm[stream].be_start--;
 				goto next;
