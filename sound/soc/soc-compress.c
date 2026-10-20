@@ -366,6 +366,7 @@ static int soc_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	int stream = cstream->direction; /* SND_COMPRESS_xxx is same as SNDRV_PCM_STREAM_xxx */
+	int unwind_cmd;
 	int ret;
 
 	snd_soc_dpcm_mutex_lock(rtd);
@@ -375,8 +376,12 @@ static int soc_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 		goto out;
 
 	ret = snd_soc_dai_compr_trigger(cpu_dai, cstream, cmd);
-	if (ret < 0)
+	if (ret < 0) {
+		unwind_cmd = snd_soc_trigger_unwind_cmd(cmd);
+		if (unwind_cmd >= 0)
+			snd_soc_component_compr_trigger(cstream, unwind_cmd);
 		goto out;
+	}
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
