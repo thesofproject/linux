@@ -397,26 +397,45 @@ out:
 	return ret;
 }
 
+static int soc_compr_trigger_fe_only(struct snd_compr_stream *cstream, int cmd)
+{
+	struct snd_soc_pcm_runtime *fe = cstream->private_data;
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(fe, 0);
+	int unwind_cmd;
+	int ret;
+
+	ret = snd_soc_dai_compr_trigger(cpu_dai, cstream, cmd);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_soc_component_compr_trigger(cstream, cmd);
+	if (ret < 0) {
+		unwind_cmd = snd_soc_trigger_unwind_cmd(cmd);
+		if (unwind_cmd >= 0)
+			snd_soc_dai_compr_trigger(cpu_dai, cstream, unwind_cmd);
+	}
+
+	return ret;
+}
+
 static int soc_compr_trigger_fe_be(struct snd_compr_stream *cstream, int cmd,
 				   bool fe_first)
 {
 	struct snd_soc_pcm_runtime *fe = cstream->private_data;
-	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(fe, 0);
+	int unwind_cmd = snd_soc_trigger_unwind_cmd(cmd);
 	int ret;
 
 	if (fe_first) {
 		dev_dbg(fe->dev, "ASoC: pre trigger FE %s cmd %d\n",
 			fe->dai_link->name, cmd);
 
-		ret = snd_soc_dai_compr_trigger(cpu_dai, cstream, cmd);
-		if (ret < 0)
-			goto out;
-
-		ret = snd_soc_component_compr_trigger(cstream, cmd);
+		ret = soc_compr_trigger_fe_only(cstream, cmd);
 		if (ret < 0)
 			goto out;
 
 		ret = dpcm_be_dai_trigger(fe, cstream->direction, cmd);
+		if (ret < 0 && unwind_cmd >= 0)
+			soc_compr_trigger_fe_only(cstream, unwind_cmd);
 	} else {
 		dev_dbg(fe->dev, "ASoC: post trigger FE %s cmd %d\n",
 			fe->dai_link->name, cmd);
@@ -425,11 +444,9 @@ static int soc_compr_trigger_fe_be(struct snd_compr_stream *cstream, int cmd,
 		if (ret < 0)
 			goto out;
 
-		ret = snd_soc_dai_compr_trigger(cpu_dai, cstream, cmd);
+		ret = soc_compr_trigger_fe_only(cstream, cmd);
 		if (ret < 0)
-			goto out;
-
-		ret = snd_soc_component_compr_trigger(cstream, cmd);
+			dpcm_be_dai_trigger_unwind(fe, cstream->direction, cmd);
 	}
 
 out:
