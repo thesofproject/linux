@@ -1766,6 +1766,7 @@ int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 			goto unwind;
 		}
 		be->dpcm[stream].be_start = 0;
+		be->dpcm[stream].be_pause = 0;
 		be->dpcm[stream].state = SND_SOC_DPCM_STATE_OPEN;
 		count++;
 	}
@@ -1997,6 +1998,7 @@ static int dpcm_fe_dai_startup(struct snd_pcm_substream *fe_substream)
 		goto unwind;
 
 	fe->dpcm[stream].state = SND_SOC_DPCM_STATE_OPEN;
+	fe->dpcm[stream].fe_pause = false;
 
 	dpcm_runtime_setup_fe(fe_substream);
 
@@ -2303,6 +2305,8 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream,
 			ret = soc_pcm_trigger(be_substream, cmd);
 			if (ret) {
 				be->dpcm[stream].be_start--;
+				fe->dpcm[stream].fe_pause = true;
+				be->dpcm[stream].be_pause++;
 				goto next;
 			}
 

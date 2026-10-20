@@ -282,6 +282,7 @@ static int soc_compr_open_fe(struct snd_compr_stream *cstream)
 	dpcm_path_put(&list);
 
 	fe->dpcm[stream].state = SND_SOC_DPCM_STATE_OPEN;
+	fe->dpcm[stream].fe_pause = false;
 	fe->dpcm[stream].runtime_update = SND_SOC_DPCM_UPDATE_NO;
 
 	snd_soc_runtime_activate(fe, stream);
