@@ -2219,11 +2219,13 @@ out:
 }
 
 static int dpcm_be_dai_trigger_be(struct snd_soc_pcm_runtime *fe,
-				  struct snd_soc_pcm_runtime *be, int stream,
-				  int cmd)
+				  struct snd_soc_dpcm *dpcm, int stream,
+				  int cmd, bool rollback)
 {
+	struct snd_soc_pcm_runtime *be = dpcm->be;
 	struct snd_pcm_substream *be_substream;
 	bool pause_stop_transition;
+	bool suspend_to_pause;
 	unsigned long flags;
 	int ret = 0;
 
@@ -2247,6 +2249,7 @@ static int dpcm_be_dai_trigger_be(struct snd_soc_pcm_runtime *fe,
 			goto next;
 
 		be->dpcm[stream].be_start++;
+		dpcm->trigger_ref = true;
 		if (be->dpcm[stream].be_start != 1)
 			goto next;
 
@@ -2258,6 +2261,7 @@ static int dpcm_be_dai_trigger_be(struct snd_soc_pcm_runtime *fe,
 					      SNDRV_PCM_TRIGGER_START);
 		if (ret) {
 			be->dpcm[stream].be_start--;
+			dpcm->trigger_ref = false;
 			goto next;
 		}
 
@@ -2270,6 +2274,7 @@ static int dpcm_be_dai_trigger_be(struct snd_soc_pcm_runtime *fe,
 			goto next;
 
 		be->dpcm[stream].be_start++;
+		dpcm->trigger_ref = true;
 		if (be->dpcm[stream].be_start != 1)
 			goto next;
 
@@ -2280,6 +2285,7 @@ static int dpcm_be_dai_trigger_be(struct snd_soc_pcm_runtime *fe,
 			ret = soc_pcm_trigger(be_substream, cmd);
 		if (ret) {
 			be->dpcm[stream].be_start--;
+			dpcm->trigger_ref = false;
 			goto next;
 		}
 
@@ -2295,12 +2301,14 @@ static int dpcm_be_dai_trigger_be(struct snd_soc_pcm_runtime *fe,
 		be->dpcm[stream].be_pause--;
 
 		be->dpcm[stream].be_start++;
+		dpcm->trigger_ref = true;
 		if (be->dpcm[stream].be_start != 1)
 			goto next;
 
 		ret = soc_pcm_trigger(be_substream, cmd);
 		if (ret) {
 			be->dpcm[stream].be_start--;
+			dpcm->trigger_ref = false;
 			fe->dpcm[stream].fe_pause = true;
 			be->dpcm[stream].be_pause++;
 			goto next;
@@ -2319,8 +2327,12 @@ static int dpcm_be_dai_trigger_be(struct snd_soc_pcm_runtime *fe,
 		if (be->dpcm[stream].be_start != 0)
 			goto next;
 
+		/*
+		 * A STOP to roll back a failed START is not a pause/stop
+		 * transition, the BE pause reference has not been taken by START
+		 */
 		pause_stop_transition = false;
-		if (fe->dpcm[stream].fe_pause) {
+		if (!rollback && fe->dpcm[stream].fe_pause) {
 			pause_stop_transition = true;
 			fe->dpcm[stream].fe_pause = false;
 			be->dpcm[stream].be_pause--;
@@ -2355,13 +2367,26 @@ static int dpcm_be_dai_trigger_be(struct snd_soc_pcm_runtime *fe,
 		if (be->dpcm[stream].be_start != 0)
 			goto next;
 
-		ret = soc_pcm_trigger(be_substream, cmd);
+		/*
+		 * A SUSPEND to roll back a failed RESUME must not suspend the BE
+		 * under a paused FE, pause the BE as the PAUSE_PUSH of that FE
+		 * would have done without the RESUME.
+		 */
+		suspend_to_pause = rollback && be->dpcm[stream].be_pause != 0;
+		if (suspend_to_pause)
+			ret = soc_pcm_trigger(be_substream,
+					      SNDRV_PCM_TRIGGER_PAUSE_PUSH);
+		else
+			ret = soc_pcm_trigger(be_substream, cmd);
 		if (ret) {
 			be->dpcm[stream].be_start++;
 			goto next;
 		}
 
-		be->dpcm[stream].state = SND_SOC_DPCM_STATE_SUSPEND;
+		if (suspend_to_pause)
+			be->dpcm[stream].state = SND_SOC_DPCM_STATE_PAUSED;
+		else
+			be->dpcm[stream].state = SND_SOC_DPCM_STATE_SUSPEND;
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		if (be->dpcm[stream].state != SND_SOC_DPCM_STATE_START)
@@ -2394,14 +2419,45 @@ int dpcm_be_dai_trigger(struct snd_soc_pcm_runtime *fe, int stream, int cmd)
 	struct snd_soc_dpcm *dpcm;
 	int ret = 0;
 
+	for_each_dpcm_be(fe, stream, dpcm)
+		dpcm->trigger_ref = false;
+
 	for_each_dpcm_be(fe, stream, dpcm) {
-		ret = dpcm_be_dai_trigger_be(fe, dpcm->be, stream, cmd);
+		ret = dpcm_be_dai_trigger_be(fe, dpcm, stream, cmd, false);
 		if (ret)
 			break;
 	}
+
+	/* Unwind the BEs that have been triggered before the failing one */
+	if (ret)
+		dpcm_be_dai_trigger_unwind(fe, stream, cmd);
+
 	return soc_pcm_ret(fe, ret);
 }
 EXPORT_SYMBOL_GPL(dpcm_be_dai_trigger);
+
+/*
+ * Unwind a successful or partially failed START, RESUME or PAUSE_RELEASE on
+ * the BEs. Only the BEs which took a reference for the FE in the last
+ * dpcm_be_dai_trigger() call are unwound.
+ */
+void dpcm_be_dai_trigger_unwind(struct snd_soc_pcm_runtime *fe, int stream,
+				int cmd)
+{
+	int unwind_cmd = snd_soc_trigger_unwind_cmd(cmd);
+	struct snd_soc_dpcm *dpcm;
+
+	if (unwind_cmd < 0)
+		return;
+
+	list_for_each_entry_reverse(dpcm, &fe->dpcm[stream].be_clients, list_be) {
+		if (!dpcm->trigger_ref)
+			continue;
+
+		dpcm->trigger_ref = false;
+		dpcm_be_dai_trigger_be(fe, dpcm, stream, unwind_cmd, true);
+	}
+}
 
 static int dpcm_dai_trigger_fe_be(struct snd_pcm_substream *substream,
 				  int cmd, bool fe_first)
