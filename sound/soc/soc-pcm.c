@@ -2463,6 +2463,7 @@ static int dpcm_dai_trigger_fe_be(struct snd_pcm_substream *substream,
 				  int cmd, bool fe_first)
 {
 	struct snd_soc_pcm_runtime *fe = snd_soc_substream_to_rtd(substream);
+	int unwind_cmd = snd_soc_trigger_unwind_cmd(cmd);
 	int ret;
 
 	/* call trigger on the frontend before the backend. */
@@ -2475,6 +2476,8 @@ static int dpcm_dai_trigger_fe_be(struct snd_pcm_substream *substream,
 			goto end;
 
 		ret = dpcm_be_dai_trigger(fe, substream->stream, cmd);
+		if (ret < 0 && unwind_cmd >= 0)
+			soc_pcm_trigger(substream, unwind_cmd);
 	}
 	/* call trigger on the frontend after the backend. */
 	else {
@@ -2486,6 +2489,8 @@ static int dpcm_dai_trigger_fe_be(struct snd_pcm_substream *substream,
 			fe->dai_link->name, cmd);
 
 		ret = soc_pcm_trigger(substream, cmd);
+		if (ret < 0)
+			dpcm_be_dai_trigger_unwind(fe, substream->stream, cmd);
 	}
 end:
 	return snd_soc_ret(fe->dev, ret, "trigger FE cmd: %d failed\n", cmd);
@@ -2513,6 +2518,25 @@ static int dpcm_fe_dai_do_trigger(struct snd_pcm_substream *substream, int cmd)
 				fe->dai_link->name);
 		ret = -EINVAL;
 		goto out;
+	}
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_STOP:
+		/*
+		 * A failed START is unwound already, ignore the undo STOP from
+		 * the PCM core if the FE has not been started.
+		 */
+		if (fe->dpcm[stream].state != SND_SOC_DPCM_STATE_START &&
+		    fe->dpcm[stream].state != SND_SOC_DPCM_STATE_PAUSED)
+			goto out;
+		break;
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		/* Same for the undo PAUSE_PUSH of a failed PAUSE_RELEASE */
+		if (fe->dpcm[stream].state != SND_SOC_DPCM_STATE_START)
+			goto out;
+		break;
+	default:
+		break;
 	}
 
 	switch (cmd) {
