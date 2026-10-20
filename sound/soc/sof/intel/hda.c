@@ -1209,8 +1209,15 @@ static struct snd_soc_acpi_adr_device *find_acpi_adr_device(struct device *dev,
 			return NULL;
 		}
 		for (j = 0; j < codec_info_list[i].dai_num; j++) {
-			/* Check if the endpoint is present by the SDCA DisCo table */
-			if (!is_endpoint_present(sdw_device, codec_info_list[i].dais[j].dai_type))
+			/*
+			 * Check if the endpoint is present by the SDCA DisCo table
+			 * Peripherals are assumed to have at least one endpoint, so we do not
+			 * verify presence for peripherals supporting only a single endpoint.
+			 * Note: If the endpoint is disabled via BIOS, the endpoint instance
+			 * will still be created.
+			 */
+			if (codec_info_list[i].dai_num > 1 &&
+			    !is_endpoint_present(sdw_device, codec_info_list[i].dais[j].dai_type))
 				continue;
 
 			endpoints[ep_index].num = j;
