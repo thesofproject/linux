@@ -690,6 +690,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	INIT_LIST_HEAD(&sdev->dai_list);
 	INIT_LIST_HEAD(&sdev->dai_link_list);
 	INIT_LIST_HEAD(&sdev->route_list);
+	INIT_LIST_HEAD(&sdev->ignore_suspend_widget_list);
 	INIT_LIST_HEAD(&sdev->ipc_client_list);
 	INIT_LIST_HEAD(&sdev->ipc_rx_handler_list);
 	INIT_LIST_HEAD(&sdev->fw_state_handler_list);
@@ -751,6 +752,7 @@ int snd_sof_device_remove(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct snd_sof_pdata *pdata = sdev->pdata;
+	struct snd_sof_ignore_suspend_widget *isw, *tmp;
 	int ret;
 	bool aborted = false;
 
@@ -769,6 +771,12 @@ int snd_sof_device_remove(struct device *dev)
 	 * before freeing the snd_card.
 	 */
 	snd_sof_machine_unregister(sdev, pdata);
+
+	/* topology is unloaded by now, free any leftover ignore_suspend widget entries */
+	list_for_each_entry_safe(isw, tmp, &sdev->ignore_suspend_widget_list, list) {
+		list_del(&isw->list);
+		kfree(isw);
+	}
 
 	/*
 	 * Balance the runtime pm usage count in case we are faced with an

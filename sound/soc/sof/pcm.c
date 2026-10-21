@@ -66,6 +66,159 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL(snd_sof_pcm_period_elapsed);
 
+static void sof_pcm_update_widget_ignore_suspend(struct snd_sof_dev *sdev,
+						 struct snd_sof_pcm_stream *stream,
+						 struct snd_soc_dapm_widget *widget,
+						 int *ret)
+{
+	struct snd_sof_ignore_suspend_widget *isw;
+	bool owned = false;
+
+	list_for_each_entry(isw, &sdev->ignore_suspend_widget_list, list) {
+		if (isw->widget == widget) {
+			owned = true;
+
+			if (isw->stream == stream)
+				return;
+		}
+	}
+
+	/* Do not take ownership of a widget already held by another subsystem. */
+	if (widget->ignore_suspend && !owned)
+		return;
+
+	isw = kzalloc_obj(*isw);
+	if (!isw) {
+		*ret = -ENOMEM;
+		return;
+	}
+
+	isw->widget = widget;
+	isw->stream = stream;
+	list_add_tail(&isw->list, &sdev->ignore_suspend_widget_list);
+	widget->ignore_suspend = 1;
+}
+
+static void sof_pcm_release_widget_ignore_suspend(struct snd_sof_dev *sdev,
+						  struct snd_sof_pcm_stream *stream)
+{
+	struct snd_sof_ignore_suspend_widget *isw, *tmp;
+
+	list_for_each_entry_safe(isw, tmp, &sdev->ignore_suspend_widget_list, list) {
+		struct snd_soc_dapm_widget *widget = isw->widget;
+		bool owned = false;
+
+		if (isw->stream != stream)
+			continue;
+
+		list_del(&isw->list);
+		kfree(isw);
+
+		list_for_each_entry(isw, &sdev->ignore_suspend_widget_list, list) {
+			if (isw->widget == widget) {
+				owned = true;
+				break;
+			}
+		}
+
+		if (!owned)
+			widget->ignore_suspend = 0;
+	}
+}
+
+static void sof_pcm_refresh_dapm_paths(struct snd_sof_dev *sdev,
+				       struct snd_soc_pcm_runtime *rtd,
+				       struct snd_sof_pcm *spcm, int dir)
+{
+	struct snd_soc_dai *dai;
+	int j;
+
+	for_each_rtd_cpu_dais(rtd, j, dai) {
+		struct snd_soc_dapm_widget_list *connected_widgets;
+		int connected;
+
+		connected = snd_soc_dapm_dai_get_connected_widgets(dai, dir,
+								   &connected_widgets,
+								   NULL);
+		if (connected >= 0) {
+			snd_soc_dapm_dai_free_widgets(&connected_widgets);
+		} else {
+			dev_dbg(sdev->dev,
+				"failed to refresh D0i3-compatible PCM %s paths: %d\n",
+				spcm->pcm.caps[dir].name, connected);
+		}
+	}
+}
+
+static int sof_pcm_set_widget_ignore_suspend(struct snd_sof_dev *sdev,
+					     struct snd_soc_pcm_runtime *rtd,
+					     struct snd_sof_pcm *spcm, int dir,
+					     bool ignore_suspend)
+{
+	struct snd_sof_pcm_stream *stream = &spcm->stream[dir];
+	struct snd_soc_dai *dai;
+	int j, ret = 0;
+
+	if (!ignore_suspend) {
+		snd_soc_dapm_mutex_lock(rtd->card);
+		sof_pcm_release_widget_ignore_suspend(sdev, stream);
+		snd_soc_dapm_mutex_unlock(rtd->card);
+		sof_pcm_refresh_dapm_paths(sdev, rtd, spcm, dir);
+		return 0;
+	}
+
+	for_each_rtd_cpu_dais(rtd, j, dai) {
+		struct snd_soc_dapm_widget_list *connected_widgets;
+		struct snd_soc_dapm_widget *widget;
+		int connected, i;
+
+		connected = snd_soc_dapm_dai_get_connected_widgets(dai, dir,
+								   &connected_widgets,
+								   NULL);
+		if (connected < 0) {
+			dev_dbg(sdev->dev,
+				"failed to enumerate D0i3-compatible PCM %s widgets: %d\n",
+				spcm->pcm.caps[dir].name, connected);
+			ret = connected;
+			break;
+		}
+
+		snd_soc_dapm_mutex_lock(rtd->card);
+		widget = snd_soc_dai_get_widget(dai, dir);
+		if (widget && widget->is_ep)
+			sof_pcm_update_widget_ignore_suspend(sdev, stream, widget, &ret);
+
+		for_each_dapm_widgets(connected_widgets, i, widget) {
+			if (ret)
+				break;
+			if (!widget->is_ep)
+				continue;
+
+			dev_dbg(sdev->dev,
+				"WoV PCM %s ignore suspend for widget %s\n",
+				spcm->pcm.caps[dir].name, widget->name);
+			sof_pcm_update_widget_ignore_suspend(sdev, stream, widget, &ret);
+			if (ret)
+				break;
+		}
+		snd_soc_dapm_mutex_unlock(rtd->card);
+		snd_soc_dapm_dai_free_widgets(&connected_widgets);
+		if (ret)
+			break;
+	}
+
+	if (ret) {
+		snd_soc_dapm_mutex_lock(rtd->card);
+		sof_pcm_release_widget_ignore_suspend(sdev, stream);
+		snd_soc_dapm_mutex_unlock(rtd->card);
+	}
+
+	/* Recalculate endpoint caches using the updated ignore_suspend flags. */
+	sof_pcm_refresh_dapm_paths(sdev, rtd, spcm, dir);
+
+	return ret;
+}
+
 int
 sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
 				struct snd_sof_pcm *spcm, struct snd_pcm_hw_params *params,
@@ -303,6 +456,9 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: hw_free\n");
 
+	sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
+					  substream->stream, false);
+	spcm->stream[substream->stream].suspend_ignored = false;
 	ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
 
 	/* unprepare and free the list of DAPM widgets */
@@ -335,6 +491,16 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 		return -EINVAL;
 
 	spcm_dbg(spcm, substream->stream, "Entry: prepare\n");
+
+	/*
+	 * A DROP on a suspended PCM does not issue STOP. Clear the frontend's
+	 * retained state before a later prepare/start sequence can consume it.
+	 * The backend will check for another retained WoV FE before skipping START.
+	 */
+	if (spcm->stream[dir].suspend_ignored) {
+		sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, dir, false);
+		spcm->stream[dir].suspend_ignored = false;
+	}
 
 	if (spcm->prepared[substream->stream]) {
 		if (!spcm->pending_stop[substream->stream])
@@ -421,6 +587,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			 * not supported, no need to re-start streams that
 			 * remained enabled in D0ix.
 			 */
+			sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
+							  substream->stream, false);
 			spcm->stream[substream->stream].suspend_ignored = false;
 			return 0;
 		}
@@ -430,6 +598,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		break;
 	case SNDRV_PCM_TRIGGER_RESUME:
 		if (spcm->stream[substream->stream].suspend_ignored) {
+			sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
+							  substream->stream, false);
 			spcm->stream[substream->stream].suspend_ignored = false;
 			return 0;
 		}
@@ -448,7 +618,12 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		    substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
 		    spcm->stream[substream->stream].d0i3_compatible &&
 		    spcm->stream[substream->stream].dsp_max_burst_size_in_ms <= 1) {
-			spcm->stream[substream->stream].suspend_ignored = true;
+			/* Set ignore_suspend to the DAPM widgets */
+			ret = sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
+								substream->stream, true);
+			spcm->stream[substream->stream].suspend_ignored = !ret;
+			if (ret < 0)
+				return ret;
 			return 0;
 		}
 		/* On suspend the DMA must be stopped in DSPless mode */
@@ -625,6 +800,9 @@ static int sof_pcm_close(struct snd_soc_component *component,
 		return -EINVAL;
 
 	spcm_dbg(spcm, substream->stream, "Entry: close\n");
+
+	sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, substream->stream, false);
+	spcm->stream[substream->stream].suspend_ignored = false;
 
 	err = snd_sof_pcm_platform_close(sdev, substream);
 	if (err < 0) {
