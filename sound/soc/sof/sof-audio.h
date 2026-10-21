@@ -346,6 +346,8 @@ struct snd_sof_pcm_stream {
 	 * active or not while suspending the stream
 	 */
 	bool suspend_ignored;
+	/* Endpoint references acquired when retaining this stream across suspend. */
+	struct list_head ignore_suspend_widgets;
 	struct snd_sof_pcm_stream_pipeline_list pipeline_list;
 
 	/* used by IPC implementation and core does not touch it */
