@@ -407,6 +407,14 @@ struct snd_sof_dfsentry {
 	};
 };
 
+/* DAPM endpoint or DAI widget tracked for WoV ignore_suspend management */
+struct snd_sof_ignore_suspend_widget {
+	struct snd_soc_dapm_widget *widget;
+	unsigned int refcount;
+	bool initial_ignore_suspend;
+	struct list_head list;
+};
+
 /* Debug mapping for any DSP memory or registers that can used for debug */
 struct snd_sof_debugfs_map {
 	const char *name;
@@ -653,6 +661,8 @@ struct snd_sof_dev {
 	struct list_head dai_list;
 	struct list_head dai_link_list;
 	struct list_head route_list;
+	/* All card DAPM endpoints/DAI widgets and their WoV ignore_suspend reference counts */
+	struct list_head ignore_suspend_widget_list;
 	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 	bool led_present;

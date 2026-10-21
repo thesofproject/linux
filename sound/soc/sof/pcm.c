@@ -66,6 +66,224 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL(snd_sof_pcm_period_elapsed);
 
+static void sof_pcm_free_ignore_suspend_widgets(struct list_head *widgets)
+{
+	struct snd_sof_ignore_suspend_widget *isw, *tmp;
+
+	list_for_each_entry_safe(isw, tmp, widgets, list) {
+		list_del(&isw->list);
+		kfree(isw);
+	}
+}
+
+static int sof_pcm_add_ignore_suspend_widget(struct list_head *widgets,
+					     struct snd_soc_dapm_widget *dapm_widget)
+{
+	struct snd_sof_ignore_suspend_widget *isw;
+
+	list_for_each_entry(isw, widgets, list) {
+		if (isw->widget == dapm_widget)
+			return 0;
+	}
+
+	isw = kzalloc_obj(*isw);
+	if (!isw)
+		return -ENOMEM;
+
+	isw->widget = dapm_widget;
+	list_add_tail(&isw->list, widgets);
+
+	return 0;
+}
+
+static struct snd_sof_ignore_suspend_widget *
+sof_pcm_find_ignore_suspend_widget(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget)
+{
+	struct snd_sof_ignore_suspend_widget *isw;
+
+	list_for_each_entry(isw, &sdev->ignore_suspend_widget_list, list) {
+		if (isw->widget == widget)
+			return isw;
+	}
+
+	return NULL;
+}
+
+static unsigned int sof_pcm_dir_to_ep(int dir)
+{
+	return SND_SOC_DAPM_DIR_TO_EP(dir == SNDRV_PCM_STREAM_PLAYBACK ?
+				      SND_SOC_DAPM_DIR_OUT : SND_SOC_DAPM_DIR_IN);
+}
+
+static int sof_pcm_init_ignore_suspend_widgets(struct snd_sof_dev *sdev,
+					       struct snd_soc_card *card, int dir)
+{
+	enum snd_soc_dapm_type dai_id = dir == SNDRV_PCM_STREAM_PLAYBACK ?
+					snd_soc_dapm_dai_in : snd_soc_dapm_dai_out;
+	unsigned int ep = sof_pcm_dir_to_ep(dir);
+	struct snd_soc_dapm_widget *widget;
+	LIST_HEAD(widgets);
+	int ret = 0;
+
+	snd_soc_dapm_mutex_lock(card);
+	for_each_card_widgets(card, widget) {
+		/* DAI widgets become endpoints when their streams start. */
+		if (!(widget->is_ep & ep) && widget->id != dai_id)
+			continue;
+
+		if (sof_pcm_find_ignore_suspend_widget(sdev, widget))
+			continue;
+
+		ret = sof_pcm_add_ignore_suspend_widget(&widgets, widget);
+		if (ret)
+			goto unlock;
+	}
+	list_splice_tail_init(&widgets, &sdev->ignore_suspend_widget_list);
+unlock:
+	snd_soc_dapm_mutex_unlock(card);
+	sof_pcm_free_ignore_suspend_widgets(&widgets);
+
+	return ret;
+}
+
+static int sof_pcm_collect_ignore_suspend_widgets(struct snd_sof_dev *sdev,
+						  struct snd_soc_pcm_runtime *rtd,
+						  struct snd_sof_pcm *spcm, int dir,
+						  struct list_head *widgets)
+{
+	enum snd_soc_dapm_type dai_id = dir == SNDRV_PCM_STREAM_PLAYBACK ?
+					snd_soc_dapm_dai_in : snd_soc_dapm_dai_out;
+	unsigned int ep = sof_pcm_dir_to_ep(dir);
+	struct snd_soc_dai *dai;
+	int j;
+
+	for_each_rtd_cpu_dais(rtd, j, dai) {
+		struct snd_soc_dapm_widget_list *connected_widgets;
+		struct snd_soc_dapm_widget *widget;
+		int connected, i, ret;
+
+		connected = snd_soc_dapm_dai_get_connected_widgets(dai, dir,
+								   &connected_widgets,
+								   NULL);
+		if (connected < 0) {
+			dev_dbg(sdev->dev,
+				"failed to enumerate D0i3-compatible PCM %s widgets: %d\n",
+				spcm->pcm.caps[dir].name, connected);
+			return connected;
+		}
+
+		widget = snd_soc_dai_get_widget(dai, dir);
+		if (widget && widget->is_ep) {
+			ret = sof_pcm_add_ignore_suspend_widget(widgets, widget);
+			if (ret) {
+				snd_soc_dapm_dai_free_widgets(&connected_widgets);
+				return ret;
+			}
+		}
+
+		for_each_dapm_widgets(connected_widgets, i, widget) {
+			if (!(widget->is_ep & ep) && widget->id != dai_id)
+				continue;
+
+			ret = sof_pcm_add_ignore_suspend_widget(widgets, widget);
+			if (ret) {
+				snd_soc_dapm_dai_free_widgets(&connected_widgets);
+				return ret;
+			}
+		}
+
+		snd_soc_dapm_dai_free_widgets(&connected_widgets);
+	}
+
+	return 0;
+}
+
+static void sof_pcm_put_widget_ignore_suspend(struct snd_sof_ignore_suspend_widget *isw)
+{
+	if (WARN_ON_ONCE(!isw->refcount))
+		return;
+
+	if (--isw->refcount)
+		return;
+
+	isw->widget->ignore_suspend = isw->initial_ignore_suspend;
+}
+
+static int sof_pcm_set_widget_ignore_suspend(struct snd_sof_dev *sdev,
+					     struct snd_soc_pcm_runtime *rtd,
+					     struct snd_sof_pcm *spcm, int dir,
+					     bool ignore_suspend)
+{
+	struct list_head *retained_widgets = &spcm->stream[dir].ignore_suspend_widgets;
+	struct snd_sof_ignore_suspend_widget *isw;
+	LIST_HEAD(widgets);
+	int ret = 0;
+
+	if (!ignore_suspend && list_empty(retained_widgets))
+		return 0;
+
+	if (ignore_suspend) {
+		ret = sof_pcm_collect_ignore_suspend_widgets(sdev, rtd, spcm, dir, &widgets);
+		if (ret)
+			goto out;
+	}
+
+	snd_soc_dapm_mutex_lock(rtd->card);
+	list_for_each_entry(isw, &widgets, list) {
+		struct snd_sof_ignore_suspend_widget *owned;
+
+		owned = sof_pcm_find_ignore_suspend_widget(sdev, isw->widget);
+		if (WARN_ON_ONCE(!owned)) {
+			ret = -EINVAL;
+			goto unlock;
+		}
+		if (owned->refcount == UINT_MAX) {
+			ret = -EOVERFLOW;
+			goto unlock;
+		}
+	}
+
+	list_for_each_entry(isw, &widgets, list) {
+		struct snd_sof_ignore_suspend_widget *owned;
+
+		owned = sof_pcm_find_ignore_suspend_widget(sdev, isw->widget);
+		if (!owned->refcount)
+			owned->initial_ignore_suspend = owned->widget->ignore_suspend;
+		owned->refcount++;
+		owned->widget->ignore_suspend = 1;
+		dev_dbg(sdev->dev, "WoV PCM %s ignore suspend for widget %s\n",
+			spcm->pcm.caps[dir].name, isw->widget->name);
+	}
+	if (ignore_suspend) {
+		list_splice_tail_init(&widgets, retained_widgets);
+	} else {
+		list_for_each_entry(isw, retained_widgets, list) {
+			struct snd_sof_ignore_suspend_widget *owned;
+
+			owned = sof_pcm_find_ignore_suspend_widget(sdev, isw->widget);
+			if (WARN_ON_ONCE(!owned))
+				continue;
+
+			sof_pcm_put_widget_ignore_suspend(owned);
+		}
+	}
+unlock:
+	snd_soc_dapm_mutex_unlock(rtd->card);
+	if (ret)
+		goto out;
+
+	if (!ignore_suspend)
+		sof_pcm_free_ignore_suspend_widgets(retained_widgets);
+
+	snd_soc_dapm_mark_endpoints_dirty(rtd->card);
+out:
+	sof_pcm_free_ignore_suspend_widgets(&widgets);
+	if (ret)
+		spcm_err(spcm, dir, "failed to retain WoV widgets: %d\n", ret);
+
+	return ret;
+}
+
 int
 sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
 				struct snd_sof_pcm *spcm, struct snd_pcm_hw_params *params,
@@ -303,6 +521,10 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: hw_free\n");
 
+	if (spcm->stream[substream->stream].suspend_ignored) {
+		sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, substream->stream, false);
+		spcm->stream[substream->stream].suspend_ignored = false;
+	}
 	ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
 
 	/* unprepare and free the list of DAPM widgets */
@@ -335,6 +557,16 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 		return -EINVAL;
 
 	spcm_dbg(spcm, substream->stream, "Entry: prepare\n");
+
+	/*
+	 * A DROP on a suspended PCM does not issue STOP. Clear the frontend's
+	 * retained state before a later prepare/start sequence can consume it.
+	 * The backend will check for another retained WoV FE before skipping START.
+	 */
+	if (spcm->stream[dir].suspend_ignored) {
+		sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, dir, false);
+		spcm->stream[dir].suspend_ignored = false;
+	}
 
 	if (spcm->prepared[substream->stream]) {
 		if (!spcm->pending_stop[substream->stream])
@@ -421,6 +653,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			 * not supported, no need to re-start streams that
 			 * remained enabled in D0ix.
 			 */
+			sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
+							  substream->stream, false);
 			spcm->stream[substream->stream].suspend_ignored = false;
 			return 0;
 		}
@@ -430,6 +664,8 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		break;
 	case SNDRV_PCM_TRIGGER_RESUME:
 		if (spcm->stream[substream->stream].suspend_ignored) {
+			sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
+							  substream->stream, false);
 			spcm->stream[substream->stream].suspend_ignored = false;
 			return 0;
 		}
@@ -448,6 +684,12 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		    substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
 		    spcm->stream[substream->stream].d0i3_compatible &&
 		    spcm->stream[substream->stream].dsp_max_burst_size_in_ms <= 1) {
+			if (spcm->stream[substream->stream].suspend_ignored)
+				return 0;
+
+			/* Widget retention is best-effort; keep FE/BE suspend state balanced. */
+			sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
+							  substream->stream, true);
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}
@@ -566,6 +808,14 @@ static int sof_pcm_open(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: open\n");
 
+	ret = sof_pcm_init_ignore_suspend_widgets(sdev, rtd->card,
+						  substream->stream);
+	if (ret) {
+		spcm_err(spcm, substream->stream,
+			 "failed to initialize WoV endpoint widgets: %d\n", ret);
+		return ret;
+	}
+
 	caps = &spcm->pcm.caps[substream->stream];
 
 	/* set runtime config */
@@ -614,7 +864,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_sof_pcm *spcm;
-	int err;
+	int ret;
 
 	/* nothing to do for BE */
 	if (rtd->dai_link->no_pcm)
@@ -626,10 +876,14 @@ static int sof_pcm_close(struct snd_soc_component *component,
 
 	spcm_dbg(spcm, substream->stream, "Entry: close\n");
 
-	err = snd_sof_pcm_platform_close(sdev, substream);
-	if (err < 0) {
+	if (spcm->stream[substream->stream].suspend_ignored) {
+		sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, substream->stream, false);
+		spcm->stream[substream->stream].suspend_ignored = false;
+	}
+	ret = snd_sof_pcm_platform_close(sdev, substream);
+	if (ret < 0) {
 		spcm_err(spcm, substream->stream,
-			 "platform pcm close failed %d\n", err);
+			 "platform pcm close failed %d\n", ret);
 		/*
 		 * keep going, no point in preventing the close
 		 * from happening
@@ -808,6 +1062,10 @@ pm_error:
 
 static void sof_pcm_remove(struct snd_soc_component *component)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+
+	sof_pcm_free_ignore_suspend_widgets(&sdev->ignore_suspend_widget_list);
+
 	/* remove topology */
 	snd_soc_tplg_component_remove(component);
 }
