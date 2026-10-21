@@ -336,7 +336,7 @@ out_free:
 }
 EXPORT_SYMBOL_NS(acp7x_query_asp_carveout, "SND_SOC_SOF_AMD_COMMON");
 
-int acp7x_load_firmware_carveout(struct snd_sof_dev *sdev)
+int acp7x_load_firmware_carveout(struct snd_sof_dev *sdev, const char *fw_name)
 {
 	struct snd_sof_pdata *plat_data = sdev->pdata;
 	struct acp_dev_data *adata = plat_data->hw_pdata;
