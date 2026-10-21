@@ -1224,6 +1224,7 @@ int snd_soc_pcm_component_trigger(struct snd_pcm_substream *substream,
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(snd_soc_pcm_component_trigger);
 
 int snd_soc_pcm_component_pm_runtime_get(struct snd_soc_pcm_runtime *rtd,
 					 void *stream)
