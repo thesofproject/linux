@@ -1148,6 +1148,82 @@ static void cs35l45_apply_sync_property_config(struct cs35l45_private *cs35l45)
 				   CS35L45_SYNC_SW_TXID_MASK, val);
 }
 
+static int cs35l45_apply_ldpm_config(struct cs35l45_private *cs35l45)
+{
+	char prop_name[CS35L45_LDPM_PROP_NAME_MAX];
+	int i, ret;
+	u32 val;
+
+	for (i = LDPM_GROUP1; i < NUM_LDPM_GROUP; i++) {
+		sprintf(prop_name, "cirrus,ldpm-group%d-pcm-threshold-db", i);
+		if (device_property_read_u32(cs35l45->dev, prop_name, &val) == 0) {
+			ret = cs35l45_get_ldpm_pcm_thld((s32)val);
+			if (ret == -EINVAL)
+				return -EINVAL;
+
+			switch (i) {
+			case LDPM_GROUP1:
+				regmap_update_bits(cs35l45->regmap, CS35L45_LDPM_CONFIG,
+						   CS35L45_LDPM_GP1_PCM_THLD_MASK,
+						   FIELD_PREP(CS35L45_LDPM_GP1_PCM_THLD_MASK,
+						   ret));
+				break;
+			case LDPM_GROUP2:
+				regmap_update_bits(cs35l45->regmap, CS35L45_LDPM_CONFIG,
+						   CS35L45_LDPM_GP2_PCM_THLD_MASK,
+						   FIELD_PREP(CS35L45_LDPM_GP2_PCM_THLD_MASK,
+						   ret));
+				break;
+			default:
+				return -EINVAL;
+			}
+		}
+
+		sprintf(prop_name, "cirrus,ldpm-group%d-delay-ms", i);
+		if (device_property_read_u32(cs35l45->dev, prop_name, &val) == 0) {
+			ret = cs35l45_get_ldpm_delay(val);
+			if (ret == -EINVAL)
+				return -EINVAL;
+
+			switch (i) {
+			case LDPM_GROUP1:
+				regmap_update_bits(cs35l45->regmap, CS35L45_LDPM_CONFIG,
+						   CS35L45_LDPM_GP1_DELAY_MASK,
+						   FIELD_PREP(CS35L45_LDPM_GP1_DELAY_MASK, ret));
+				break;
+			case LDPM_GROUP2:
+				regmap_update_bits(cs35l45->regmap, CS35L45_LDPM_CONFIG,
+						   CS35L45_LDPM_GP2_DELAY_MASK,
+						   FIELD_PREP(CS35L45_LDPM_GP2_DELAY_MASK, ret));
+				break;
+			default:
+				return -EINVAL;
+			}
+		}
+	}
+
+	if (device_property_read_bool(cs35l45->dev, "cirrus,ldpm-group1-boost-select"))
+		regmap_set_bits(cs35l45->regmap, CS35L45_LDPM_CONFIG, CS35L45_LDPM_GP1_BOOST_SEL);
+
+	if (device_property_read_u32(cs35l45->dev, "cirrus,boost-low-power-mode", &val) == 0)
+		regmap_write(cs35l45->regmap, CS35L45_BOOST_LPMODE_CFG, val);
+
+	if (device_property_read_bool(cs35l45->dev, "cirrus,ldpm-group1-amp-select"))
+		regmap_set_bits(cs35l45->regmap, CS35L45_LDPM_CONFIG, CS35L45_LDPM_GP1_AMP_SEL);
+
+	if ((device_property_read_u32(cs35l45->dev, "cirrus,amplifier-low-power-mode", &val) == 0)
+				      && (val == 0))
+		regmap_clear_bits(cs35l45->regmap, CS35L45_BLOCK_ENABLES, CS35L45_NFR_EN_MASK);
+
+	if (device_property_read_bool(cs35l45->dev, "cirrus,ldpm-group2-vmon-select"))
+		regmap_set_bits(cs35l45->regmap, CS35L45_LDPM_CONFIG, CS35L45_LDPM_GP2_VMON_SEL);
+
+	if (device_property_read_bool(cs35l45->dev, "cirrus,ldpm-group2-imon-select"))
+		regmap_set_bits(cs35l45->regmap, CS35L45_LDPM_CONFIG, CS35L45_LDPM_GP2_IMON_SEL);
+
+	return 0;
+}
+
 static int cs35l45_apply_property_config(struct cs35l45_private *cs35l45)
 {
 	struct device_node *node = cs35l45->dev->of_node;
@@ -1222,6 +1298,10 @@ static int cs35l45_apply_property_config(struct cs35l45_private *cs35l45)
 				   CS35L45_ASP_DOUT_HIZ_CTRL_MASK,
 				   val << CS35L45_ASP_DOUT_HIZ_CTRL_SHIFT);
 	}
+
+	ret = cs35l45_apply_ldpm_config(cs35l45);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }

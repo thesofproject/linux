@@ -648,7 +648,7 @@ static int fw_parse_configuration_data_kernel(
 		 */
 		if (strnstr(config->name, "calib", 64)) {
 			tas_fmw->calibration_config_id = i;
-			dev_dbg(tas_priv->dev, "%s: calib cofig = %d\n",
+			dev_dbg(tas_priv->dev, "%s: calib config = %d\n",
 				__func__, tas_fmw->calibration_config_id);
 		}
 		/*skip extra 16 bytes*/
@@ -1438,7 +1438,7 @@ static int fw_parse_configuration_data(
 		 */
 		if (strnstr(config->name, "calib", 64)) {
 			tas_fmw->calibration_config_id = i;
-			dev_dbg(tas_priv->dev, "%s: calib cofig id = %d\n",
+			dev_dbg(tas_priv->dev, "%s: calib config id = %d\n",
 				__func__, tas_fmw->calibration_config_id);
 		}
 
@@ -1992,7 +1992,8 @@ static void dspbin_type_check(struct tasdevice_priv *tas_priv,
 	if (tas_priv->chip_id == TAS2573)
 		return;
 	if ((tas_priv->dspbin_typ != TASDEV_BASIC) &&
-		(ppcver < PPC3_VERSION_TAS5825_BASE))
+		(ppcver < PPC3_VERSION_TAS5825_BASE ||
+		tas_priv->chip_id == TAS2781))
 		tas_priv->fw_parse_fct_param_address =
 			fw_parse_fct_param_address;
 }
@@ -2003,7 +2004,8 @@ static int dspfw_default_callback(struct tasdevice_priv *tas_priv,
 	int rc = 0;
 
 	if (drv_ver == 0x100) {
-		if (ppcver >= PPC3_VERSION_TAS5825_BASE) {
+		if (ppcver >= PPC3_VERSION_TAS5825_BASE &&
+			tas_priv->chip_id == TAS5825) {
 			tas_priv->fw_parse_variable_header =
 				fw_parse_variable_header_kernel;
 			tas_priv->fw_parse_program_data =

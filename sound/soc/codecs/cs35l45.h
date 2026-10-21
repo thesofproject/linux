@@ -38,6 +38,7 @@
 #define CS35L45_SYNC_TX_RX_ENABLES		0x00003400
 #define CS35L45_SYNC_SW_TX_ID			0x00003408
 #define CS35L45_BOOST_CCM_CFG			0x00003808
+#define CS35L45_BOOST_LPMODE_CFG		0x00003810
 #define CS35L45_BOOST_DCM_CFG			0x0000380C
 #define CS35L45_BOOST_OV_CFG			0x0000382C
 #define CS35L45_ASP_ENABLES1			0x00004800
@@ -174,6 +175,8 @@
 #define CS35L45_BST_EN_MASK			GENMASK(5, 4)
 #define CS35L45_RCV_EN_SHIFT			2
 #define CS35L45_RCV_EN_MASK			BIT(2)
+#define CS35L45_NFR_EN_SHIFT			1
+#define CS35L45_NFR_EN_MASK			BIT(1)
 #define CS35L45_AMP_EN_SHIFT			0
 #define CS35L45_AMP_EN_MASK			BIT(0)
 
@@ -240,6 +243,9 @@
 #define CS35L45_SYNC_SW_TXID_SHIFT		0
 #define CS35L45_SYNC_SW_TXID_MASK		GENMASK(2, 0)
 
+/* BOOST_LPMODE_CFG */
+#define CS35L45_BST_LPMODE_SEL			GENMASK(1, 0)
+
 /* ASP_ENABLES_1 */
 #define CS35L45_ASP_RX2_EN_SHIFT		17
 #define CS35L45_ASP_RX1_EN_SHIFT		16
@@ -302,6 +308,20 @@
 #define CS35L45_HVLV_OPERATION			0x03
 #define CS35L45_HVLV_MODE_SHIFT		0
 #define CS35L45_HVLV_MODE_MASK			GENMASK(1, 0)
+
+/* LDPM_CONFIG */
+#define CS35L45_LDPM_GP1_BOOST_SEL		BIT(15)
+#define CS35L45_LDPM_GP1_AMP_SEL		BIT(14)
+#define CS35L45_LDPM_GP1_DELAY_SHIFT		11
+#define CS35L45_LDPM_GP1_DELAY_MASK		GENMASK(13, 11)
+#define CS35L45_LDPM_GP1_PCM_THLD_SHIFT	8
+#define CS35L45_LDPM_GP1_PCM_THLD_MASK		GENMASK(10, 8)
+#define CS35L45_LDPM_GP2_IMON_SEL		BIT(7)
+#define CS35L45_LDPM_GP2_VMON_SEL		BIT(6)
+#define CS35L45_LDPM_GP2_DELAY_SHIFT		3
+#define CS35L45_LDPM_GP2_DELAY_MASK		GENMASK(5, 3)
+#define CS35L45_LDPM_GP2_PCM_THLD_SHIFT	0
+#define CS35L45_LDPM_GP2_PCM_THLD_MASK		GENMASK(2, 0)
 
 /* AMP_PCM_CONTROL */
 #define CS35L45_AMP_VOL_PCM_SHIFT		0
@@ -448,6 +468,12 @@ enum amp_mode {
 	AMP_MODE_RCV  = 1,
 };
 
+enum ldpm_groups {
+	LDPM_GROUP1 = 1,
+	LDPM_GROUP2 = 2,
+	NUM_LDPM_GROUP,
+};
+
 #define CS35L45_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | \
 			 SNDRV_PCM_FMTBIT_S24_3LE| \
 			 SNDRV_PCM_FMTBIT_S24_LE)
@@ -456,6 +482,8 @@ enum amp_mode {
 		       SNDRV_PCM_RATE_48000 | \
 		       SNDRV_PCM_RATE_88200 | \
 		       SNDRV_PCM_RATE_96000)
+
+#define CS35L45_LDPM_PROP_NAME_MAX	37
 
 /*
  * IRQs
@@ -531,6 +559,8 @@ extern const struct regmap_config cs35l45_i2c_regmap;
 extern const struct regmap_config cs35l45_spi_regmap;
 int cs35l45_apply_patch(struct cs35l45_private *cs35l45);
 int cs35l45_get_clk_freq_id(unsigned int freq);
+int cs35l45_get_ldpm_pcm_thld(int pcm_thld_db);
+int cs35l45_get_ldpm_delay(u32 delay_ms);
 int cs35l45_probe(struct cs35l45_private *cs35l45);
 void cs35l45_remove(struct cs35l45_private *cs35l45);
 

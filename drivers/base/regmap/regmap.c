@@ -3379,16 +3379,13 @@ int regmap_register_patch(struct regmap *map, const struct reg_sequence *regs,
 	    num_regs))
 		return 0;
 
-	p = krealloc(map->patch,
-		     sizeof(struct reg_sequence) * (map->patch_regs + num_regs),
-		     GFP_KERNEL);
-	if (p) {
-		memcpy(p + map->patch_regs, regs, num_regs * sizeof(*regs));
-		map->patch = p;
-		map->patch_regs += num_regs;
-	} else {
+	p = krealloc_array(map->patch, map->patch_regs + num_regs, sizeof(*p), GFP_KERNEL);
+	if (!p)
 		return -ENOMEM;
-	}
+
+	memcpy(p + map->patch_regs, regs, num_regs * sizeof(*regs));
+	map->patch = p;
+	map->patch_regs += num_regs;
 
 	scoped_guard(regmap, map) {
 		bypass = map->cache_bypass;
