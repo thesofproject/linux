@@ -423,7 +423,7 @@ int acp_get_bar_index(struct snd_sof_dev *sdev, u32 type);
 
 /* ACP7.B/7.F ASP carveout firmware load helper functions */
 int acp7x_query_asp_carveout(struct snd_sof_dev *sdev);
-int acp7x_load_firmware_carveout(struct snd_sof_dev *sdev);
+int acp7x_load_firmware_carveout(struct snd_sof_dev *sdev, const char *fw_name);
 int acp7x_configure_carveout_pte(struct snd_sof_dev *sdev);
 
 /* Block IO callbacks */
