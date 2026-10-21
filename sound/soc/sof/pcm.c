@@ -163,6 +163,7 @@ static int sof_pcm_set_widget_ignore_suspend(struct snd_sof_dev *sdev,
 		snd_soc_dapm_mutex_lock(rtd->card);
 		sof_pcm_release_widget_ignore_suspend(sdev, stream);
 		snd_soc_dapm_mutex_unlock(rtd->card);
+		stream->suspend_ignored = false;
 		sof_pcm_refresh_dapm_paths(sdev, rtd, spcm, dir);
 		return 0;
 	}
@@ -211,6 +212,9 @@ static int sof_pcm_set_widget_ignore_suspend(struct snd_sof_dev *sdev,
 		snd_soc_dapm_mutex_lock(rtd->card);
 		sof_pcm_release_widget_ignore_suspend(sdev, stream);
 		snd_soc_dapm_mutex_unlock(rtd->card);
+		stream->suspend_ignored = false;
+	} else {
+		stream->suspend_ignored = true;
 	}
 
 	/* Recalculate endpoint caches using the updated ignore_suspend flags. */
@@ -458,7 +462,6 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 
 	sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
 					  substream->stream, false);
-	spcm->stream[substream->stream].suspend_ignored = false;
 	ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
 
 	/* unprepare and free the list of DAPM widgets */
@@ -497,10 +500,8 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	 * retained state before a later prepare/start sequence can consume it.
 	 * The backend will check for another retained WoV FE before skipping START.
 	 */
-	if (spcm->stream[dir].suspend_ignored) {
+	if (spcm->stream[dir].suspend_ignored)
 		sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, dir, false);
-		spcm->stream[dir].suspend_ignored = false;
-	}
 
 	if (spcm->prepared[substream->stream]) {
 		if (!spcm->pending_stop[substream->stream])
@@ -589,7 +590,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			 */
 			sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
 							  substream->stream, false);
-			spcm->stream[substream->stream].suspend_ignored = false;
 			return 0;
 		}
 
@@ -600,7 +600,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		if (spcm->stream[substream->stream].suspend_ignored) {
 			sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
 							  substream->stream, false);
-			spcm->stream[substream->stream].suspend_ignored = false;
 			return 0;
 		}
 		spcm_err(spcm, substream->stream, "RESUME trigger is not supported\n");
@@ -621,7 +620,6 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			/* Set ignore_suspend to the DAPM widgets */
 			ret = sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
 								substream->stream, true);
-			spcm->stream[substream->stream].suspend_ignored = !ret;
 			if (ret < 0)
 				return ret;
 			return 0;
@@ -802,7 +800,6 @@ static int sof_pcm_close(struct snd_soc_component *component,
 	spcm_dbg(spcm, substream->stream, "Entry: close\n");
 
 	sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, substream->stream, false);
-	spcm->stream[substream->stream].suspend_ignored = false;
 
 	err = snd_sof_pcm_platform_close(sdev, substream);
 	if (err < 0) {
