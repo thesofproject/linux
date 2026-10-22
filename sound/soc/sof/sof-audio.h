@@ -172,6 +172,11 @@ struct sof_ipc_tplg_control_ops {
 				   int size);
 };
 
+enum sof_widget_output_pin {
+	SOF_OUTPUT_PIN_ANY = -1,
+	SOF_OUTPUT_PIN_NONE = -2,
+};
+
 /**
  * struct sof_ipc_tplg_widget_ops - IPC-specific ops for topology widgets
  * @ipc_setup: Function pointer for setting up widget IPC params
@@ -179,7 +184,13 @@ struct sof_ipc_tplg_control_ops {
  * @token_list: List of token ID's that should be parsed for the widget
  * @token_list_size: number of elements in token_list
  * @bind_event: Function pointer for binding events to the widget
- * @ipc_prepare: Optional op for preparing a widget for set up
+ * @ipc_prepare: Optional op for preparing a widget for set up. Called for each
+ *		 outgoing connection with a separate copy of the input params.
+ *		 Only the first call initializes the widget; subsequent calls
+ *		 propagate its configured output format. @out_pin is the
+ *		 output pin of the widget feeding the connection being prepared,
+ *		 SOF_OUTPUT_PIN_ANY if bindings are absent, or
+ *		 SOF_OUTPUT_PIN_NONE if there is no downstream connection
  * @ipc_unprepare: Optional op for unpreparing a widget
  */
 struct sof_ipc_tplg_widget_ops {
@@ -192,7 +203,8 @@ struct sof_ipc_tplg_widget_ops {
 	int (*ipc_prepare)(struct snd_sof_widget *swidget,
 			   struct snd_pcm_hw_params *fe_params,
 			   struct snd_sof_platform_stream_params *platform_params,
-			   struct snd_pcm_hw_params *source_params, int dir);
+			   struct snd_pcm_hw_params *source_params, int dir,
+			   int out_pin);
 	void (*ipc_unprepare)(struct snd_sof_widget *swidget);
 };
 
