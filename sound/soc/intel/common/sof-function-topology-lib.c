@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
+#include <linux/moduleparam.h>
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include "sof-function-topology-lib.h"
@@ -26,6 +27,11 @@ enum tplg_device_id {
 	TPLG_DEVICE_LOOPBACK_VIRTUAL,
 	TPLG_DEVICE_MAX
 };
+
+static int function_tplg_mask = -1;
+module_param(function_tplg_mask, int, 0444);
+MODULE_PARM_DESC(function_tplg_mask,
+		"Function topology selection mask, BIT(tplg_device_id); -1: all devices");
 
 #define SDCA_DEVICE_MASK (BIT(TPLG_DEVICE_SDCA_JACK) | BIT(TPLG_DEVICE_SDCA_AMP) | \
 			  BIT(TPLG_DEVICE_SDCA_MIC))
@@ -182,6 +188,11 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 	int ret;
 	int i;
 
+	if (function_tplg_mask >= 0) {
+		tplg_mask = ~(unsigned long)function_tplg_mask;
+		best_effort = true;
+	}
+
 	ret = get_platform_name(card, mach, platform);
 	if (ret < 0)
 		return ret;
@@ -257,6 +268,12 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 
 	dev_dbg(card->dev, "tplg_mask %#lx tplg_num %d\n", tplg_mask, tplg_num);
 
+	if (function_tplg_mask >= 0 && !tplg_num) {
+		dev_err(card->dev, "No function topology available for mask %#x\n",
+			function_tplg_mask);
+		return -ENOENT;
+	}
+
 	return tplg_num;
 }
 EXPORT_SYMBOL_GPL(sof_sdw_get_tplg_files);
@@ -274,6 +291,11 @@ int sof_i2s_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 	int tplg_dev;
 	int ret;
 	int i;
+
+	if (function_tplg_mask >= 0) {
+		tplg_mask = ~(unsigned long)function_tplg_mask;
+		best_effort = true;
+	}
 
 	ret = get_platform_name(card, mach, platform);
 	if (ret < 0)
@@ -328,6 +350,12 @@ int sof_i2s_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 	}
 
 	dev_dbg(card->dev, "tplg_mask %#lx tplg_num %d\n", tplg_mask, tplg_num);
+
+	if (function_tplg_mask >= 0 && !tplg_num) {
+		dev_err(card->dev, "No function topology available for mask %#x\n",
+			function_tplg_mask);
+		return -ENOENT;
+	}
 
 	return tplg_num;
 }
