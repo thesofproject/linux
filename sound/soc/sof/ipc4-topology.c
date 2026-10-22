@@ -275,6 +275,15 @@ static bool sof_ipc4_is_same_fmt(const struct sof_ipc4_audio_format *a,
 	       sof_ipc4_fmt_to_type(a) == sof_ipc4_fmt_to_type(b);
 }
 
+static bool sof_ipc4_fmt_matches_params(const struct sof_ipc4_audio_format *fmt,
+					u32 rate, u32 channels, u32 valid_bits, u32 type)
+{
+	return fmt->sampling_frequency == rate &&
+	       SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg) == channels &&
+	       SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg) == valid_bits &&
+	       sof_ipc4_fmt_to_type(fmt) == type;
+}
+
 /* Check if @pin_fmt belongs to @pin, SOF_OUTPUT_PIN_ANY matches all pins */
 static bool sof_ipc4_is_pin_fmt(struct sof_ipc4_pin_format *pin_fmt, int pin)
 {
@@ -1683,18 +1692,11 @@ static int sof_ipc4_init_output_audio_fmt(struct snd_sof_dev *sdev,
 	for (i = 0; i < pin_fmts_size; i++) {
 		struct sof_ipc4_audio_format *fmt = &pin_fmts[i].audio_fmt;
 
-		u32 _out_rate, _out_channels, _out_valid_bits, _out_type;
-
 		if (!sof_ipc4_is_pin_fmt(&pin_fmts[i], pin))
 			continue;
 
-		_out_rate = fmt->sampling_frequency;
-		_out_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
-		_out_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
-		_out_type = sof_ipc4_fmt_to_type(fmt);
-
-		if (_out_rate == out_ref_rate && _out_channels == out_ref_channels &&
-		    _out_valid_bits == out_ref_valid_bits && _out_type == out_ref_type)
+		if (sof_ipc4_fmt_matches_params(fmt, out_ref_rate, out_ref_channels,
+						out_ref_valid_bits, out_ref_type))
 			goto out_fmt;
 	}
 
@@ -1755,6 +1757,53 @@ static int sof_ipc4_get_sample_type(struct snd_sof_dev *sdev, struct snd_pcm_hw_
 	}
 }
 
+/*
+ * The params do not match any pin 0 input format: check if they match the format
+ * of another input pin, meaning that the path being prepared enters the module on
+ * that pin. The module is configured with the pin 0 input format, which is only
+ * known if pin 0 has a single format. With multiple pin 0 formats the path
+ * entering on pin 0 must be prepared first.
+ *
+ * Returns the index of the pin 0 format, -ENOENT if the params do not match any
+ * other pin either, -EINVAL if pin 0 does not have a single format.
+ */
+static int sof_ipc4_get_input_fmt_via_other_pin(struct snd_sof_dev *sdev,
+						struct snd_sof_widget *swidget,
+						struct sof_ipc4_pin_format *pin_fmts,
+						u32 pin_fmts_size, u32 rate, u32 channels,
+						u32 valid_bits, u32 type)
+{
+	int match_pin = -1;
+	int i;
+
+	for (i = 0; i < pin_fmts_size; i++) {
+		struct sof_ipc4_audio_format *fmt = &pin_fmts[i].audio_fmt;
+
+		if (!pin_fmts[i].pin_index)
+			continue;
+
+		if (sof_ipc4_fmt_matches_params(fmt, rate, channels, valid_bits, type)) {
+			match_pin = pin_fmts[i].pin_index;
+			break;
+		}
+	}
+
+	if (match_pin < 0)
+		return -ENOENT;
+
+	if (!sof_ipc4_is_single_format(sdev, pin_fmts, pin_fmts_size, 0)) {
+		dev_err(sdev->dev,
+			"%s: params match input pin %d, pin 0 format is unknown\n",
+			swidget->widget->name, match_pin);
+		return -EINVAL;
+	}
+
+	dev_dbg(sdev->dev, "%s: params match input pin %d, using the pin 0 format\n",
+		swidget->widget->name, match_pin);
+
+	return sof_ipc4_get_first_pin_fmt(pin_fmts, pin_fmts_size, 0);
+}
+
 static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 					 struct snd_sof_widget *swidget,
 					 struct sof_ipc4_base_module_cfg *base_config,
@@ -1763,10 +1812,6 @@ static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 {
 	struct sof_ipc4_pin_format *pin_fmts = available_fmt->input_pin_fmts;
 	u32 pin_fmts_size = available_fmt->num_input_formats;
-	u32 valid_bits;
-	u32 channels;
-	u32 rate;
-	u32 type;
 	bool single_format;
 	int sample_valid_bits;
 	int sample_type;
@@ -1800,22 +1845,25 @@ static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 		if (pin_fmts[i].pin_index)
 			continue;
 
-		rate = fmt->sampling_frequency;
-		channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
-		valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
-		type = sof_ipc4_fmt_to_type(fmt);
-		if (params_rate(params) == rate && params_channels(params) == channels &&
-		    sample_valid_bits == valid_bits && sample_type == type)
+		if (sof_ipc4_fmt_matches_params(fmt, params_rate(params), params_channels(params),
+						sample_valid_bits, sample_type))
 			break;
 	}
 
-	if (i == pin_fmts_size) {
+	if (i == pin_fmts_size)
+		i = sof_ipc4_get_input_fmt_via_other_pin(sdev, swidget, pin_fmts, pin_fmts_size,
+							 params_rate(params),
+							 params_channels(params),
+							 sample_valid_bits, sample_type);
+
+	if (i == -ENOENT)
 		dev_err(sdev->dev,
 			"%s: Unsupported audio format: %uHz, %ubit, %u channels, type: %d\n",
 			__func__, params_rate(params), sample_valid_bits,
 			params_channels(params), sample_type);
+
+	if (i < 0)
 		return -EINVAL;
-	}
 
 in_fmt:
 	/* copy input format */
