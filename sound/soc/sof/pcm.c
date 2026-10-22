@@ -808,8 +808,11 @@ pm_error:
 
 static void sof_pcm_remove(struct snd_soc_component *component)
 {
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+
 	/* remove topology */
 	snd_soc_tplg_component_remove(component);
+	sof_debug_set_tplg_name(sdev, NULL);
 }
 
 static int sof_pcm_ack(struct snd_soc_component *component,

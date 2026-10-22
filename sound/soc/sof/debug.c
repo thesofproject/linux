@@ -14,6 +14,7 @@
 #include <linux/debugfs.h>
 #include <linux/io.h>
 #include <linux/pm_runtime.h>
+#include <linux/seq_file.h>
 #include <sound/sof/ext_manifest.h>
 #include <sound/sof/debug.h>
 #include "sof-priv.h"
@@ -313,6 +314,28 @@ int snd_sof_dbg_memory_info_init(struct snd_sof_dev *sdev)
 }
 EXPORT_SYMBOL_GPL(snd_sof_dbg_memory_info_init);
 
+static int sof_dbg_tplg_name_show(struct seq_file *m, void *v)
+{
+	struct snd_sof_dev *sdev = m->private;
+
+	/* fall back to the selected topology name while no topology is loaded */
+	mutex_lock(&sdev->loaded_tplg_names_mutex);
+	seq_printf(m, "%s\n", sdev->loaded_tplg_names ?: sdev->pdata->tplg_filename);
+	mutex_unlock(&sdev->loaded_tplg_names_mutex);
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(sof_dbg_tplg_name);
+
+/* Takes ownership of the devm allocated tplg_names, NULL clears the list */
+void sof_debug_set_tplg_name(struct snd_sof_dev *sdev, char *tplg_names)
+{
+	mutex_lock(&sdev->loaded_tplg_names_mutex);
+	devm_kfree(sdev->dev, sdev->loaded_tplg_names);
+	sdev->loaded_tplg_names = tplg_names;
+	mutex_unlock(&sdev->loaded_tplg_names_mutex);
+}
+
 int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 {
 	const struct snd_sof_dsp_ops *ops = sof_ops(sdev);
@@ -355,8 +378,8 @@ int snd_sof_dbg_init(struct snd_sof_dev *sdev)
 			   (char **)&plat_data->tplg_filename_prefix);
 	debugfs_create_str("fw_name", 0444, fw_profile,
 			   (char **)&plat_data->fw_filename);
-	debugfs_create_str("tplg_name", 0444, fw_profile,
-			   (char **)&plat_data->tplg_filename);
+	debugfs_create_file("tplg_name", 0444, fw_profile, sdev,
+			    &sof_dbg_tplg_name_fops);
 	debugfs_create_u32("ipc_type", 0444, fw_profile,
 			   (u32 *)&plat_data->ipc_type);
 

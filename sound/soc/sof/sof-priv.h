@@ -656,6 +656,9 @@ struct snd_sof_dev {
 	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 	bool led_present;
+	/* newline separated list of the loaded topology files for debugfs */
+	char *loaded_tplg_names;
+	struct mutex loaded_tplg_names_mutex; /* protects loaded_tplg_names */
 
 	/* FW configuration */
 	struct sof_ipc_window *info_window;
@@ -798,6 +801,7 @@ static inline void snd_sof_ipc_process_reply(struct snd_sof_dev *sdev, u32 msg_i
  */
 int snd_sof_dbg_init(struct snd_sof_dev *sdev);
 void snd_sof_free_debug(struct snd_sof_dev *sdev);
+void sof_debug_set_tplg_name(struct snd_sof_dev *sdev, char *tplg_names);
 int snd_sof_debugfs_buf_item(struct snd_sof_dev *sdev,
 			     void *base, size_t size,
 			     const char *name, mode_t mode);
