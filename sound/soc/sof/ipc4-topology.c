@@ -2677,7 +2677,8 @@ static int
 sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 			       struct snd_pcm_hw_params *fe_params,
 			       struct snd_sof_platform_stream_params *platform_params,
-			       struct snd_pcm_hw_params *pipeline_params, int dir)
+			       struct snd_pcm_hw_params *pipeline_params, int dir,
+			       int out_pin)
 {
 	if (swidget->prepared)
 		return sof_ipc4_copier_module_update_params(swidget,
@@ -2691,7 +2692,8 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 					struct snd_pcm_hw_params *fe_params,
 					struct snd_sof_platform_stream_params *platform_params,
-					struct snd_pcm_hw_params *pipeline_params, int dir)
+					struct snd_pcm_hw_params *pipeline_params, int dir,
+					int out_pin)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
@@ -2740,7 +2742,8 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 					 struct snd_pcm_hw_params *fe_params,
 					 struct snd_sof_platform_stream_params *platform_params,
-					 struct snd_pcm_hw_params *pipeline_params, int dir)
+					 struct snd_pcm_hw_params *pipeline_params, int dir,
+					 int out_pin)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
@@ -2813,7 +2816,8 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 				       struct snd_pcm_hw_params *fe_params,
 				       struct snd_sof_platform_stream_params *platform_params,
-				       struct snd_pcm_hw_params *pipeline_params, int dir)
+				       struct snd_pcm_hw_params *pipeline_params, int dir,
+				       int out_pin)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
@@ -3074,7 +3078,8 @@ sof_ipc4_process_select_output_fmt(struct snd_sof_dev *sdev,
 static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 					   struct snd_pcm_hw_params *fe_params,
 					   struct snd_sof_platform_stream_params *platform_params,
-					   struct snd_pcm_hw_params *pipeline_params, int dir)
+					   struct snd_pcm_hw_params *pipeline_params, int dir,
+					   int out_pin)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
