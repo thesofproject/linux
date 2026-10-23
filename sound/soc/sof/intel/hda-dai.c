@@ -282,6 +282,25 @@ static int __maybe_unused hda_dai_hw_params(struct snd_pcm_substream *substream,
 	return hda_dai_hw_params_data(substream, params, dai, &data, flags);
 }
 
+/*
+ * A retained WoV FE that is being resumed has already consumed its
+ * suspend_ignored flag when the FE is triggered before the BE, but its
+ * DPCM state is not updated until the trigger completes. Its PCM is still
+ * SUSPENDED during the trigger.
+ */
+static bool hda_dai_fe_is_resuming(struct snd_soc_pcm_runtime *fe)
+{
+	struct snd_pcm_substream *fe_substream;
+
+	if (fe->dpcm[SNDRV_PCM_STREAM_CAPTURE].runtime_update != SND_SOC_DPCM_UPDATE_FE)
+		return false;
+
+	fe_substream = snd_soc_dpcm_get_substream(fe, SNDRV_PCM_STREAM_CAPTURE);
+
+	return fe_substream && fe_substream->runtime &&
+	       fe_substream->runtime->state == SNDRV_PCM_STATE_SUSPENDED;
+}
+
 static bool hda_dai_has_wov_fe(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
@@ -292,20 +311,42 @@ static bool hda_dai_has_wov_fe(struct snd_sof_dev *sdev, struct snd_pcm_substrea
 		return false;
 
 	/*
-	 * Only retain the BE for a connected WoV capture FE that is running
-	 * or has already ignored its suspend trigger. An idle WoV FE may
-	 * still be connected to the BE.
+	 * Only retain the BE for a connected WoV capture FE that is running,
+	 * has already ignored its suspend trigger or is being resumed. An idle
+	 * WoV FE may still be connected to the BE.
 	 */
 	for_each_dpcm_fe(rtd, SNDRV_PCM_STREAM_CAPTURE, dpcm) {
 		spcm = snd_sof_find_spcm_dai(sdev->component, dpcm->fe);
 		if (spcm && spcm->stream[SNDRV_PCM_STREAM_CAPTURE].d0i3_compatible &&
 		    spcm->stream[SNDRV_PCM_STREAM_CAPTURE].dsp_max_burst_size_in_ms <= 1 &&
 		    (dpcm->fe->dpcm[SNDRV_PCM_STREAM_CAPTURE].state == SND_SOC_DPCM_STATE_START ||
-		     spcm->stream[SNDRV_PCM_STREAM_CAPTURE].suspend_ignored))
+		     spcm->stream[SNDRV_PCM_STREAM_CAPTURE].suspend_ignored ||
+		     hda_dai_fe_is_resuming(dpcm->fe)))
 			return true;
 	}
 
 	return false;
+}
+
+static void hda_dai_set_sdw_ignore_suspend(struct snd_soc_dai *dai, int dir,
+					   bool ignore_suspend)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(dai, dir);
+	struct sdw_stream_runtime *sdw_stream;
+	struct snd_sof_widget *swidget;
+	struct snd_sof_dai *sof_dai;
+
+	if (!w || !w->dobj.private)
+		return;
+
+	swidget = w->dobj.private;
+	sof_dai = swidget->private;
+	if (!sof_dai || sof_dai->type != SOF_DAI_INTEL_ALH)
+		return;
+
+	sdw_stream = snd_soc_dai_get_stream(dai, dir);
+	if (!IS_ERR_OR_NULL(sdw_stream))
+		sdw_stream->ignore_suspend = ignore_suspend;
 }
 
 /*
@@ -319,6 +360,7 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 	struct hdac_ext_stream *hext_stream;
 	struct sof_intel_hda_stream *hda_stream;
 	struct snd_sof_dev *sdev;
+	bool skip_fw_ipc;
 	int ret;
 
 	if (!ops) {
@@ -330,13 +372,20 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 		dai->name, substream->stream);
 
 	sdev = dai_to_sdev(substream, dai);
+	/*
+	 * Firmware IPC is unavailable after a crash, but STOP/SUSPEND must
+	 * still clean up the host-side DMA resources below.
+	 */
+	skip_fw_ipc = sdev->fw_state != SOF_FW_BOOT_COMPLETE &&
+		(cmd == SNDRV_PCM_TRIGGER_STOP || cmd == SNDRV_PCM_TRIGGER_SUSPEND);
 
 	hext_stream = ops->get_hext_stream(sdev, dai, substream);
 	if (!hext_stream)
 		return -EINVAL;
 	hda_stream = hstream_to_sof_hda_stream(hext_stream);
 
-	if (cmd == SNDRV_PCM_TRIGGER_RESUME && hda_stream->suspend_ignored) {
+	if ((cmd == SNDRV_PCM_TRIGGER_START || cmd == SNDRV_PCM_TRIGGER_RESUME) &&
+	    hda_stream->suspend_ignored) {
 		hda_stream->suspend_ignored = false;
 		return 0;
 	}
@@ -353,7 +402,7 @@ static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, i
 		return 0;
 	}
 
-	if (ops->pre_trigger) {
+	if (ops->pre_trigger && !skip_fw_ipc) {
 		ret = ops->pre_trigger(sdev, dai, substream, cmd);
 		if (ret < 0)
 			return ret;
@@ -691,6 +740,16 @@ EXPORT_SYMBOL_NS(sdw_hda_dai_hw_free, "SND_SOC_SOF_INTEL_HDA_COMMON");
 int sdw_hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 			struct snd_soc_dai *cpu_dai)
 {
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	bool retain = false;
+
+	if (cmd == SNDRV_PCM_TRIGGER_SUSPEND)
+		retain = sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
+			 hda_dai_has_wov_fe(sdev, substream);
+
+	if (cmd == SNDRV_PCM_TRIGGER_SUSPEND || cmd == SNDRV_PCM_TRIGGER_STOP)
+		hda_dai_set_sdw_ignore_suspend(cpu_dai, substream->stream, retain);
+
 	return hda_dai_trigger(substream, cmd, cpu_dai);
 }
 EXPORT_SYMBOL_NS(sdw_hda_dai_trigger, "SND_SOC_SOF_INTEL_HDA_COMMON");

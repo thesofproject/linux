@@ -407,6 +407,13 @@ struct snd_sof_dfsentry {
 	};
 };
 
+/* DAPM widget whose ignore_suspend flag was set by a WoV PCM */
+struct snd_sof_ignore_suspend_widget {
+	struct snd_soc_dapm_widget *widget;
+	struct snd_sof_pcm_stream *stream;
+	struct list_head list;
+};
+
 /* Debug mapping for any DSP memory or registers that can used for debug */
 struct snd_sof_debugfs_map {
 	const char *name;
@@ -653,6 +660,8 @@ struct snd_sof_dev {
 	struct list_head dai_list;
 	struct list_head dai_link_list;
 	struct list_head route_list;
+	/* DAPM widgets marked ignore_suspend by WoV PCMs */
+	struct list_head ignore_suspend_widget_list;
 	struct snd_soc_component *component;
 	u32 enabled_cores_mask; /* keep track of enabled cores */
 	bool led_present;

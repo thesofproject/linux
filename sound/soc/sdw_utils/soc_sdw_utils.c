@@ -1880,6 +1880,9 @@ int asoc_sdw_prepare(struct snd_pcm_substream *substream)
 		return PTR_ERR(sdw_stream);
 	}
 
+	if (sdw_stream->state == SDW_STREAM_ENABLED)
+		return 0;
+
 	return sdw_prepare_stream(sdw_stream);
 }
 EXPORT_SYMBOL_NS(asoc_sdw_prepare, "SND_SOC_SDW_UTILS");
@@ -1902,6 +1905,10 @@ int asoc_sdw_trigger(struct snd_pcm_substream *substream, int cmd)
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_RESUME:
+		if (sdw_stream->state == SDW_STREAM_ENABLED) {
+			ret = 0;
+			break;
+		}
 		/*
 		 * The peripherals lose their port configuration when the
 		 * controller is power-gated during system suspend, and an
@@ -1923,9 +1930,11 @@ int asoc_sdw_trigger(struct snd_pcm_substream *substream, int cmd)
 		break;
 
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
 		ret = sdw_disable_stream(sdw_stream);
+		break;
+	case SNDRV_PCM_TRIGGER_SUSPEND:
+		ret = sdw_stream->ignore_suspend ? 0 : sdw_disable_stream(sdw_stream);
 		break;
 	default:
 		ret = -EINVAL;
@@ -2003,6 +2012,16 @@ int asoc_sdw_hw_free(struct snd_pcm_substream *substream)
 	if (IS_ERR(sdw_stream)) {
 		dev_err(rtd->dev, "no stream found for DAI %s\n", dai->name);
 		return PTR_ERR(sdw_stream);
+	}
+
+	if (sdw_stream->state == SDW_STREAM_ENABLED) {
+		int ret;
+
+		ret = sdw_disable_stream(sdw_stream);
+		if (ret) {
+			dev_err(rtd->dev, "failed to disable SoundWire stream: %d\n", ret);
+			return ret;
+		}
 	}
 
 	return sdw_deprepare_stream(sdw_stream);
