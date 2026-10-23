@@ -475,6 +475,11 @@ sof_ipc4_get_input_pin_audio_fmt(struct snd_sof_widget *swidget, int pin_index)
 	return NULL;
 }
 
+/*
+ * Evaluate the params changed by the module between its pin 0 input and pin 0
+ * output formats. The formats of other pins are not on the data path from
+ * input pin 0 to output pin 0.
+ */
 static void
 sof_ipc4_evaluate_params_change(struct sof_ipc4_available_audio_format *available_fmt)
 {
@@ -485,12 +490,18 @@ sof_ipc4_evaluate_params_change(struct sof_ipc4_available_audio_format *availabl
 	int i, j;
 
 	for (i = 0; i < available_fmt->num_input_formats; i++) {
+		if (available_fmt->input_pin_fmts[i].pin_index)
+			continue;
+
 		fmt = &available_fmt->input_pin_fmts[i].audio_fmt;
 		in_rate = fmt->sampling_frequency;
 		in_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
 		in_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
 
 		for (j = 0; j < available_fmt->num_output_formats; j++) {
+			if (available_fmt->output_pin_fmts[j].pin_index)
+				continue;
+
 			fmt = &available_fmt->output_pin_fmts[j].audio_fmt;
 			out_rate = fmt->sampling_frequency;
 			out_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
