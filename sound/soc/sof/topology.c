@@ -2575,12 +2575,6 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		const struct firmware *fw __free(firmware) = NULL;
 		ret = request_firmware(&fw, tplg_files[i], scomp->dev);
 		if (ret < 0) {
-			/*
-			 * snd_soc_tplg_component_remove(scomp) will be called
-			 * if snd_soc_tplg_component_load(scomp) failed and all
-			 * objects in the scomp will be removed. No need to call
-			 * snd_soc_tplg_component_remove(scomp) here.
-			 */
 			dev_err(scomp->dev, "tplg request firmware %s failed err: %d\n",
 				tplg_files[i], ret);
 			goto out;
@@ -2613,12 +2607,6 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		const struct firmware *fw __free(firmware) = NULL;
 		ret = request_firmware(&fw, feature_topology, scomp->dev);
 		if (ret < 0) {
-			/*
-			 * snd_soc_tplg_component_remove(scomp) will be called
-			 * if snd_soc_tplg_component_load(scomp) failed and all
-			 * objects in the scomp will be removed. No need to call
-			 * snd_soc_tplg_component_remove(scomp) here.
-			 */
 			dev_warn(scomp->dev, "feature tplg request firmware %s failed err: %d\n",
 				 feature_topologies[i], ret);
 			/*
@@ -2652,6 +2640,14 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 out:
 	if (ret >= 0 && sdev->led_present)
 		ret = snd_ctl_led_request();
+
+	/*
+	 * Remove the topology on any error as .remove is not called when the
+	 * component probe fails. If snd_soc_tplg_component_load() failed, it
+	 * has removed it already and this call is a no-op.
+	 */
+	if (ret < 0)
+		snd_soc_tplg_component_remove(scomp);
 
 	return ret;
 }
