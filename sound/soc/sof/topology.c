@@ -2509,11 +2509,40 @@ static const struct snd_soc_tplg_ops sof_dspless_tplg_ops = {
 	.bytes_ext_ops_count = ARRAY_SIZE(sof_dspless_bytes_ext_ops),
 };
 
+/*
+ * Append the name of a loaded topology file to the list exposed via debugfs.
+ * The topology path prefix is dropped as it is exposed separately.
+ */
+static int sof_tplg_names_append(struct snd_sof_dev *sdev, char **names,
+				 const char *file)
+{
+	const char *prefix = sdev->pdata->tplg_filename_prefix;
+	size_t prefix_len = strlen(prefix);
+	char *new_names;
+
+	if (!strncmp(file, prefix, prefix_len) && file[prefix_len] == '/')
+		file += prefix_len + 1;
+
+	if (*names)
+		new_names = devm_kasprintf(sdev->dev, GFP_KERNEL, "%s\n%s",
+					   *names, file);
+	else
+		new_names = devm_kstrdup(sdev->dev, file, GFP_KERNEL);
+	if (!new_names)
+		return -ENOMEM;
+
+	devm_kfree(sdev->dev, *names);
+	*names = new_names;
+
+	return 0;
+}
+
 int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const char *tplg_filename_prefix = sof_pdata->tplg_filename_prefix;
+	char *tplg_names = NULL;
 	int tplg_cnt = 0;
 	int ret;
 	int i;
@@ -2575,12 +2604,6 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		const struct firmware *fw __free(firmware) = NULL;
 		ret = request_firmware(&fw, tplg_files[i], scomp->dev);
 		if (ret < 0) {
-			/*
-			 * snd_soc_tplg_component_remove(scomp) will be called
-			 * if snd_soc_tplg_component_load(scomp) failed and all
-			 * objects in the scomp will be removed. No need to call
-			 * snd_soc_tplg_component_remove(scomp) here.
-			 */
 			dev_err(scomp->dev, "tplg request firmware %s failed err: %d\n",
 				tplg_files[i], ret);
 			goto out;
@@ -2596,6 +2619,10 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 				tplg_files[i], ret);
 			goto out;
 		}
+
+		ret = sof_tplg_names_append(sdev, &tplg_names, tplg_files[i]);
+		if (ret < 0)
+			goto out;
 	}
 
 	/* Loading user defined topologies */
@@ -2613,12 +2640,6 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 		const struct firmware *fw __free(firmware) = NULL;
 		ret = request_firmware(&fw, feature_topology, scomp->dev);
 		if (ret < 0) {
-			/*
-			 * snd_soc_tplg_component_remove(scomp) will be called
-			 * if snd_soc_tplg_component_load(scomp) failed and all
-			 * objects in the scomp will be removed. No need to call
-			 * snd_soc_tplg_component_remove(scomp) here.
-			 */
 			dev_warn(scomp->dev, "feature tplg request firmware %s failed err: %d\n",
 				 feature_topologies[i], ret);
 			/*
@@ -2644,14 +2665,36 @@ int snd_sof_load_topology(struct snd_soc_component *scomp, const char *file)
 			 */
 			goto out;
 		}
+
+		ret = sof_tplg_names_append(sdev, &tplg_names, feature_topology);
+		if (ret < 0)
+			goto out;
 	}
 
 	/* call sof_complete when topologies are loaded successfully */
 	ret = sof_complete(scomp);
+	if (ret < 0)
+		goto out;
+
+	/* Update the list of loaded topologies exposed via debugfs */
+	sof_debug_set_tplg_name(sdev, tplg_names);
+	tplg_names = NULL;
 
 out:
+	devm_kfree(sdev->dev, tplg_names);
+
 	if (ret >= 0 && sdev->led_present)
 		ret = snd_ctl_led_request();
+
+	/*
+	 * Remove the topology on any error as .remove is not called when the
+	 * component probe fails. If snd_soc_tplg_component_load() failed, it
+	 * has removed it already and this call is a no-op.
+	 */
+	if (ret < 0) {
+		snd_soc_tplg_component_remove(scomp);
+		sof_debug_set_tplg_name(sdev, NULL);
+	}
 
 	return ret;
 }

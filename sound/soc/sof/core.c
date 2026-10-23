@@ -699,6 +699,7 @@ int snd_sof_device_probe(struct device *dev, struct snd_sof_pdata *plat_data)
 	mutex_init(&sdev->ipc_client_mutex);
 	mutex_init(&sdev->client_event_handler_mutex);
 	mutex_init(&sdev->dsp_fw_boot_mutex);
+	mutex_init(&sdev->loaded_tplg_names_mutex);
 
 	/* set default timeouts if none provided */
 	if (plat_data->desc->ipc_timeout == 0)
