@@ -3438,6 +3438,15 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 			changed_params = BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
 					 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
 					 BIT(SNDRV_PCM_HW_PARAM_RATE);
+		} else if (swidget->num_input_pins > 1) {
+			/*
+			 * The path might enter the module on an input pin other than
+			 * pin 0 and the pipeline params might not match the pin 0
+			 * format the output is derived from.
+			 */
+			changed_params = BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
+					 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
+					 BIT(SNDRV_PCM_HW_PARAM_RATE);
 		}
 
 		/* modify the pipeline params with the output format of the selected pin */
