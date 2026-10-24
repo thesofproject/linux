@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
+#include <linux/moduleparam.h>
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include "sof-function-topology-lib.h"
@@ -26,6 +27,20 @@ enum tplg_device_id {
 	TPLG_DEVICE_LOOPBACK_VIRTUAL,
 	TPLG_DEVICE_MAX
 };
+
+static int function_tplg_mask = -1;
+module_param(function_tplg_mask, int, 0444);
+MODULE_PARM_DESC(function_tplg_mask,
+		"Function topology selection mask, BIT(tplg_device_id); -1: all devices");
+
+#define MAX_FEATURE_VARIANTS 16
+
+static char *function_variant[MAX_FEATURE_VARIANTS];
+static int function_variant_count;
+module_param_array(function_variant, charp, &function_variant_count, 0444);
+MODULE_PARM_DESC(function_variant,
+		 "Feature topology variants as feature-name:variant pairs separated by commas; "
+		 "variant is appended before .tplg");
 
 #define SDCA_DEVICE_MASK (BIT(TPLG_DEVICE_SDCA_JACK) | BIT(TPLG_DEVICE_SDCA_AMP) | \
 			  BIT(TPLG_DEVICE_SDCA_MIC))
@@ -70,7 +85,12 @@ static char *get_tplg_filename(struct device *dev, const char *prefix,
 			       const char *platform, const char *tplg_dev_name,
 			       int dai_link_id, int tplg_dev)
 {
-	char *filename = NULL;
+	const struct firmware *fw;
+	char *variant_name = NULL;
+	char *tplg_filename;
+	char *filename;
+	int i;
+	int ret;
 
 	/*
 	 * The tplg file naming rule is sof-<platform>-<function>-id<BE id number>.tplg
@@ -83,16 +103,72 @@ static char *get_tplg_filename(struct device *dev, const char *prefix,
 	case TPLG_DEVICE_SSP_AMP:
 	case TPLG_DEVICE_SSP_BT:
 	case TPLG_DEVICE_SSP_HDMI_IN:
-		filename = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-%s-%s-id%d.tplg",
+		filename = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-%s-%s-id%d",
 					  prefix, platform, tplg_dev_name, dai_link_id);
+		if (function_variant_count)
+			variant_name = devm_kasprintf(dev, GFP_KERNEL,
+						      "sof-%s-%s-id%d", platform,
+						      tplg_dev_name, dai_link_id);
 		break;
 	default:
-		filename = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-%s-id%d.tplg",
+		filename = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-%s-id%d",
 					  prefix, tplg_dev_name, dai_link_id);
+		if (function_variant_count)
+			variant_name = devm_kasprintf(dev, GFP_KERNEL, "sof-%s-id%d",
+						      tplg_dev_name, dai_link_id);
 		break;
 	}
 
-	return filename;
+	if (!filename)
+		return NULL;
+
+	if (function_variant_count && !variant_name) {
+		dev_warn(dev, "Failed to allocate memory for variant_name, using %s.tplg\n", filename);
+		goto add_extension;
+	}
+
+	for (i = 0; i < function_variant_count; i++) {
+		const char *entry = function_variant[i];
+		const char *separator = strchr(entry, ':');
+
+		if (separator && separator != entry && separator[1]) {
+			if (separator - entry == strlen(variant_name) &&
+			    !strncmp(entry, variant_name, separator - entry)) {
+				char *variant_filename;
+
+				devm_kfree(dev, variant_name);
+				variant_name = NULL;
+				variant_filename = devm_kasprintf(dev, GFP_KERNEL, "%s-%s.tplg",
+								  filename, separator + 1);
+				if (!variant_filename)
+					return NULL;
+				ret = firmware_request_nowarn(&fw, variant_filename, dev);
+				if (!ret) {
+					release_firmware(fw);
+					devm_kfree(dev, filename);
+					return variant_filename;
+				} else {
+					dev_dbg(dev,
+						"Variant topology %s not found, using %s.tplg\n",
+						variant_filename, filename);
+					devm_kfree(dev, variant_filename);
+				}
+				break;
+			}
+		}
+	}
+
+	if (variant_name)
+		devm_kfree(dev, variant_name);
+
+add_extension:
+	tplg_filename = devm_kasprintf(dev, GFP_KERNEL, "%s.tplg", filename);
+
+	if (!tplg_filename)
+		return NULL;
+
+	devm_kfree(dev, filename);
+	return tplg_filename;
 }
 
 static int get_dmic_tplg_dev(struct device *dev, int dmic_num,
@@ -182,6 +258,11 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 	int ret;
 	int i;
 
+	if (function_tplg_mask >= 0) {
+		tplg_mask = ~(unsigned long)function_tplg_mask;
+		best_effort = true;
+	}
+
 	ret = get_platform_name(card, mach, platform);
 	if (ret < 0)
 		return ret;
@@ -257,6 +338,12 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 
 	dev_dbg(card->dev, "tplg_mask %#lx tplg_num %d\n", tplg_mask, tplg_num);
 
+	if (function_tplg_mask >= 0 && !tplg_num) {
+		dev_err(card->dev, "No function topology available for mask %#x\n",
+			function_tplg_mask);
+		return -ENOENT;
+	}
+
 	return tplg_num;
 }
 EXPORT_SYMBOL_GPL(sof_sdw_get_tplg_files);
@@ -274,6 +361,11 @@ int sof_i2s_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 	int tplg_dev;
 	int ret;
 	int i;
+
+	if (function_tplg_mask >= 0) {
+		tplg_mask = ~(unsigned long)function_tplg_mask;
+		best_effort = true;
+	}
 
 	ret = get_platform_name(card, mach, platform);
 	if (ret < 0)
@@ -328,6 +420,12 @@ int sof_i2s_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 	}
 
 	dev_dbg(card->dev, "tplg_mask %#lx tplg_num %d\n", tplg_mask, tplg_num);
+
+	if (function_tplg_mask >= 0 && !tplg_num) {
+		dev_err(card->dev, "No function topology available for mask %#x\n",
+			function_tplg_mask);
+		return -ENOENT;
+	}
 
 	return tplg_num;
 }
