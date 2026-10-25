@@ -12,6 +12,7 @@
 #include <linux/pm_runtime.h>
 #include <sound/soc.h>
 #include <linux/bitops.h>
+#include "soc-internal.h"
 
 #define soc_component_ret(dai, ret) _soc_component_ret(dai, __func__, ret)
 static inline int _soc_component_ret(struct snd_soc_component *component, const char *func, int ret)
@@ -456,6 +457,7 @@ int snd_soc_component_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_soc_component *component;
+	int unwind_cmd;
 	int i, ret;
 
 	for_each_rtd_components(rtd, i, component) {
@@ -464,11 +466,30 @@ int snd_soc_component_compr_trigger(struct snd_compr_stream *cstream, int cmd)
 			ret = component->driver->compress_ops->trigger(
 				component, cstream, cmd);
 			if (ret < 0)
-				return soc_component_ret(component, ret);
+				goto unwind;
 		}
 	}
 
 	return 0;
+
+unwind:
+	ret = soc_component_ret(component, ret);
+
+	unwind_cmd = snd_soc_trigger_unwind_cmd(cmd);
+	if (unwind_cmd < 0)
+		return ret;
+
+	/* Unwind the components that have been triggered before the failing one */
+	while (--i >= 0) {
+		component = rtd->components[i];
+		if (component->driver->compress_ops &&
+		    component->driver->compress_ops->trigger)
+			component->driver->compress_ops->trigger(component,
+								 cstream,
+								 unwind_cmd);
+	}
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_component_compr_trigger);
 

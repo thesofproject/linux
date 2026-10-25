@@ -77,6 +77,12 @@ struct snd_soc_dpcm {
 	struct list_head list_be;
 	struct list_head list_fe;
 
+	/*
+	 * BE reference taken for the FE by START, RESUME or PAUSE_RELEASE,
+	 * only accessed from the trigger path of the FE
+	 */
+	bool trigger_ref;
+
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs_state;
 #endif

@@ -36,4 +36,28 @@ struct clk *snd_soc_dai_get_bclk(struct snd_soc_dai *dai);
 unsigned int snd_soc_dai_get_bclk_ratio(struct snd_soc_dai *dai);
 void snd_soc_dai_active_update(struct snd_soc_dai *dai, int stream, int action);
 
+/*
+ * In soc-pcm
+ */
+void dpcm_be_dai_trigger_unwind(struct snd_soc_pcm_runtime *fe, int stream,
+				int cmd);
+
+/*
+ * Get the trigger command to unwind a failed START, RESUME or PAUSE_RELEASE.
+ * Returns -EINVAL for commands that are not unwound.
+ */
+static inline int snd_soc_trigger_unwind_cmd(int cmd)
+{
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_START:
+		return SNDRV_PCM_TRIGGER_STOP;
+	case SNDRV_PCM_TRIGGER_RESUME:
+		return SNDRV_PCM_TRIGGER_SUSPEND;
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		return SNDRV_PCM_TRIGGER_PAUSE_PUSH;
+	default:
+		return -EINVAL;
+	}
+}
+
 #endif /* __SOC_INTERNAL_H */
