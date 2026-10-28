@@ -455,10 +455,7 @@ sof_ipc4_get_input_pin_audio_fmt(struct snd_sof_widget *swidget, int pin_index)
 
 	base_cfg_ext = process->base_config_ext;
 
-	/*
-	 * If there are multiple input formats available for a pin, the first available format
-	 * is chosen.
-	 */
+	/* the base config extension holds the format each input pin is configured with */
 	for (i = 0; i < base_cfg_ext->num_input_pin_fmts; i++) {
 		struct sof_ipc4_pin_format *pin_format = &base_cfg_ext->pin_formats[i];
 
@@ -2995,6 +2992,7 @@ sof_ipc4_process_set_pin_formats(struct snd_sof_widget *swidget, int pin_type)
 	struct sof_ipc4_available_audio_format *available_fmt = &process->available_fmt;
 	struct sof_ipc4_pin_format *pin_format, *format_list_to_search;
 	struct snd_soc_component *scomp = swidget->scomp;
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	int num_pins, format_list_count;
 	int pin_format_offset = 0;
 	int i, j;
@@ -3027,25 +3025,28 @@ sof_ipc4_process_set_pin_formats(struct snd_sof_widget *swidget, int pin_type)
 		}
 
 		/*
-		 * For all other pins, find the pin formats from those set in topology. If there
-		 * is more than one format specified for a pin, this will pick the first available
-		 * one.
+		 * For all other pins, use the format set in topology. The pin can only
+		 * have a single format, there are no params to select one of multiple
+		 * formats with.
 		 */
-		for (j = 0; j < format_list_count; j++) {
-			struct sof_ipc4_pin_format *pin_format_item = &format_list_to_search[j];
-
-			if (pin_format_item->pin_index == i - pin_format_offset) {
-				*pin_format = *pin_format_item;
-				break;
-			}
-		}
-
-		if (j == format_list_count) {
+		j = sof_ipc4_get_first_pin_fmt(format_list_to_search, format_list_count,
+					       i - pin_format_offset);
+		if (j < 0) {
 			dev_err(scomp->dev, "%s pin %d format not found for %s\n",
 				(pin_type == SOF_PIN_TYPE_INPUT) ? "input" : "output",
 				i - pin_format_offset, swidget->widget->name);
 			return -EINVAL;
 		}
+
+		if (!sof_ipc4_is_single_format(sdev, format_list_to_search, format_list_count,
+					       i - pin_format_offset)) {
+			dev_err(scomp->dev, "%s pin %d format of %s is ambiguous with multiple formats\n",
+				(pin_type == SOF_PIN_TYPE_INPUT) ? "input" : "output",
+				i - pin_format_offset, swidget->widget->name);
+			return -EINVAL;
+		}
+
+		*pin_format = format_list_to_search[j];
 	}
 
 	return 0;
@@ -3069,6 +3070,13 @@ static int sof_ipc4_process_add_base_cfg_extn(struct snd_sof_widget *swidget)
  * Select the output format for the process module's base configuration. Return
  * its index in available_fmt->output_pin_fmts, or an error.
  * @in_fmt is the selected input format, NULL for modules without input formats.
+ * @out_pin is the output pin feeding the connection being prepared, normalized
+ * to pin 0 if there is no downstream connection or output pin bindings.
+ *
+ * Modules with multiple output pins are configured with the output pin 0 format,
+ * which is selected only among the pin 0 formats. The params of the path can only
+ * be used to select it if the path leaves the module on pin 0, otherwise pin 0
+ * must have a single format.
  */
 static int
 sof_ipc4_process_select_output_fmt(struct snd_sof_dev *sdev,
@@ -3076,10 +3084,26 @@ sof_ipc4_process_select_output_fmt(struct snd_sof_dev *sdev,
 				   struct sof_ipc4_base_module_cfg *base_config,
 				   struct sof_ipc4_available_audio_format *available_fmt,
 				   struct sof_ipc4_audio_format *in_fmt,
-				   struct snd_pcm_hw_params *fe_params, int dir)
+				   struct snd_pcm_hw_params *fe_params, int dir,
+				   int out_pin)
 {
+	struct sof_ipc4_pin_format *pin_fmts = available_fmt->output_pin_fmts;
+	u32 num_fmts = available_fmt->num_output_formats;
 	u32 ref_rate, ref_channels;
 	int ref_valid_bits, ref_type;
+	int pin = SOF_OUTPUT_PIN_ANY;
+
+	if (swidget->num_output_pins > 1) {
+		pin = 0;
+
+		if (out_pin > 0 && sof_ipc4_get_first_pin_fmt(pin_fmts, num_fmts, 0) >= 0 &&
+		    !sof_ipc4_is_single_format(sdev, pin_fmts, num_fmts, 0)) {
+			dev_err(sdev->dev,
+				"%s: output pin 0 format is ambiguous, path leaves on pin %d\n",
+				swidget->widget->name, out_pin);
+			return -EINVAL;
+		}
+	}
 
 	if (in_fmt) {
 		/*
@@ -3131,8 +3155,69 @@ sof_ipc4_process_select_output_fmt(struct snd_sof_dev *sdev,
 	}
 
 	return sof_ipc4_init_output_audio_fmt(sdev, swidget, base_config, available_fmt,
-					      SOF_OUTPUT_PIN_ANY, ref_rate, ref_channels,
-					      ref_valid_bits, ref_type);
+					      pin, ref_rate, ref_channels, ref_valid_bits,
+					      ref_type);
+}
+
+/*
+ * Return the format output pin @pin of a process module is configured with: the
+ * format selected for pin 0, the single topology format of other pins or the pin 0
+ * format for pins without formats in topology. NULL if @pin has multiple formats.
+ */
+static struct sof_ipc4_audio_format *
+sof_ipc4_process_get_output_pin_fmt(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget,
+				    int pin)
+{
+	struct sof_ipc4_process *process = swidget->private;
+	struct sof_ipc4_available_audio_format *available_fmt = &process->available_fmt;
+	struct sof_ipc4_pin_format *pin_fmts = available_fmt->output_pin_fmts;
+	u32 num_fmts = available_fmt->num_output_formats;
+	int i;
+
+	if (pin <= 0)
+		return &process->output_format;
+
+	i = sof_ipc4_get_first_pin_fmt(pin_fmts, num_fmts, pin);
+	if (i < 0)
+		return &process->output_format;
+
+	if (!sof_ipc4_is_single_format(sdev, pin_fmts, num_fmts, pin)) {
+		dev_err(sdev->dev, "%s: output pin %d format is ambiguous with multiple formats\n",
+			swidget->widget->name, pin);
+		return NULL;
+	}
+
+	return &pin_fmts[i].audio_fmt;
+}
+
+/*
+ * Without output pin bindings the output pin a sink is connected to is only
+ * allocated at bind time and the format of output pin 0 is propagated to the sink.
+ * The output pin formats of a process module are fixed at init, this is only
+ * correct if all output pins are configured with the pin 0 format.
+ */
+static int sof_ipc4_process_check_unbound_output_pins(struct snd_sof_dev *sdev,
+						      struct snd_sof_widget *swidget)
+{
+	struct sof_ipc4_process *process = swidget->private;
+	int pin;
+
+	for (pin = 1; pin < swidget->num_output_pins; pin++) {
+		struct sof_ipc4_audio_format *fmt;
+
+		fmt = sof_ipc4_process_get_output_pin_fmt(sdev, swidget, pin);
+		if (!fmt)
+			return -EINVAL;
+
+		if (!sof_ipc4_is_same_fmt(fmt, &process->output_format)) {
+			dev_err(sdev->dev,
+				"%s: output pin %d format differs from pin 0, output pin bindings are required\n",
+				swidget->widget->name, pin);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
 }
 
 static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
@@ -3145,24 +3230,43 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_process *process = swidget->private;
 	struct sof_ipc4_available_audio_format *available_fmt = &process->available_fmt;
+	bool propagate_output = out_pin != SOF_OUTPUT_PIN_NONE;
+	bool unbound_output = out_pin == SOF_OUTPUT_PIN_ANY;
 	void *cfg = process->ipc_config_data;
 	int output_fmt_index = 0;
 	int input_fmt_index = 0;
 	int ret;
 
-	if (available_fmt->num_input_formats) {
-		if (swidget->prepared) {
-			if (!available_fmt->num_output_formats)
-				return 0;
+	/* Without a downstream connection or output pin bindings use output pin 0 */
+	if (out_pin < 0)
+		out_pin = 0;
 
-			/* modify the pipeline params with the output format */
-			return sof_ipc4_update_hw_params(sdev, pipeline_params,
-							&process->output_format,
-							BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
-							BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
-							BIT(SNDRV_PCM_HW_PARAM_RATE));
+	if (swidget->prepared) {
+		struct sof_ipc4_audio_format *out_fmt;
+
+		if (!swidget->num_output_pins || !available_fmt->num_output_formats ||
+		    !propagate_output)
+			return 0;
+
+		if (unbound_output) {
+			ret = sof_ipc4_process_check_unbound_output_pins(sdev, swidget);
+			if (ret)
+				return ret;
 		}
 
+		/* The pin formats are fixed, use the pin feeding the path. */
+		out_fmt = sof_ipc4_process_get_output_pin_fmt(sdev, swidget, out_pin);
+		if (!out_fmt)
+			return -EINVAL;
+
+		/* modify the pipeline params with the output format */
+		return sof_ipc4_update_hw_params(sdev, pipeline_params, out_fmt,
+						 BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
+						 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
+						 BIT(SNDRV_PCM_HW_PARAM_RATE));
+	}
+
+	if (available_fmt->num_input_formats) {
 		input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
 								&process->base_config,
 								pipeline_params,
@@ -3172,8 +3276,10 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	}
 
 	/* Configure output audio format only if the module supports output */
-	if (available_fmt->num_output_formats) {
+	if (swidget->num_output_pins && available_fmt->num_output_formats) {
+		u32 changed_params = available_fmt->changed_params;
 		struct sof_ipc4_audio_format *in_fmt = NULL;
+		struct sof_ipc4_audio_format *out_fmt;
 		struct sof_ipc4_pin_format *pin_fmt;
 
 		if (available_fmt->num_input_formats)
@@ -3182,21 +3288,42 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 		output_fmt_index = sof_ipc4_process_select_output_fmt(sdev, swidget,
 								      &process->base_config,
 								      available_fmt, in_fmt,
-								      fe_params, dir);
+								      fe_params, dir, out_pin);
 		if (output_fmt_index < 0)
 			return output_fmt_index;
 
 		pin_fmt = &available_fmt->output_pin_fmts[output_fmt_index];
+		out_fmt = &pin_fmt->audio_fmt;
 
 		/* copy Pin output format for Pin 0 only */
-		if (pin_fmt->pin_index == 0) {
+		if (pin_fmt->pin_index == 0)
 			memcpy(&process->output_format, &pin_fmt->audio_fmt,
 			       sizeof(struct sof_ipc4_audio_format));
 
-			/* modify the pipeline params with the output format */
-			ret = sof_ipc4_update_hw_params(sdev, pipeline_params,
-							&process->output_format,
-							available_fmt->changed_params);
+		if (unbound_output) {
+			ret = sof_ipc4_process_check_unbound_output_pins(sdev, swidget);
+			if (ret)
+				return ret;
+		}
+
+		/*
+		 * The formats of the output pins of a multi-output module are fixed,
+		 * use the format of the output pin feeding the path.
+		 */
+		if (swidget->num_output_pins > 1) {
+			out_fmt = sof_ipc4_process_get_output_pin_fmt(sdev, swidget, out_pin);
+			if (!out_fmt)
+				return -EINVAL;
+
+			changed_params = BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
+					 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
+					 BIT(SNDRV_PCM_HW_PARAM_RATE);
+		}
+
+		/* modify the pipeline params with the output format of the selected pin */
+		if (propagate_output) {
+			ret = sof_ipc4_update_hw_params(sdev, pipeline_params, out_fmt,
+							changed_params);
 			if (ret)
 				return ret;
 		}
