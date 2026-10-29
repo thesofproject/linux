@@ -1639,6 +1639,15 @@ int amd_sof_acp7x_resume(struct snd_sof_dev *sdev)
 		return ret;
 	}
 
+	/*
+	 * S4 powers down the carveout, invalidating its cached firmware. Clear
+	 * fw_code_carveout_addr to force a full reload via VALIDATE_IMAGE on
+	 * resume instead of a SHA-DMA from the stale carveout.
+	 */
+	if (acp_data->asp_carveout_base &&
+	    sdev->system_suspend_target == SOF_SUSPEND_S4)
+		acp_data->fw_code_carveout_addr = 0;
+
 	return 0;
 }
 EXPORT_SYMBOL_NS(amd_sof_acp7x_resume, "SND_SOC_SOF_AMD_COMMON");
