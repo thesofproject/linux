@@ -238,13 +238,18 @@ struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_sof_dev *sdev,
 	return NULL;
 }
 
-static u32 sof_ipc4_fmt_cfg_to_type(u32 fmt_cfg)
+static u32 sof_ipc4_fmt_to_type(const struct sof_ipc4_audio_format *fmt)
 {
-	/* Fetch the sample type from the fmt for 8 and 32 bit formats */
-	u32 __bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt_cfg);
+	u32 valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
+	u32 type = SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE(fmt->fmt_cfg);
 
-	if (__bits == 8 || __bits == 32)
-		return SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE(fmt_cfg);
+	/* MSB and LSB alignment coincide when a 32-bit sample fills its container. */
+	if (valid_bits == 32 && fmt->bit_depth == 32 &&
+	    type == SOF_IPC4_TYPE_MSB_INTEGER)
+		return SOF_IPC4_TYPE_LSB_INTEGER;
+
+	if (valid_bits == 8 || valid_bits == 32)
+		return type;
 
 	/*
 	 * Return LSB integer type for 16, 20 and 24 formats as the firmware is
@@ -255,7 +260,10 @@ static u32 sof_ipc4_fmt_cfg_to_type(u32 fmt_cfg)
 	return SOF_IPC4_TYPE_LSB_INTEGER;
 }
 
-/* Check if @a and @b have the same rate, channel count and valid bit depth */
+/*
+ * Check if @a and @b are the same format: the rate, channel count, valid bit depth
+ * and sample type are compared, like when a format is matched against the params.
+ */
 static bool sof_ipc4_is_same_fmt(const struct sof_ipc4_audio_format *a,
 				 const struct sof_ipc4_audio_format *b)
 {
@@ -263,7 +271,8 @@ static bool sof_ipc4_is_same_fmt(const struct sof_ipc4_audio_format *a,
 	       SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(a->fmt_cfg) ==
 	       SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(b->fmt_cfg) &&
 	       SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(a->fmt_cfg) ==
-	       SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(b->fmt_cfg);
+	       SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(b->fmt_cfg) &&
+	       sof_ipc4_fmt_to_type(a) == sof_ipc4_fmt_to_type(b);
 }
 
 /* Check if @pin_fmt belongs to @pin, SOF_OUTPUT_PIN_ANY matches all pins */
@@ -319,7 +328,7 @@ static void sof_ipc4_dbg_audio_format(struct device *dev, struct sof_ipc4_pin_fo
 		dev_dbg(dev,
 			"Pin #%d: %uHz, %ubit (type: %u), %luch (ch_map %#x ch_cfg %u interleaving_style %u fmt_cfg %#x) buffer size %d\n",
 			pin_fmt[i].pin_index, fmt->sampling_frequency, fmt->bit_depth,
-			sof_ipc4_fmt_cfg_to_type(fmt->fmt_cfg),
+			sof_ipc4_fmt_to_type(fmt),
 			SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg),
 			fmt->ch_map, fmt->ch_cfg, fmt->interleaving_style, fmt->fmt_cfg,
 			pin_fmt[i].buffer_size);
@@ -1530,7 +1539,7 @@ static int sof_ipc4_update_hw_params(struct snd_sof_dev *sdev, struct snd_pcm_hw
 
 	if (param_to_update & BIT(SNDRV_PCM_HW_PARAM_FORMAT)) {
 		int valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
-		int type = sof_ipc4_fmt_cfg_to_type(fmt->fmt_cfg);
+		int type = sof_ipc4_fmt_to_type(fmt);
 		snd_pcm_format_t snd_fmt;
 		struct snd_mask *m;
 
@@ -1648,7 +1657,7 @@ static int sof_ipc4_init_output_audio_fmt(struct snd_sof_dev *sdev,
 		_out_rate = fmt->sampling_frequency;
 		_out_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
 		_out_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
-		_out_type = sof_ipc4_fmt_cfg_to_type(fmt->fmt_cfg);
+		_out_type = sof_ipc4_fmt_to_type(fmt);
 
 		if (_out_rate == out_ref_rate && _out_channels == out_ref_channels &&
 		    _out_valid_bits == out_ref_valid_bits && _out_type == out_ref_type)
@@ -1760,7 +1769,7 @@ static int sof_ipc4_init_input_audio_fmt(struct snd_sof_dev *sdev,
 		rate = fmt->sampling_frequency;
 		channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg);
 		valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg);
-		type = sof_ipc4_fmt_cfg_to_type(fmt->fmt_cfg);
+		type = sof_ipc4_fmt_to_type(fmt);
 		if (params_rate(params) == rate && params_channels(params) == channels &&
 		    sample_valid_bits == valid_bits && sample_type == type)
 			break;
@@ -2427,7 +2436,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		in_fmt = &available_fmt->input_pin_fmts[input_fmt_index].audio_fmt;
 		out_ref_rate = in_fmt->sampling_frequency;
 		out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
-		out_ref_type = sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg);
+		out_ref_type = sof_ipc4_fmt_to_type(in_fmt);
 
 		if (!single_output_bitdepth)
 			out_ref_valid_bits =
@@ -2467,7 +2476,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 		out_fmt = &available_fmt->output_pin_fmts[0].audio_fmt;
 		out_ref_valid_bits =
 			SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(out_fmt->fmt_cfg);
-		out_ref_type = sof_ipc4_fmt_cfg_to_type(out_fmt->fmt_cfg);
+		out_ref_type = sof_ipc4_fmt_to_type(out_fmt);
 	}
 
 	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
@@ -2760,7 +2769,7 @@ static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
 	out_ref_rate = in_fmt->sampling_frequency;
 	out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
-	out_ref_type = sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg);
+	out_ref_type = sof_ipc4_fmt_to_type(in_fmt);
 
 	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
 							  &gain->data.base_config,
@@ -2810,7 +2819,7 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	out_ref_rate = in_fmt->sampling_frequency;
 	out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
-	out_ref_type = sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg);
+	out_ref_type = sof_ipc4_fmt_to_type(in_fmt);
 
 	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
 							  &mixer->base_config,
@@ -2882,7 +2891,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	in_audio_fmt = &available_fmt->input_pin_fmts[input_fmt_index].audio_fmt;
 	out_ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_audio_fmt->fmt_cfg);
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_audio_fmt->fmt_cfg);
-	out_ref_type = sof_ipc4_fmt_cfg_to_type(in_audio_fmt->fmt_cfg);
+	out_ref_type = sof_ipc4_fmt_to_type(in_audio_fmt);
 
 	if (sink_rate_from_tplg) {
 		/* Use the sink rate as reference */
@@ -3054,7 +3063,7 @@ sof_ipc4_process_select_output_fmt(struct snd_sof_dev *sdev,
 		ref_rate = in_fmt->sampling_frequency;
 		ref_channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg);
 		ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg);
-		ref_type = sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg);
+		ref_type = sof_ipc4_fmt_to_type(in_fmt);
 	} else {
 		/* for modules without input formats, use FE params as reference */
 		ref_rate = params_rate(fe_params);
