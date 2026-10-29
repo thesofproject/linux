@@ -1225,6 +1225,100 @@ static int create_bt_dailinks(struct snd_soc_card *card,
 	return 0;
 }
 
+static const struct snd_soc_pcm_stream asoc_sdw_bridge_params = {
+	.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE |
+		   SNDRV_PCM_FMTBIT_S24_LE,
+	.rate_min = 48000,
+	.rate_max = 48000,
+	.channels_min = 2,
+	.channels_max = 2,
+};
+
+static const struct snd_soc_dai_link bridge_dai_template = {
+	.name = "SDW Companion Amp",
+	.stream_name = "Companion Amp",
+	.c2c_params = &asoc_sdw_bridge_params,
+	.num_c2c_params = 1,
+};
+
+static int create_sdw_comp_dailinks(struct snd_soc_card *card,
+				    struct snd_soc_dai_link **dai_links, int *be_id,
+				    struct snd_soc_codec_conf **codec_conf,
+				    struct asoc_sdw_companion_amp_endpoint *comp_ends,
+				    int comp_ends_num)
+{
+	struct device *dev = card->dev;
+	struct asoc_sdw_endpoint *end;
+	struct snd_soc_dai_link_component *platform;
+	struct snd_soc_dai_link_component *codecs;
+	struct snd_soc_dai_link_component *cpus;
+	char *name;
+	int num_codecs;
+	int i;
+
+	for (i = 0; i < comp_ends_num; i++) {
+		if (!comp_ends[i].main_amp || list_empty(&comp_ends[i].comp_ends)) {
+			dev_err(dev, "companion amp group %d: missing main amp or companion amps\n", i);
+			return -EINVAL;
+		}
+
+		num_codecs = 0;
+		list_for_each_entry(end, &comp_ends[i].comp_ends, list)
+			num_codecs++;
+
+		cpus = devm_kzalloc(dev, sizeof(*cpus), GFP_KERNEL);
+		if (!cpus)
+			return -ENOMEM;
+
+		codecs = devm_kcalloc(dev, num_codecs, sizeof(*codecs), GFP_KERNEL);
+		if (!codecs)
+			return -ENOMEM;
+
+		platform = devm_kzalloc(dev, sizeof(*platform), GFP_KERNEL);
+		if (!platform)
+			return -ENOMEM;
+
+		name = devm_kasprintf(dev, GFP_KERNEL, "SDW Companion Amp %d", i);
+		if (!name)
+			return -ENOMEM;
+
+		cpus[0].name = comp_ends[i].main_amp->codec_name;
+		cpus[0].dai_name = comp_ends[i].main_amp->dai_info->dai_name;
+		platform->name = cpus[0].name;
+
+		(*codec_conf)->dlc.name = comp_ends[i].main_amp->codec_name;
+		(*codec_conf)->name_prefix = comp_ends[i].main_amp->name_prefix;
+		(*codec_conf)++;
+
+		num_codecs = 0;
+		list_for_each_entry(end, &comp_ends[i].comp_ends, list) {
+			codecs[num_codecs].name = end->codec_name;
+			codecs[num_codecs].dai_name = end->dai_info->dai_name;
+			num_codecs++;
+
+			(*codec_conf)->dlc.name = end->codec_name;
+			(*codec_conf)->name_prefix = end->name_prefix;
+			(*codec_conf)++;
+		}
+
+		**dai_links = bridge_dai_template;
+		(*dai_links)->name = name;
+		(*dai_links)->stream_name = name;
+		(*dai_links)->cpus = cpus;
+		(*dai_links)->num_cpus = 1;
+		(*dai_links)->codecs = codecs;
+		(*dai_links)->num_codecs = num_codecs;
+		(*dai_links)->platforms = platform;
+		(*dai_links)->num_platforms = 1;
+		(*dai_links)->init = asoc_sdw_rtd_init;
+		(*dai_links)++;
+	}
+
+	dev_dbg(dev, "Added SDW Companion AMP Codec to Codec link\n");
+
+	return 0;
+}
+
 static int create_echoref_dailink(struct snd_soc_card *card,
 				  struct snd_soc_dai_link **dai_links, int *be_id)
 {
@@ -1261,11 +1355,13 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct intel_mc_ctx *intel_ctx = (struct intel_mc_ctx *)ctx->private;
 	struct snd_soc_acpi_mach_params *mach_params = &mach->mach_params;
+	struct asoc_sdw_companion_amp_endpoint *sof_comp_ends;
 	struct snd_soc_codec_conf *codec_conf;
 	struct asoc_sdw_codec_info *ssp_info;
 	struct asoc_sdw_endpoint *sof_ends;
 	struct asoc_sdw_dailink *sof_dais;
 	struct snd_soc_aux_dev *sof_aux;
+	int num_comp_amps = 0;
 	int num_devs = 0;
 	int num_ends = 0;
 	int num_aux = 0;
@@ -1276,8 +1372,9 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	int hdmi_num;
 	unsigned long ssp_mask;
 	int ret;
+	int i;
 
-	ret = asoc_sdw_count_sdw_endpoints(card, &num_devs, &num_ends, &num_aux);
+	ret = asoc_sdw_count_sdw_endpoints(card, &num_devs, &num_ends, &num_aux, &num_comp_amps);
 	if (ret < 0) {
 		dev_err(dev, "failed to count devices/endpoints: %d\n", ret);
 		return ret;
@@ -1307,12 +1404,31 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 		goto err_dai;
 	}
 
-	ret = asoc_sdw_parse_sdw_endpoints(dev, ctx, sof_aux, sof_dais, sof_ends, &num_confs);
+	sof_comp_ends = devm_kcalloc(dev, num_comp_amps, sizeof(*sof_comp_ends), GFP_KERNEL);
+	if (!sof_comp_ends) {
+		ret = -ENOMEM;
+		goto err_dai;
+	}
+
+	for (i = 0; i < num_comp_amps; i++)
+		INIT_LIST_HEAD(&sof_comp_ends[i].comp_ends);
+
+	ret = asoc_sdw_parse_sdw_endpoints(dev, ctx, sof_aux, sof_dais, sof_ends, sof_comp_ends,
+					   &num_confs);
 	if (ret < 0)
 		goto err_end;
 
 	sdw_be_num = ret;
 
+	/* Companion amps are not in num_ends but still need a name_prefix codec_conf */
+	for (i = 0; i < num_comp_amps; i++) {
+		struct asoc_sdw_endpoint *comp_end;
+
+		if (sof_comp_ends[i].main_amp)
+			num_confs++;
+		list_for_each_entry(comp_end, &sof_comp_ends[i].comp_ends, list)
+			num_confs++;
+	}
 	/*
 	 * on generic tgl platform, I2S or sdw mode is supported
 	 * based on board rework. A ACPI device is registered in
@@ -1366,8 +1482,8 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	 * This should be the last DAI link and it is expected both for monolithic
 	 * and functional SOF topologies to support echo reference.
 	 */
-	num_links = sdw_be_num + ssp_num + dmic_num + hdmi_num + bt_num + 1;
-	dai_links = devm_kcalloc(dev, num_links, sizeof(*dai_links), GFP_KERNEL);
+	num_links = sdw_be_num + ssp_num + dmic_num + hdmi_num + bt_num + num_comp_amps + 1;
+	dai_links = devm_kcalloc(dev, num_links + 1, sizeof(*dai_links), GFP_KERNEL);
 	if (!dai_links) {
 		ret = -ENOMEM;
 		goto err_end;
@@ -1415,6 +1531,17 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 			goto err_end;
 	}
 
+	/*
+	 * Companion amps are SoundWire peripherals. They get their audio data from another
+	 * SoundWire peripheral (the main amp) over the SoundWire bus instead of from the host,
+	 * so a codec-to-codec dai link is created between the main amp and the companion amps.
+	 */
+	if (num_comp_amps) {
+		ret = create_sdw_comp_dailinks(card, &dai_links, &be_id, &codec_conf,
+					       sof_comp_ends, num_comp_amps);
+		if (ret)
+			goto err_end;
+	}
 	/* dummy echo ref link. keep this as the last DAI link. The DAI link ID does not matter */
 	ret = create_echoref_dailink(card, &dai_links, &be_id);
 	if (ret) {

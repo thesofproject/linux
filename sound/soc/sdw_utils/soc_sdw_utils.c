@@ -2269,12 +2269,14 @@ static int is_sdca_aux_dev_present(struct device *dev,
 }
 
 int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
-				 int *num_devs, int *num_ends, int *num_aux)
+				 int *num_devs, int *num_ends, int *num_aux, int *num_comp_amps)
 {
 	struct device *dev = card->dev;
+	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct snd_soc_acpi_mach *mach = dev_get_platdata(dev);
 	struct snd_soc_acpi_mach_params *mach_params = &mach->mach_params;
 	const struct snd_soc_acpi_link_adr *adr_link;
+	u32 companion_amp_mask = 0;
 	int i, j, ret;
 
 	for (adr_link = mach_params->links; adr_link->num_adr; adr_link++) {
@@ -2284,11 +2286,29 @@ int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
 			const struct snd_soc_acpi_adr_device *adr_dev = &adr_link->adr_d[i];
 			struct asoc_sdw_codec_info *codec_info;
 
-			*num_ends += adr_dev->num_endpoints;
-
 			codec_info = asoc_sdw_find_codec_info_part(adr_dev->adr);
 			if (!codec_info)
 				return -EINVAL;
+
+			for (j = 0; j < adr_dev->num_endpoints; j++) {
+				/* Skip companion amps */
+				if (adr_dev->endpoints[j].num >= codec_info->dai_num)
+					continue;
+				if (codec_info->dais[adr_dev->endpoints[j].num].quirk & SOC_SDW_COMPANION_AMPS) {
+					if (adr_dev->endpoints[j].group_id >=
+					    BITS_PER_TYPE(companion_amp_mask)) {
+						dev_err(dev, "invalid companion group_id %d\n",
+							adr_dev->endpoints[j].group_id);
+						return -EINVAL;
+					}
+					/* The companion amp is only present when the quirk is set */
+					if (!(ctx->mc_quirk & SOC_SDW_COMPANION_AMPS))
+						continue;
+					companion_amp_mask |= BIT(adr_dev->endpoints[j].group_id);
+					continue;
+				}
+				(*num_ends)++;
+			}
 
 			for (j = 0; j < codec_info->aux_num; j++) {
 				ret = is_sdca_aux_dev_present(dev, codec_info->auxs[j].codec_name,
@@ -2301,6 +2321,7 @@ int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
 		}
 	}
 
+	*num_comp_amps = hweight32(companion_amp_mask);
 	dev_dbg(dev, "Found %d devices with %d endpoints\n", *num_devs, *num_ends);
 
 	return 0;
@@ -2412,15 +2433,40 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 				 struct snd_soc_aux_dev *soc_aux,
 				 struct asoc_sdw_dailink *soc_dais,
 				 struct asoc_sdw_endpoint *soc_ends,
+				 struct asoc_sdw_companion_amp_endpoint *comp_ends,
 				 int *num_devs)
 {
 	struct snd_soc_acpi_mach *mach = dev_get_platdata(dev);
 	struct snd_soc_acpi_mach_params *mach_params = &mach->mach_params;
 	const struct snd_soc_acpi_link_adr *adr_link;
 	struct asoc_sdw_endpoint *soc_end = soc_ends;
+	u32 companion_amp_mask = 0;
 	int num_dais = 0;
 	int i, j;
 	int ret;
+
+	/* Get companion_amp_mask to calculate the companion amp group array index */
+	for (adr_link = mach_params->links; adr_link->num_adr; adr_link++) {
+		for (i = 0; i < adr_link->num_adr; i++) {
+			const struct snd_soc_acpi_adr_device *adr_dev = &adr_link->adr_d[i];
+			struct asoc_sdw_codec_info *codec_info;
+
+			codec_info = asoc_sdw_find_codec_info_part(adr_dev->adr);
+			if (!codec_info)
+				return -EINVAL;
+
+			for (j = 0; j < adr_dev->num_endpoints; j++) {
+				if (adr_dev->endpoints[j].num >= codec_info->dai_num)
+					continue;
+				if (!(codec_info->dais[adr_dev->endpoints[j].num].quirk &
+				      SOC_SDW_COMPANION_AMPS))
+					continue;
+				if (!(ctx->mc_quirk & SOC_SDW_COMPANION_AMPS))
+					continue;
+				companion_amp_mask |= BIT(adr_dev->endpoints[j].group_id);
+			}
+		}
+	}
 
 	for (adr_link = mach_params->links; adr_link->num_adr; adr_link++) {
 		int num_link_dailinks = 0;
@@ -2492,9 +2538,53 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 				int stream;
 
 				adr_end = &adr_dev->endpoints[j];
+				if (adr_end->num >= codec_info->dai_num) {
+					dev_err(dev,
+						"%d is too many endpoints for codec: 0x%x\n",
+						adr_end->num, codec_info->part_id);
+					return -EINVAL;
+				}
 				dai_info = &codec_info->dais[adr_end->num];
-				soc_dai = asoc_sdw_find_dailink(soc_dais, adr_end);
 
+				if (dai_info->quirk & SOC_SDW_COMPANION_AMPS) {
+					struct asoc_sdw_endpoint *comp_end;
+					int comp_index;
+
+					if (!(ctx->mc_quirk & SOC_SDW_COMPANION_AMPS))
+						continue;
+
+					comp_index = hweight32(companion_amp_mask &
+							       (BIT(adr_end->group_id) - 1));
+
+					codec_name = asoc_sdw_get_codec_name(dev, dai_info,
+									     adr_link, i);
+					if (IS_ERR(codec_name))
+						return PTR_ERR(codec_name);
+					if (!codec_name)
+						return -ENOMEM;
+
+					comp_end = devm_kcalloc(dev, 1, sizeof(*comp_end),
+								GFP_KERNEL);
+					if (!comp_end)
+						return -ENOMEM;
+					comp_end->name_prefix = adr_dev->name_prefix;
+
+					comp_end->link_mask = adr_link->mask;
+					comp_end->codec_name = codec_name;
+					comp_end->codec_info = codec_info;
+					comp_end->dai_info = dai_info;
+
+					/* group_position = 0 is the main amp */
+					if (!adr_end->group_position)
+						comp_ends[comp_index].main_amp = comp_end;
+					else
+						list_add_tail(&comp_end->list,
+							      &comp_ends[comp_index].comp_ends);
+
+					continue;
+				}
+
+				soc_dai = asoc_sdw_find_dailink(soc_dais, adr_end);
 				/*
 				 * quirk should have higher priority than the sdca properties
 				 * in the BIOS. We can't always check the DAI quirk because we
@@ -2537,13 +2627,6 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 					dai_info->direction[SNDRV_PCM_STREAM_CAPTURE] ? 'C' : '-',
 					adr_end->aggregated ? "group" : "solo",
 					adr_end->group_id);
-
-				if (adr_end->num >= codec_info->dai_num) {
-					dev_err(dev,
-						"%d is too many endpoints for codec: 0x%x\n",
-						adr_end->num, codec_info->part_id);
-					return -EINVAL;
-				}
 
 				for_each_pcm_streams(stream) {
 					if (dai_info->direction[stream] &&
