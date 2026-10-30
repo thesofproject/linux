@@ -1006,9 +1006,6 @@ void hda_dsp_remove(struct snd_sof_dev *sdev)
 		snd_dma_free_pages(&hda->iccmax_dmab);
 
 skip_disable_dsp:
-	/* stop CORB/RIRB DMA before the ring buffers are freed below */
-	hda_codec_stop_cmd_io(sdev);
-
 	free_irq(sdev->ipc_irq, sdev);
 	if (sdev->msi_enabled)
 		pci_free_irq_vectors(pci);
