@@ -470,11 +470,13 @@ struct sof_ipc4_src_data {
  * @data: IPC base config data
  * @available_fmt: Available audio format
  * @msg: IPC4 message struct containing header and data info
+ * @sink_rate_from_tplg: Sink rate is specified by topology rather than runtime
  */
 struct sof_ipc4_src {
 	struct sof_ipc4_src_data data;
 	struct sof_ipc4_available_audio_format available_fmt;
 	struct sof_ipc4_msg msg;
+	bool sink_rate_from_tplg;
 };
 
 /*
@@ -494,11 +496,13 @@ struct sof_ipc4_asrc_data {
  * @data: IPC base config data
  * @available_fmt: Available audio format
  * @msg: IPC4 message struct containing header and data info
+ * @sink_rate_from_tplg: Sink rate is specified by topology rather than runtime
  */
 struct sof_ipc4_asrc {
 	struct sof_ipc4_asrc_data data;
 	struct sof_ipc4_available_audio_format available_fmt;
 	struct sof_ipc4_msg msg;
+	bool sink_rate_from_tplg;
 };
 
 /**

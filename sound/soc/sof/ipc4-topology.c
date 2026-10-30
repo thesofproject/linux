@@ -1182,6 +1182,9 @@ static int sof_ipc4_widget_setup_comp_src(struct snd_sof_widget *swidget)
 		goto err;
 	}
 
+	if (src->data.sink_rate)
+		src->sink_rate_from_tplg = true;
+
 	spipe->core_mask |= BIT(swidget->core);
 
 	dev_dbg(scomp->dev, "SRC sink rate %d\n", src->data.sink_rate);
@@ -1234,6 +1237,9 @@ static int sof_ipc4_widget_setup_comp_asrc(struct snd_sof_widget *swidget)
 		dev_err(scomp->dev, "Parsing ASRC tokens failed\n");
 		goto err;
 	}
+
+	if (asrc->data.out_freq)
+		asrc->sink_rate_from_tplg = true;
 
 	spipe->core_mask |= BIT(swidget->core);
 
@@ -2787,19 +2793,37 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct sof_ipc4_src *src = swidget->private;
-	struct sof_ipc4_available_audio_format *available_fmt = &src->available_fmt;
+	struct sof_ipc4_available_audio_format *available_fmt;
+	struct sof_ipc4_base_module_cfg *base_config;
 	struct sof_ipc4_audio_format *out_audio_fmt;
 	struct sof_ipc4_audio_format *in_audio_fmt;
 	u32 out_ref_rate, out_ref_channels, out_ref_valid_bits, out_ref_type;
 	int output_fmt_index, input_fmt_index;
+	bool sink_rate_from_tplg;
+	u32 *sink_rate;
 
 	/* This cannot happen */
 	if (unlikely(swidget->prepared))
 		return 0;
 
+	if (swidget->id == snd_soc_dapm_asrc) {
+		struct sof_ipc4_asrc *asrc = swidget->private;
+
+		available_fmt = &asrc->available_fmt;
+		base_config = &asrc->data.base_config;
+		sink_rate = &asrc->data.out_freq;
+		sink_rate_from_tplg = asrc->sink_rate_from_tplg;
+	} else {
+		struct sof_ipc4_src *src = swidget->private;
+
+		available_fmt = &src->available_fmt;
+		base_config = &src->data.base_config;
+		sink_rate = &src->data.sink_rate;
+		sink_rate_from_tplg = src->sink_rate_from_tplg;
+	}
+
 	input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
-							&src->data.base_config,
+							base_config,
 							pipeline_params,
 							available_fmt);
 	if (input_fmt_index < 0)
@@ -2814,9 +2838,9 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	out_ref_valid_bits = SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_audio_fmt->fmt_cfg);
 	out_ref_type = sof_ipc4_fmt_cfg_to_type(in_audio_fmt->fmt_cfg);
 
-	if (src->data.sink_rate) {
+	if (sink_rate_from_tplg) {
 		/* Use the sink rate as reference */
-		out_ref_rate = src->data.sink_rate;
+		out_ref_rate = *sink_rate;
 	} else if (dir == SNDRV_PCM_STREAM_CAPTURE) {
 		/*
 		 * Use the fe rate as reference for capture if the sink rate is
@@ -2846,7 +2870,7 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	}
 
 	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
-							  &src->data.base_config,
+							  base_config,
 							  available_fmt,
 							  out_ref_rate,
 							  out_ref_channels,
@@ -2859,10 +2883,10 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 					 input_fmt_index, output_fmt_index);
 
 	/* update pipeline memory usage */
-	sof_ipc4_update_resource_usage(sdev, swidget, &src->data.base_config);
+	sof_ipc4_update_resource_usage(sdev, swidget, base_config);
 
 	out_audio_fmt = &available_fmt->output_pin_fmts[output_fmt_index].audio_fmt;
-	src->data.sink_rate = out_audio_fmt->sampling_frequency;
+	*sink_rate = out_audio_fmt->sampling_frequency;
 
 	/* update pipeline_params for sink widgets */
 	return sof_ipc4_update_hw_params(sdev, pipeline_params, out_audio_fmt,
