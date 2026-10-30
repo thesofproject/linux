@@ -1773,6 +1773,7 @@ static int sof_dai_load(struct snd_soc_component *scomp, int index,
 	spcm->scomp = scomp;
 
 	for_each_pcm_streams(stream) {
+		INIT_LIST_HEAD(&spcm->stream[stream].ignore_suspend_widgets);
 		spcm->stream[stream].comp_id = COMP_ID_UNASSIGNED;
 		if (pcm->compress)
 			snd_sof_compr_init_elapsed_work(&spcm->stream[stream].period_elapsed_work);
