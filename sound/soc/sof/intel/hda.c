@@ -1432,37 +1432,24 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 	for (i = 0; i < peripherals->num_peripherals; i++) {
 		slave = peripherals->array[i];
 
-		if (!slave->bus->is_present)
-			continue;
-
-		if (link_mask & BIT(slave->bus->link_id)) {
-			/*
-			 * At least one peripheral is present on the link which means that this
-			 * link has already been enumerated
-			 */
+		if (slave->dev_num_sticky)
 			goto skip_wait_link_enumeration;
-		}
 
-		if (sdw_show_ping_status(slave->bus, true) == 0) {
-			/* no peripherals attached on this link */
-			slave->bus->is_present = false;
-			continue;
-		}
-
-		time = wait_for_completion_timeout(&slave->bus->enumeration_complete,
+		time = wait_for_completion_timeout(&slave->enumeration_complete,
 						   msecs_to_jiffies(SDW_ENUM_TIMEOUT_MS));
 		if (!time) {
-			dev_warn(slave->bus->dev, "No peripheral is present\n");
-			slave->bus->is_present = false;
+			dev_warn(&slave->dev, "The peripheral is not present\n");
 			continue;
 		}
 
-skip_wait_link_enumeration:
 		/* Check if the SoundWire peripheral is present */
 		if (!slave->dev_num_sticky) {
 			dev_warn(&slave->dev, "SoundWire peripheral is not present\n");
 			continue;
 		}
+
+skip_wait_link_enumeration:
+
 		/* link_index = the number of used links below the current link */
 		link_index = hweight32(link_mask & (BIT(slave->bus->link_id) - 1));
 		links[link_index].adr_d = find_acpi_adr_device(sdev->dev, slave,
