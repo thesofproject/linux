@@ -3737,6 +3737,8 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 		swidget->heap_bytes = 0;
 		swidget->stack_bytes = 0;
 		pipeline->state = SOF_IPC4_PIPE_UNINITIALIZED;
+		swidget->spipe->started_count = 0;
+		swidget->spipe->paused_count = 0;
 		ida_free(&pipeline_ida, swidget->instance_id);
 		swidget->instance_id = -EINVAL;
 	} else {

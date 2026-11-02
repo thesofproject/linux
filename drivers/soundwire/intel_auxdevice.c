@@ -577,13 +577,23 @@ int intel_resume_child_device(struct device *dev, void *data)
 	return 0;
 }
 
+static bool intel_ignore_suspend(struct sdw_intel *sdw)
+{
+	const struct sdw_intel_link_res *res = sdw->link_res;
+
+	if (res->ops && res->ops->ignore_suspend)
+		return res->ops->ignore_suspend(res->dev);
+
+	return pm_suspend_target_state == PM_SUSPEND_TO_IDLE;
+}
+
 static int __maybe_unused intel_pm_prepare(struct device *dev)
 {
 	struct sdw_cdns *cdns = dev_get_drvdata(dev);
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_bus *bus = &cdns->bus;
 	u32 clock_stop_quirks;
-	int ret;
+	int i, ret, stream_error = 0;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
 		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
@@ -592,6 +602,7 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 	}
 
 	clock_stop_quirks = sdw->link_res->clock_stop_quirks;
+	sdw->suspend_bus_retained = false;
 
 	if (pm_runtime_suspended(dev) &&
 	    pm_runtime_suspended(dev->parent) &&
@@ -634,7 +645,38 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 			dev_err(dev, "%s: intel_resume_child_device failed: %d\n", __func__, ret);
 	}
 
-	return 0;
+	/*
+	 * Revoke retention from an earlier S0ix before any controller or codec
+	 * suspends. An already-suspended PCM will not issue another trigger.
+	 */
+	if (!intel_ignore_suspend(sdw)) {
+		for (i = 0; i < cdns->pcm.num_pdi; i++) {
+			struct sdw_cdns_dai_runtime *dai_runtime = cdns->dai_runtime_array[i];
+			struct sdw_stream_runtime *stream;
+
+			if (!dai_runtime || !dai_runtime->stream)
+				continue;
+
+			stream = dai_runtime->stream;
+			if (!stream->ignore_suspend)
+				continue;
+
+			stream->ignore_suspend = false;
+			dai_runtime->suspended = true;
+
+			if (stream->state == SDW_STREAM_ENABLED) {
+				ret = sdw_disable_stream(stream);
+				if (ret) {
+					dev_err(dev, "failed to disable retained stream %s: %d; close and reopen PCM\n",
+						stream->name, ret);
+					if (!stream_error)
+						stream_error = ret;
+				}
+			}
+		}
+	}
+
+	return stream_error;
 }
 
 static int __maybe_unused intel_suspend(struct device *dev)
@@ -655,9 +697,10 @@ static int __maybe_unused intel_suspend(struct device *dev)
 	 * ignore_suspend is set by the PCM trigger for S0ix and may remain set
 	 * if a later sleep transition does not issue another PCM trigger.
 	 */
-	if (pm_suspend_target_state == PM_SUSPEND_TO_IDLE &&
-	    sdw_bus_ignore_suspend(bus))
+	if (intel_ignore_suspend(sdw) && sdw_bus_ignore_suspend(bus)) {
+		sdw->suspend_bus_retained = true;
 		return 0;
+	}
 
 	/* Prevent runtime PM from racing with the code below. */
 	pm_runtime_disable(dev);
@@ -688,6 +731,7 @@ static int __maybe_unused intel_suspend(struct device *dev)
 	ret = sdw_intel_stop_bus(sdw, true, false);
 	if (ret < 0) {
 		dev_err(dev, "%s: cannot stop bus: %d\n", __func__, ret);
+		pm_runtime_enable(dev);
 		return ret;
 	}
 
@@ -746,8 +790,7 @@ static int __maybe_unused intel_resume(struct device *dev)
 		return 0;
 	}
 
-	if (pm_suspend_target_state == PM_SUSPEND_TO_IDLE &&
-	    sdw_bus_ignore_suspend(bus)) {
+	if (sdw->suspend_bus_retained) {
 		dev_dbg(dev, "SoundWire master %d remained active during system suspend\n",
 			bus->link_id);
 		return 0;

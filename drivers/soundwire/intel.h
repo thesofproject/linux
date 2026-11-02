@@ -78,6 +78,7 @@ struct sdw_intel {
 	struct sdw_intel_link_res *link_res;
 	bool startup_done;
 	struct sdw_intel_bpt bpt_ctx;
+	bool suspend_bus_retained;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif

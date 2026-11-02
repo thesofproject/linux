@@ -608,6 +608,8 @@ struct snd_sof_dev {
 
 	/* Intended power target of system suspend */
 	enum sof_system_suspend_state system_suspend_target;
+	bool system_suspend_started;
+	bool system_suspend_retention_revoked;
 
 	/* DSP firmware boot */
 	wait_queue_head_t boot_wait;

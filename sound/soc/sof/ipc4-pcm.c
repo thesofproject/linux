@@ -19,11 +19,15 @@
  * struct sof_ipc4_pcm_stream_priv - IPC4 specific private data
  * @time_info: pointer to time info struct if it is supported, otherwise NULL
  * @chain_dma_allocated: indicates the ChainDMA allocation state
+ * @started: this PCM holds a started reference on its FE-triggered pipelines
+ * @paused: this PCM holds a paused reference on its FE-triggered pipelines
  */
 struct sof_ipc4_pcm_stream_priv {
 	struct sof_ipc4_timestamp_info *time_info;
 
 	bool chain_dma_allocated;
+	bool started;
+	bool paused;
 };
 
 /*
@@ -189,66 +193,73 @@ sof_ipc4_add_pipeline_to_trigger_list(struct snd_sof_dev *sdev, int state,
 	}
 }
 
-static void
-sof_ipc4_update_pipeline_state(struct snd_sof_dev *sdev, int state, int cmd,
-			       struct snd_sof_pipeline *spipe,
-			       struct ipc4_pipeline_set_state_data *trigger_list)
+static void sof_ipc4_set_stream_state(struct snd_sof_pcm_stream *stream,
+				      bool started, bool paused)
 {
-	struct snd_sof_widget *pipe_widget = spipe->pipe_widget;
-	struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+	struct sof_ipc4_pcm_stream_priv *stream_priv = stream->private;
+	struct snd_sof_pcm_stream_pipeline_list *pipeline_list = &stream->pipeline_list;
+	int started_delta = (int)started - stream_priv->started;
+	int paused_delta = (int)paused - stream_priv->paused;
 	int i;
 
-	if (pipeline->skip_during_fe_trigger && state != SOF_IPC4_PIPE_RESET)
-		return;
+	for (i = 0; i < pipeline_list->count; i++) {
+		struct snd_sof_pipeline *spipe = pipeline_list->pipelines[i];
+		struct sof_ipc4_pipeline *pipeline = spipe->pipe_widget->private;
 
-	/* set state for pipeline if it was just triggered */
-	for (i = 0; i < trigger_list->count; i++) {
-		if (trigger_list->pipeline_instance_ids[i] == pipe_widget->instance_id) {
-			pipeline->state = state;
-			break;
+		if (pipeline->skip_during_fe_trigger || pipeline->use_chain_dma)
+			continue;
+
+		spipe->started_count += started_delta;
+		spipe->paused_count += paused_delta;
+	}
+
+	stream_priv->started = started;
+	stream_priv->paused = paused;
+}
+
+static void sof_ipc4_update_stream_state(int state, int cmd,
+					 struct snd_sof_pcm_stream *stream,
+					 struct ipc4_pipeline_set_state_data *trigger_list)
+{
+	struct sof_ipc4_pcm_stream_priv *stream_priv = stream->private;
+	struct snd_sof_pcm_stream_pipeline_list *pipeline_list = &stream->pipeline_list;
+	bool started = stream_priv->started;
+	bool paused = stream_priv->paused;
+	int i, trigger_index;
+
+	for (i = 0; i < pipeline_list->count; i++) {
+		struct snd_sof_widget *pipe_widget = pipeline_list->pipelines[i]->pipe_widget;
+		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+
+		if (pipeline->skip_during_fe_trigger && state != SOF_IPC4_PIPE_RESET)
+			continue;
+
+		for (trigger_index = 0; trigger_index < trigger_list->count; trigger_index++) {
+			if (trigger_list->pipeline_instance_ids[trigger_index] ==
+			    pipe_widget->instance_id) {
+				pipeline->state = state;
+				break;
+			}
 		}
 	}
 
-	switch (state) {
-	case SOF_IPC4_PIPE_PAUSED:
-		switch (cmd) {
-		case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-			/*
-			 * increment paused_count if the PAUSED is the final state during
-			 * the PAUSE trigger
-			 */
-			spipe->paused_count++;
-			break;
-		case SNDRV_PCM_TRIGGER_STOP:
-		case SNDRV_PCM_TRIGGER_SUSPEND:
-			/*
-			 * decrement started_count if PAUSED is the final state during the
-			 * STOP trigger
-			 */
-			spipe->started_count--;
-			break;
-		default:
-			break;
+	if (state == SOF_IPC4_PIPE_RUNNING) {
+		if (cmd == SNDRV_PCM_TRIGGER_START || cmd == SNDRV_PCM_TRIGGER_RESUME) {
+			started = true;
+			paused = false;
 		}
-		break;
-	case SOF_IPC4_PIPE_RUNNING:
-		switch (cmd) {
-		case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-			/* decrement paused_count for RELEASE */
-			spipe->paused_count--;
-			break;
-		case SNDRV_PCM_TRIGGER_START:
-		case SNDRV_PCM_TRIGGER_RESUME:
-			/* increment started_count for START/RESUME */
-			spipe->started_count++;
-			break;
-		default:
-			break;
+		if (cmd == SNDRV_PCM_TRIGGER_PAUSE_RELEASE)
+			paused = false;
+	} else if (state == SOF_IPC4_PIPE_PAUSED) {
+		if (cmd == SNDRV_PCM_TRIGGER_PAUSE_PUSH)
+			paused = started;
+		if (cmd == SNDRV_PCM_TRIGGER_STOP || cmd == SNDRV_PCM_TRIGGER_SUSPEND) {
+			started = false;
+			paused = false;
 		}
-		break;
-	default:
-		break;
 	}
+
+	sof_ipc4_set_stream_state(stream, started, paused);
 }
 
 /*
@@ -401,6 +412,7 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_sof_pcm_stream_pipeline_list *pipeline_list;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct sof_ipc4_pcm_stream_priv *stream_priv = spcm->stream[dir].private;
 	struct ipc4_pipeline_set_state_data *trigger_list;
 	struct snd_sof_widget *pipe_widget;
 	struct sof_ipc4_pipeline *pipeline;
@@ -413,6 +425,9 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 
 	pipeline_list = &spcm->stream[dir].pipeline_list;
 	guard(mutex)(&ipc4_data->pipeline_state_mutex);
+
+	if (state == SOF_IPC4_PIPE_RESET)
+		sof_ipc4_set_stream_state(&spcm->stream[dir], false, false);
 
 	/* nothing to trigger if the list is empty */
 	if (!pipeline_list->pipelines || !pipeline_list->count)
@@ -487,6 +502,10 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 		}
 	else
 		for (i = 0; i < pipeline_list->count; i++) {
+			if (state == SOF_IPC4_PIPE_PAUSED &&
+			    (!stream_priv->started || stream_priv->paused))
+				continue;
+
 			spipe = pipeline_list->pipelines[i];
 			sof_ipc4_add_pipeline_to_trigger_list(sdev, state, spipe, trigger_list,
 							      pipe_priority);
@@ -495,7 +514,9 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	/* return if all pipelines are in the requested state already */
 	if (!trigger_list->count) {
 		ret = 0;
-		goto free;
+		if (state == SOF_IPC4_PIPE_PAUSED)
+			goto update_paused_state;
+		goto update_state;
 	}
 
 	/* no need to pause before reset, EOS or before pause release */
@@ -526,11 +547,9 @@ static int sof_ipc4_trigger_pipelines(struct snd_soc_component *component,
 	}
 
 	/* update PAUSED state for all pipelines just triggered */
-	for (i = 0; i < pipeline_list->count ; i++) {
-		spipe = pipeline_list->pipelines[i];
-		sof_ipc4_update_pipeline_state(sdev, SOF_IPC4_PIPE_PAUSED, cmd, spipe,
-					       trigger_list);
-	}
+update_paused_state:
+	sof_ipc4_update_stream_state(SOF_IPC4_PIPE_PAUSED, cmd,
+				     &spcm->stream[dir], trigger_list);
 
 	/* return if this is the final state */
 	if (state == SOF_IPC4_PIPE_PAUSED) {
@@ -569,10 +588,8 @@ skip_pause_transition:
 	}
 
 	/* update RUNNING/RESET state for all pipelines that were just triggered */
-	for (i = 0; i < pipeline_list->count; i++) {
-		spipe = pipeline_list->pipelines[i];
-		sof_ipc4_update_pipeline_state(sdev, state, cmd, spipe, trigger_list);
-	}
+update_state:
+	sof_ipc4_update_stream_state(state, cmd, &spcm->stream[dir], trigger_list);
 
 free:
 	kfree(trigger_list);
@@ -615,8 +632,21 @@ static int sof_ipc4_pcm_hw_free(struct snd_soc_component *component,
 				struct snd_pcm_substream *substream,
 				struct snd_sof_pcm *spcm, int dir)
 {
+	struct sof_ipc4_pcm_stream_priv *stream_priv = spcm->stream[dir].private;
+	int ret = 0, reset_ret;
+
+	if (stream_priv->started) {
+		ret = sof_ipc4_trigger_pipelines(component, substream, SOF_IPC4_PIPE_PAUSED,
+						 SNDRV_PCM_TRIGGER_STOP, spcm, dir);
+		if (ret)
+			spcm_err(spcm, dir, "failed to stop PCM during hw_free: %d\n", ret);
+	}
+
 	/* command is not relevant with RESET, so just pass 0 */
-	return sof_ipc4_trigger_pipelines(component, substream, SOF_IPC4_PIPE_RESET, 0, spcm, dir);
+	reset_ret = sof_ipc4_trigger_pipelines(component, substream,
+					       SOF_IPC4_PIPE_RESET, 0, spcm, dir);
+
+	return ret ? ret : reset_ret;
 }
 
 static int ipc4_ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev,

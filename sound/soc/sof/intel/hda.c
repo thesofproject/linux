@@ -100,9 +100,18 @@ static int sdw_params_free(struct device *dev, struct sdw_intel_stream_free_data
 	return 0;
 }
 
+static bool sdw_ignore_suspend(struct device *dev)
+{
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+
+	return sdev->system_suspend_target == SOF_SUSPEND_S0IX &&
+	       sdev->fw_state == SOF_FW_BOOT_COMPLETE;
+}
+
 struct sdw_intel_ops sdw_callback = {
 	.params_stream = sdw_params_stream,
 	.free_stream = sdw_params_free,
+	.ignore_suspend = sdw_ignore_suspend,
 };
 
 static int sdw_ace2x_params_stream(struct device *dev,
@@ -132,6 +141,7 @@ static struct sdw_intel_ops sdw_ace2x_callback = {
 	.params_stream = sdw_ace2x_params_stream,
 	.free_stream = sdw_ace2x_free_stream,
 	.trigger = sdw_ace2x_trigger,
+	.ignore_suspend = sdw_ignore_suspend,
 };
 
 static int hda_sdw_acpi_scan(struct snd_sof_dev *sdev)

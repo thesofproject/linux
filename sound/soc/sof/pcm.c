@@ -284,6 +284,94 @@ out:
 	return ret;
 }
 
+void snd_sof_pcm_complete_suspend(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pcm *spcm;
+	int dir;
+
+	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+		for_each_pcm_streams(dir) {
+			struct snd_pcm_substream *substream = spcm->stream[dir].substream;
+			struct snd_soc_pcm_runtime *rtd;
+
+			if (!spcm->stream[dir].suspend_widgets_prepared)
+				continue;
+
+			if (!spcm->stream[dir].suspend_ignored && !WARN_ON_ONCE(!substream)) {
+				rtd = snd_soc_substream_to_rtd(substream);
+				sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, dir, false);
+			}
+			spcm->stream[dir].suspend_widgets_prepared = false;
+		}
+	}
+}
+
+int snd_sof_pcm_prepare_suspend(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pcm *spcm;
+	int dir = SNDRV_PCM_STREAM_CAPTURE;
+	int ret;
+
+	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+		struct snd_pcm_substream *substream = spcm->stream[dir].substream;
+		struct snd_soc_pcm_runtime *rtd;
+
+		if (spcm->stream[dir].suspend_ignored ||
+		    !spcm->stream[dir].d0i3_compatible ||
+		    spcm->stream[dir].dsp_max_burst_size_in_ms > 1 ||
+		    !substream || !substream->runtime || !snd_pcm_running(substream))
+			continue;
+
+		rtd = snd_soc_substream_to_rtd(substream);
+		ret = sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm, dir, true);
+		if (ret) {
+			spcm_err(spcm, dir, "failed to prepare WoV retention: %d; aborting suspend\n",
+				 ret);
+			snd_sof_pcm_complete_suspend(sdev);
+			return ret;
+		}
+		spcm->stream[dir].suspend_widgets_prepared = true;
+	}
+
+	return 0;
+}
+
+int snd_sof_pcm_clear_suspend_ignored(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pcm *spcm;
+	int dir, ret = 0;
+
+	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+		for_each_pcm_streams(dir) {
+			struct snd_pcm_substream *substream;
+			struct snd_soc_pcm_runtime *rtd;
+			int stream_ret;
+
+			if (!spcm->stream[dir].suspend_ignored)
+				continue;
+
+			sdev->system_suspend_retention_revoked = true;
+			spcm->stream[dir].suspend_ignored = false;
+			substream = spcm->stream[dir].substream;
+			if (WARN_ON_ONCE(!substream)) {
+				stream_ret = -EINVAL;
+			} else {
+				rtd = snd_soc_substream_to_rtd(substream);
+				stream_ret = sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
+									       dir, false);
+			}
+			if (stream_ret) {
+				spcm_err(spcm, dir, "failed to clear WoV retention: %d; close and reopen PCM\n",
+					 stream_ret);
+				if (!ret)
+					ret = stream_ret;
+			}
+		}
+	}
+
+	return ret;
+}
+
 int
 sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
 				struct snd_sof_pcm *spcm, struct snd_pcm_hw_params *params,
@@ -687,9 +775,10 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 			if (spcm->stream[substream->stream].suspend_ignored)
 				return 0;
 
-			/* Widget retention is best-effort; keep FE/BE suspend state balanced. */
-			sof_pcm_set_widget_ignore_suspend(sdev, rtd, spcm,
-							  substream->stream, true);
+			if (!spcm->stream[substream->stream].suspend_widgets_prepared) {
+				spcm_err(spcm, substream->stream, "WoV widgets were not prepared for suspend\n");
+				return -EINVAL;
+			}
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}

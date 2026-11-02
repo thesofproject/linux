@@ -346,6 +346,7 @@ struct snd_sof_pcm_stream {
 	 * active or not while suspending the stream
 	 */
 	bool suspend_ignored;
+	bool suspend_widgets_prepared;
 	/* Endpoint references acquired when retaining this stream across suspend. */
 	struct list_head ignore_suspend_widgets;
 	struct snd_sof_pcm_stream_pipeline_list pipeline_list;
@@ -642,6 +643,9 @@ struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 					   int *direction);
 void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 void snd_sof_pcm_init_elapsed_work(struct work_struct *work);
+int snd_sof_pcm_clear_suspend_ignored(struct snd_sof_dev *sdev);
+int snd_sof_pcm_prepare_suspend(struct snd_sof_dev *sdev);
+void snd_sof_pcm_complete_suspend(struct snd_sof_dev *sdev);
 int sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
 				    struct snd_sof_pcm *spcm, struct snd_pcm_hw_params *params,
 				    struct snd_sof_platform_stream_params *platform_params,
