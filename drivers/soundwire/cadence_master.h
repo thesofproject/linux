@@ -6,6 +6,8 @@
 #ifndef __SDW_CADENCE_H
 #define __SDW_CADENCE_H
 
+#include <linux/soundwire/sdw_cadence.h>
+
 #define SDW_CADENCE_GSYNC_KHZ		4 /* 4 kHz */
 #define SDW_CADENCE_GSYNC_HZ		(SDW_CADENCE_GSYNC_KHZ * 1000)
 
@@ -16,27 +18,6 @@
 #define CDNS_MCP_IP_MAX_CMD_LEN		32
 
 #define SDW_CADENCE_MCP_IP_OFFSET	0x4000
-
-/**
- * struct sdw_cdns_pdi: PDI (Physical Data Interface) instance
- *
- * @num: pdi number
- * @intel_alh_id: link identifier
- * @l_ch_num: low channel for PDI
- * @h_ch_num: high channel for PDI
- * @ch_count: total channel count for PDI
- * @dir: data direction
- * @type: stream type, (only PCM supported)
- */
-struct sdw_cdns_pdi {
-	int num;
-	int intel_alh_id;
-	int l_ch_num;
-	int h_ch_num;
-	int ch_count;
-	enum sdw_data_direction dir;
-	enum sdw_stream_type type;
-};
 
 /**
  * struct sdw_cdns_streams: Cadence stream data structure
@@ -114,6 +95,7 @@ struct sdw_cdns_dai_runtime {
  * @ports: Data ports
  * @num_ports: Total number of data ports
  * @pcm: PCM streams
+ * @pdi_lock: synchronizes assignment of PDIs found in PCM streams
  * @registers: Cadence registers
  * @link_up: Link status
  * @msg_count: Messages sent on bus
@@ -140,6 +122,7 @@ struct sdw_cdns {
 	int num_ports;
 
 	struct sdw_cdns_streams pcm;
+	spinlock_t pdi_lock;
 
 	int pdi_loopback_source;
 	int pdi_loopback_target;

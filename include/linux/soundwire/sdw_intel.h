@@ -7,6 +7,7 @@
 #include <linux/acpi.h>
 #include <linux/irqreturn.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_cadence.h>
 
 /*********************************************************************
  * cAVS and ACE1.x definitions
@@ -386,6 +387,8 @@ void sdw_intel_exit(struct sdw_intel_ctx *ctx);
 
 irqreturn_t sdw_intel_thread(int irq, void *dev_id);
 
+void sdw_intel_pdi_config(struct sdw_bus *bus, struct sdw_cdns_pdi *pdi);
+
 #else
 
 static inline int sdw_intel_acpi_scan(acpi_handle parent_handle, struct sdw_intel_acpi_info *info)
@@ -414,6 +417,10 @@ static inline void sdw_intel_exit(struct sdw_intel_ctx *ctx)
 static inline irqreturn_t sdw_intel_thread(int irq, void *dev_id)
 {
 	return 0;
+}
+
+static inline void sdw_intel_pdi_config(struct sdw_bus *bus, struct sdw_cdns_pdi *pdi)
+{
 }
 
 #endif

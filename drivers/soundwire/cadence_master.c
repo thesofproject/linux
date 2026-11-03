@@ -17,6 +17,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_cadence.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <linux/workqueue.h>
@@ -1839,6 +1840,7 @@ int sdw_cdns_probe(struct sdw_cdns *cdns)
 
 	mutex_init(&cdns->status_update_lock);
 
+	spin_lock_init(&cdns->pdi_lock);
 	INIT_WORK(&cdns->work, cdns_update_slave_status_work);
 	INIT_DELAYED_WORK(&cdns->attach_dwork, cdns_check_attached_status_dwork);
 
@@ -1994,6 +1996,69 @@ struct sdw_cdns_pdi *sdw_cdns_alloc_pdi(struct sdw_cdns *cdns,
 	return pdi;
 }
 EXPORT_SYMBOL(sdw_cdns_alloc_pdi);
+
+/**
+ * sdw_cdns_assign_pdi - Assign a PDI
+ * @bus: SoundWire bus instance
+ * @dir: Data direction
+ *
+ * Return: A valid PDI instance or %NULL if none available.
+ */
+struct sdw_cdns_pdi *sdw_cdns_assign_pdi(struct sdw_bus *bus, u32 dir)
+{
+	struct sdw_cdns *cdns = bus_to_cdns(bus);
+	struct sdw_cdns_streams *stream = &cdns->pcm;
+	struct sdw_cdns_pdi *pdis, *pdi;
+	size_t num_pdis;
+	int i;
+
+	if (dir == SDW_DATA_DIR_RX) {
+		num_pdis = stream->num_in;
+		pdis = stream->in;
+	} else {
+		num_pdis = stream->num_out;
+		pdis = stream->out;
+	}
+
+	spin_lock(&cdns->pdi_lock);
+	for (i = 0; i < num_pdis; i++) {
+		if (!pdis[i].assigned) {
+			pdi = &pdis[i];
+			goto found;
+		}
+	}
+
+	/* Indexes 0/1 are reserved for the Bulk transfer. */
+	for (i = 2; i < stream->num_bd; i++) {
+		if (!stream->bd[i].assigned) {
+			pdi = &stream->bd[i];
+			goto found;
+		}
+	}
+
+	spin_unlock(&cdns->pdi_lock);
+	return NULL;
+found:
+	pdi->dir = dir;
+	pdi->assigned = true;
+	spin_unlock(&cdns->pdi_lock);
+	return pdi;
+}
+EXPORT_SYMBOL(sdw_cdns_assign_pdi);
+
+/**
+ * sdw_cdns_release_pdi() - Release a PDI
+ * @bus: SoundWire bus instance
+ * @pdi: PDI instance
+ */
+void sdw_cdns_release_pdi(struct sdw_bus *bus, struct sdw_cdns_pdi *pdi)
+{
+	struct sdw_cdns *cdns = bus_to_cdns(bus);
+
+	guard(spinlock)(&cdns->pdi_lock);
+	pdi->assigned = false;
+}
+EXPORT_SYMBOL(sdw_cdns_release_pdi);
 
 /*
  * the MIPI SoundWire CRC8 polynomial is X^8 + X^6 + X^3 + X^2 + 1, MSB first
