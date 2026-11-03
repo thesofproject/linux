@@ -659,8 +659,10 @@ out:
  *
  * @bus: SDW Bus instance
  * @stream: Soundwire stream
+ * @prepare: True when preparing, false when depreparing
  */
-int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream)
+int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream,
+		       bool prepare)
 {
 	int ret;
 
