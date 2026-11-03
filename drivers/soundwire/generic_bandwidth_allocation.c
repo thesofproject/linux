@@ -658,6 +658,20 @@ out:
 		list_for_each_entry(m_p_rt, &m_rt->port_list, port_node) {
 			m_p_rt->lane = m_lane;
 		}
+	} else if (prepare) {
+		/* Clear stale lane assignments when preparing on lane 0. */
+		list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+			if (m_rt->stream != stream)
+				continue;
+
+			list_for_each_entry(m_p_rt, &m_rt->port_list, port_node)
+				m_p_rt->lane = 0;
+
+			list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node)
+				list_for_each_entry(s_p_rt, &s_rt->port_list, port_node)
+					s_p_rt->lane = 0;
+			break;
+		}
 	}
 
 	if (!mstr_prop->default_frame_rate || !mstr_prop->default_row)
