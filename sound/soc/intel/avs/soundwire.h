@@ -22,6 +22,8 @@ void avs_sdw_enable_irq(struct avs_dev *adev, bool enable);
 void avs_sdw_process_wakeen_event(struct avs_dev *adev);
 irqreturn_t avs_sdw_thread(int irq, struct avs_dev *adev);
 
+int avs_register_sdw_component(struct avs_dev *adev, const char *name, u32 link_id);
+
 #else
 
 static inline int avs_sdw_probe(struct avs_dev *adev)
@@ -49,6 +51,11 @@ static inline void avs_sdw_process_wakeen_event(struct avs_dev *adev)
 static inline irqreturn_t avs_sdw_thread(int irq, struct avs_dev *adev)
 {
 	return IRQ_HANDLED;
+}
+
+static inline int avs_register_sdw_component(struct avs_dev *adev, const char *name, u32 link_id)
+{
+	return 0;
 }
 
 #endif

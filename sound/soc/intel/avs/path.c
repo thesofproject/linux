@@ -260,6 +260,8 @@ static void avs_init_node_id(union avs_connector_node_id *node_id,
 
 	case AVS_DMA_HDA_LINK_OUTPUT:
 	case AVS_DMA_HDA_LINK_INPUT:
+	case AVS_DMA_SDW_LINK_OUTPUT:
+	case AVS_DMA_SDW_LINK_INPUT:
 		node_id->vindex = te->copier.vindex.val | dma_id;
 		break;
 

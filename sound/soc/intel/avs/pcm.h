@@ -35,6 +35,9 @@ struct avs_dma_data {
 
 	struct work_struct period_elapsed_work;
 	struct hdac_ext_link *link;
+	struct sdw_stream_runtime *sdw_stream;
+	struct sdw_cdns_pdi *pdi;
+	bool sdw_suspended;
 	struct snd_pcm_substream *substream;
 };
 

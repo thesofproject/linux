@@ -15,7 +15,7 @@ snd-soc-avs-y += probes.o debugfs.o
 endif
 
 ifneq ($(CONFIG_SND_SOC_INTEL_AVS_SOUNDWIRE),)
-snd-soc-avs-y += soundwire.o
+snd-soc-avs-y += soundwire.o pcm_sdw.o
 endif
 
 obj-$(CONFIG_SND_SOC_INTEL_AVS) += snd-soc-avs.o

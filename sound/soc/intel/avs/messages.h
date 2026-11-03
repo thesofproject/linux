@@ -750,6 +750,8 @@ enum avs_dma_type {
 	AVS_DMA_DMIC_LINK_INPUT = 11,
 	AVS_DMA_I2S_LINK_OUTPUT = 12,
 	AVS_DMA_I2S_LINK_INPUT = 13,
+	AVS_DMA_SDW_LINK_OUTPUT = 16,
+	AVS_DMA_SDW_LINK_INPUT = 17,
 };
 
 union avs_virtual_index {
