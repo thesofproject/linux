@@ -1019,7 +1019,8 @@ struct sdw_stream_runtime {
  * @controller_id: system-unique controller ID. If set to -1, the bus @id will be used.
  * @link_id: Link id number, can be 0 to N, unique for each Controller
  * @id: bus system-wide unique id
- * @compute_params: points to Bus resource management implementation
+ * @compute_params: points to Bus resource management implementation; the prepare
+ * argument is true when preparing a stream and false when depreparing it
  * @assigned: Bitmap for Slave device numbers.
  * Bit set implies used number, bit clear implies unused number.
  * @clk_stop_timeout: Clock stop timeout computed
@@ -1054,7 +1055,8 @@ struct sdw_bus {
 	int controller_id;
 	unsigned int link_id;
 	int id;
-	int (*compute_params)(struct sdw_bus *bus, struct sdw_stream_runtime *stream);
+	int (*compute_params)(struct sdw_bus *bus, struct sdw_stream_runtime *stream,
+			      bool prepare);
 	DECLARE_BITMAP(assigned, SDW_MAX_DEVICES);
 	unsigned int clk_stop_timeout;
 	u32 bank_switch_timeout;
@@ -1069,7 +1071,8 @@ struct sdw_bus {
 struct sdw_stream_runtime *sdw_alloc_stream(const char *stream_name, enum sdw_stream_type type);
 void sdw_release_stream(struct sdw_stream_runtime *stream);
 
-int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream);
+int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream,
+		       bool prepare);
 
 int sdw_stream_add_master(struct sdw_bus *bus,
 			  struct sdw_stream_config *stream_config,
