@@ -433,7 +433,8 @@ struct sdw_intel;
  * @debugfs_init: initialize all debugfs capabilities
  * @debugfs_exit: close and cleanup debugfs capabilities
  * @get_link_count: fetch link count from hardware registers
- * @register_dai: read all PDI information and register DAIs
+ * @init_pdis: read all PDI information
+ * @register_dai: register DAIs
  * @check_clock_stop: throw error message if clock is not stopped.
  * @start_bus: normal start
  * @start_bus_after_reset: start after reset
@@ -459,6 +460,7 @@ struct sdw_intel_hw_ops {
 
 	int (*get_link_count)(struct sdw_intel *sdw);
 
+	int (*init_pdis)(struct sdw_intel *sdw);
 	int (*register_dai)(struct sdw_intel *sdw);
 
 	void (*check_clock_stop)(struct sdw_intel *sdw);
