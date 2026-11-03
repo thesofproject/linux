@@ -6,11 +6,16 @@
 //          Amadeusz Slawinski <amadeuszx.slawinski@linux.intel.com>
 //
 
+#include <linux/acpi.h>
+#include <linux/device.h>
+#include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_intel.h>
 #include <sound/hdaudio_ext.h>
 #include "avs.h"
 #include "debug.h"
 #include "messages.h"
 #include "registers.h"
+#include "soundwire.h"
 
 static void avs_cnl_ipc_interrupt(struct avs_dev *adev)
 {
@@ -61,14 +66,28 @@ static void avs_cnl_ipc_interrupt(struct avs_dev *adev)
 irqreturn_t avs_cnl_dsp_interrupt(struct avs_dev *adev, int irq)
 {
 	u32 adspis = snd_hdac_adsp_readl(adev, AVS_ADSP_REG_ADSPIS);
+	u32 adspis2 = snd_hdac_adsp_readl(adev, AVS_ADSP_REG_ADSPIS2);
 	irqreturn_t ret = IRQ_NONE;
 
-	if (adspis == UINT_MAX)
+	if (adspis == UINT_MAX && adspis2 == UINT_MAX)
 		return ret;
 
-	if (adspis & AVS_ADSP_ADSPIS_IPC) {
+	if (adspis != UINT_MAX && (adspis & AVS_ADSP_ADSPIS_IPC)) {
 		avs_cnl_ipc_interrupt(adev);
 		ret = IRQ_HANDLED;
+	}
+
+	if (adev->sdw) {
+		u32 wakests;
+
+		if (adspis2 != UINT_MAX && (adspis2 & AVS_ADSP_ADSPIS2_SNDW))
+			ret = avs_sdw_thread(irq, adev);
+
+		wakests = snd_hdac_adsp_readl(adev, adev->sdw->shim_base + SDW_SHIM_WAKESTS);
+		if (wakests) {
+			avs_sdw_process_wakeen_event(adev);
+			ret = IRQ_HANDLED;
+		}
 	}
 
 	return ret;

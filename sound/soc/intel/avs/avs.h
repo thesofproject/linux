@@ -136,6 +136,7 @@ struct avs_dev {
 	void __iomem *dsp_ba;
 	const struct avs_spec *spec;
 	struct avs_ipc *ipc;
+	struct sdw_intel_ctx *sdw;
 
 	struct avs_fw_cfg fw_cfg;
 	struct avs_hw_cfg hw_cfg;
