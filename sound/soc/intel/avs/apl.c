@@ -17,7 +17,7 @@
 #include "registers.h"
 #include "topology.h"
 
-static irqreturn_t avs_apl_dsp_interrupt(struct avs_dev *adev)
+static irqreturn_t avs_apl_dsp_interrupt(struct avs_dev *adev, int irq)
 {
 	u32 adspis = snd_hdac_adsp_readl(adev, AVS_ADSP_REG_ADSPIS);
 	irqreturn_t ret = IRQ_NONE;

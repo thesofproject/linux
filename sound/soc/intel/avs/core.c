@@ -344,7 +344,7 @@ static irqreturn_t avs_dsp_irq_thread(int irq, void *dev_id)
 
 	status = readl(bus->ppcap + AZX_REG_PP_PPSTS);
 	if (status & AZX_PPCTL_PIE)
-		avs_dsp_op(adev, dsp_interrupt);
+		avs_dsp_op(adev, dsp_interrupt, irq);
 
 	/* Unmask GIE, masked in irq_handler(). */
 	snd_hdac_chip_updatel(bus, INTCTL, AZX_INT_GLOBAL_EN, AZX_INT_GLOBAL_EN);

@@ -58,7 +58,7 @@ static void avs_cnl_ipc_interrupt(struct avs_dev *adev)
 			      AVS_ADSP_HIPCCTL_DONE | AVS_ADSP_HIPCCTL_BUSY);
 }
 
-irqreturn_t avs_cnl_dsp_interrupt(struct avs_dev *adev)
+irqreturn_t avs_cnl_dsp_interrupt(struct avs_dev *adev, int irq)
 {
 	u32 adspis = snd_hdac_adsp_readl(adev, AVS_ADSP_REG_ADSPIS);
 	irqreturn_t ret = IRQ_NONE;
