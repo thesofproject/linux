@@ -538,8 +538,11 @@ static int get_manager_lane(struct sdw_bus *bus, struct sdw_master_runtime *m_rt
  * sdw_compute_bus_params: Compute bus parameters
  *
  * @bus: SDW Bus instance
+ * @stream: SoundWire stream being prepared or deprepared
+ * @prepare: True when preparing, false when depreparing
  */
-static int sdw_compute_bus_params(struct sdw_bus *bus)
+static int sdw_compute_bus_params(struct sdw_bus *bus,
+				  struct sdw_stream_runtime *stream, bool prepare)
 {
 	struct sdw_master_prop *mstr_prop = &bus->prop;
 	struct sdw_slave_prop *slave_prop;
@@ -582,6 +585,14 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 			break;
 
 		list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+			/*
+			 * Select only the current stream's runtime. Check prepare
+			 * to avoid computing m_lane during deprepare, when the
+			 * stream's bandwidth reservation has already been released.
+			 */
+			if (m_rt->stream != stream || !prepare)
+				continue;
+
 			/*
 			 * Get the first s_rt that will be used to find the available lane that
 			 * can be used. No need to check all Peripherals because we can't use
@@ -629,8 +640,8 @@ out:
 			}
 		}
 		/*
-		 * Set Manager lanes. Configure the last m_rt in bus->m_rt_list only since
-		 * we don't want to touch other m_rts that are already working.
+		 * Set Manager lanes for the stream being prepared without changing
+		 * other runtimes that are already working.
 		 */
 		list_for_each_entry(m_p_rt, &m_rt->port_list, port_node) {
 			m_p_rt->lane = m_lane;
@@ -667,7 +678,7 @@ int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream,
 	int ret;
 
 	/* Computes clock frequency, frame shape and frame frequency */
-	ret = sdw_compute_bus_params(bus);
+	ret = sdw_compute_bus_params(bus, stream, prepare);
 	if (ret < 0)
 		return ret;
 
