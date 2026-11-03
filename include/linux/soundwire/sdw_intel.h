@@ -358,6 +358,8 @@ struct sdw_intel_res {
 	struct mutex *eml_lock;
 };
 
+#if IS_ENABLED(CONFIG_SOUNDWIRE_INTEL)
+
 /*
  * On Intel platforms, the SoundWire IP has dependencies on power
  * rails shared with the DSP, and the initialization steps are split
@@ -383,6 +385,38 @@ int sdw_intel_startup(struct sdw_intel_ctx *ctx);
 void sdw_intel_exit(struct sdw_intel_ctx *ctx);
 
 irqreturn_t sdw_intel_thread(int irq, void *dev_id);
+
+#else
+
+static inline int sdw_intel_acpi_scan(acpi_handle parent_handle, struct sdw_intel_acpi_info *info)
+{
+	return -ENODEV;
+}
+
+static inline void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
+{
+}
+
+static inline struct sdw_intel_ctx *sdw_intel_probe(struct sdw_intel_res *res)
+{
+	return NULL;
+}
+
+static inline int sdw_intel_startup(struct sdw_intel_ctx *ctx)
+{
+	return 0;
+}
+
+static inline void sdw_intel_exit(struct sdw_intel_ctx *ctx)
+{
+}
+
+static inline irqreturn_t sdw_intel_thread(int irq, void *dev_id)
+{
+	return 0;
+}
+
+#endif
 
 #define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
 

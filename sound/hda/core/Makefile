@@ -18,5 +18,8 @@ snd-intel-dspcfg-y := intel-dsp-config.o
 snd-intel-dspcfg-$(CONFIG_SND_INTEL_NHLT) += intel-nhlt.o
 obj-$(CONFIG_SND_INTEL_DSP_CONFIG) += snd-intel-dspcfg.o
 
+ifneq ($(CONFIG_SND_INTEL_SOUNDWIRE_ACPI),)
 snd-intel-sdw-acpi-y := intel-sdw-acpi.o
+endif
+
 obj-$(CONFIG_SND_INTEL_SOUNDWIRE_ACPI) += snd-intel-sdw-acpi.o
