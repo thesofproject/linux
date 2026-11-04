@@ -687,6 +687,62 @@ int usb_offload_release_stream(struct usb_offload_ctx *ctx,
 }
 EXPORT_SYMBOL_NS_GPL(usb_offload_release_stream, "USB_AUDIO_OFFLOAD");
 
+/*
+ * Stop the offloaded endpoints on the xHCI once the DSP has stopped its side
+ * of the link, before the link goes down: an isochronous IN endpoint that the
+ * controller still services then has nowhere to deliver its packets, which
+ * can stall the controller's periodic schedule. The feedback endpoint is the
+ * IN one on a playback stream, so it goes first. The resources stay claimed
+ * until usb_offload_release_stream().
+ *
+ * Return: 0 if the endpoints stopped, the first error otherwise.
+ */
+int usb_offload_quiesce_stream(struct usb_offload_ctx *ctx,
+			       struct usb_device *udev, int direction, int pcm_index)
+{
+	struct usb_offload_ua_stream *stream;
+	struct usb_offload_dev *dev;
+	int ret = 0;
+
+	if (!ctx || !udev)
+		return -EINVAL;
+
+	if (direction < 0 || direction > SNDRV_PCM_STREAM_LAST)
+		return -EINVAL;
+
+	guard(mutex)(&usb_offload_ua_lock);
+
+	if (usb_offload_ua_ctx != ctx)
+		return -ENODEV;
+
+	dev = usb_offload_ua_find_udev(udev);
+	if (!dev)
+		return -ENODEV;
+
+	stream = usb_offload_ua_find_stream(dev, direction, pcm_index);
+	if (!stream)
+		return -ENODEV;
+
+	/* both are attempted, the first failure is the one reported */
+	if (stream->feedback_host_ep) {
+		ret = xhci_sideband_stop_endpoint(dev->sb, stream->feedback_host_ep);
+		if (ret)
+			dev_dbg(&udev->dev, "USB offload: stop feedback ep: %d\n", ret);
+	}
+
+	if (stream->data_host_ep) {
+		int data_ret = xhci_sideband_stop_endpoint(dev->sb, stream->data_host_ep);
+
+		if (data_ret)
+			dev_dbg(&udev->dev, "USB offload: stop ep: %d\n", data_ret);
+		if (!ret)
+			ret = data_ret;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_NS_GPL(usb_offload_quiesce_stream, "USB_AUDIO_OFFLOAD");
+
 static u64 usb_offload_add_s24_le(struct usb_offload_ctx *ctx, u64 formats)
 {
 	if (ctx->s24_3le_as_s24_le && (formats & SNDRV_PCM_FMTBIT_S24_3LE))

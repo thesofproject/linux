@@ -148,7 +148,8 @@ struct usb_offload_ep_info {
 /**
  * struct usb_offload_stream_hw - resources reserved for one offloaded stream
  * @pcm_index: USB SND PCM device number the stream was acquired on, to be
- *	       passed back to usb_offload_release_stream()
+ *	       passed back to usb_offload_quiesce_stream() and
+ *	       usb_offload_release_stream()
  * @bus_devid: PCI bus, device and function of the xHCI controller, as
  *	       PCI_DEVID() lays them out
  * @format: the sample format the device runs the stream in. It is the format of
@@ -188,9 +189,11 @@ struct usb_offload_stream_hw {
  * connected device's data endpoint so that the caller can program its DSP.
  * The USB PCM is taken away from the host for as long as it is held; the
  * other PCMs of the device are not affected and can be acquired alongside.
- * release_stream() reverses it, naming the stream by its direction and the
- * USB PCM device number acquire_stream() reported in
- * usb_offload_stream_hw.pcm_index.
+ * release_stream() reverses it. quiesce_stream() only stops the endpoints on
+ * the controller, for the caller to run once its own side of the link has
+ * stopped, before it is torn down; release_stream() still has to follow.
+ * Both name the stream by its direction and the USB PCM device number
+ * acquire_stream() reported in usb_offload_stream_hw.pcm_index.
  *
  * @params is the format to run the device at and @direction an
  * SNDRV_PCM_STREAM_* value. @pcm_index pins the search to one USB SND PCM
@@ -203,6 +206,9 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 			       struct snd_pcm_hw_params *params,
 			       struct usb_offload_stream_hw *hw);
 int usb_offload_release_stream(struct usb_offload_ctx *ctx,
+			       struct usb_device *udev, int direction,
+			       int pcm_index);
+int usb_offload_quiesce_stream(struct usb_offload_ctx *ctx,
 			       struct usb_device *udev, int direction,
 			       int pcm_index);
 
