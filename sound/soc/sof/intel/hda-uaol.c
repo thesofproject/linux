@@ -85,6 +85,42 @@ static bool hda_uaol_dev_identity_equal(const struct hda_uaol_dev *a,
 		       sizeof(a->cpcm_name_storage));
 }
 
+/*
+ * Whether a stream is already open on @route of @direction, consulted by the
+ * route kcontrol before it lets a selection change - a link a running stream
+ * owns is never switched out from under it.
+ */
+static bool hda_uaol_is_route_busy(struct snd_soc_usb *usb, int direction,
+				   unsigned int route)
+{
+	struct sof_intel_hda_dev *hdev = usb->priv_data;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(hdev->uaol_streams); i++) {
+		struct hda_uaol_stream *stream = &hdev->uaol_streams[i];
+
+		if (stream->dai && stream->direction == direction &&
+		    stream->route == route && stream->udev)
+			return true;
+	}
+
+	return false;
+}
+
+/* The backend state of a UAOL CPU DAI, claimed when the DAI probed */
+static struct hda_uaol_stream *hda_uaol_stream_get(struct sof_intel_hda_dev *hdev,
+						   struct snd_soc_dai *dai)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(hdev->uaol_streams); i++) {
+		if (hdev->uaol_streams[i].dai == dai)
+			return &hdev->uaol_streams[i];
+	}
+
+	return NULL;
+}
+
 int hda_uaol_notify_connect(struct device *dev, struct usb_device *udev,
 			    const struct usb_offload_usb_dev_info *id)
 {
@@ -167,11 +203,72 @@ int hda_uaol_notify_connect(struct device *dev, struct usb_device *udev,
 }
 EXPORT_SYMBOL_NS(hda_uaol_notify_connect, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
+/*
+ * Nothing else tells a frontend that the device it plays to has been unplugged:
+ * the link keeps running into a dead endpoint and the application keeps
+ * feeding it. End its stream the way the USB card ends its own users' streams
+ * when it goes away, so the application sees the device disappear instead of
+ * silence.
+ */
+static void hda_uaol_stop_frontends(struct sof_intel_hda_dev *hdev,
+				    struct usb_device *udev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(hdev->uaol_streams); i++) {
+		struct hda_uaol_stream *stream = &hdev->uaol_streams[i];
+		struct snd_pcm_substream *be_substream = READ_ONCE(stream->be);
+		int dir = stream->direction;
+		struct snd_soc_pcm_runtime *be;
+		struct snd_soc_dpcm *dpcm;
+
+		if (!be_substream)
+			continue;
+
+		be = snd_soc_substream_to_rtd(be_substream);
+
+		/* the backend's hw_params and hw_free run under this, so the pair is stable */
+		snd_soc_dpcm_mutex_lock(be);
+		if (stream->udev != udev || stream->be != be_substream) {
+			snd_soc_dpcm_mutex_unlock(be);
+			continue;
+		}
+
+		for_each_dpcm_fe(be, dir, dpcm) {
+			struct snd_pcm_substream *fe_substream =
+				snd_soc_dpcm_get_substream(dpcm->fe, dir);
+
+			snd_pcm_stream_lock_irq(fe_substream);
+			if (fe_substream->runtime) {
+				if (snd_pcm_running(fe_substream))
+					snd_pcm_stop(fe_substream, SNDRV_PCM_STATE_DISCONNECTED);
+				else
+					__snd_pcm_set_state(fe_substream->runtime,
+							    SNDRV_PCM_STATE_DISCONNECTED);
+			}
+			snd_pcm_stream_unlock_irq(fe_substream);
+		}
+
+		/*
+		 * The library has already given the USB side back and the device
+		 * goes away with the disconnect. Forget it, so that the trigger and
+		 * hw_free of the frontends' teardown do not hand the stale pointer
+		 * back to the library, where a device reusing the address would
+		 * match.
+		 */
+		stream->udev = NULL;
+		stream->be = NULL;
+		snd_soc_dpcm_mutex_unlock(be);
+	}
+}
+
 int hda_uaol_notify_disconnect(struct device *dev, struct usb_device *udev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct hda_uaol_dev *offload_dev;
+
+	hda_uaol_stop_frontends(hdev, udev);
 
 	scoped_guard(mutex, &hdev->uaol_mutex) {
 		offload_dev = hda_uaol_find(hdev, udev);
@@ -210,8 +307,29 @@ static int uaol_dai_probe(struct snd_soc_dai *dai)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(dai->component);
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct hda_uaol_stream *stream;
 	struct snd_soc_usb *usb;
-	int ret, i;
+	unsigned int route;
+	int direction, ret, i;
+
+	/*
+	 * The pin number of the DAI, "UAOL0 Playback Pin1", is the ordinal of
+	 * the backend among those of its direction, which is the ASoC USB
+	 * route it plays to.
+	 */
+	if (sscanf(dai->driver->name, "UAOL%*u %*s Pin%u", &route) != 1)
+		return -EINVAL;
+	direction = dai->driver->playback.channels_min ? SNDRV_PCM_STREAM_PLAYBACK :
+							  SNDRV_PCM_STREAM_CAPTURE;
+
+	/* a free slot has no DAI */
+	stream = hda_uaol_stream_get(hdev, NULL);
+	if (!stream)
+		return -ENOSPC;
+	stream->hdev = hdev;
+	stream->dai = dai;
+	stream->direction = direction;
+	stream->route = route;
 
 	if (!hdev->uaol) {
 		/*
@@ -226,7 +344,7 @@ static int uaol_dai_probe(struct snd_soc_dai *dai)
 		ret = snd_soc_card_jack_new(dai->component->card, "USB Offload Jack",
 					    SND_JACK_USB, &hdev->uaol_jack);
 		if (ret)
-			return ret;
+			goto err_free_slot;
 
 		snd_jack_report(hdev->uaol_jack.jack, 0);
 		return 0;
@@ -237,16 +355,18 @@ static int uaol_dai_probe(struct snd_soc_dai *dai)
 		return 0;
 
 	usb = snd_soc_usb_allocate_port(dai->component, hdev);
-	if (IS_ERR(usb))
-		return PTR_ERR(usb);
+	if (IS_ERR(usb)) {
+		ret = PTR_ERR(usb);
+		goto err_free_slot;
+	}
+
+	usb->is_route_busy = hda_uaol_is_route_busy;
 
 	/* a route per backend of a direction, each with a device of its own */
 	for (i = 0; i <= SNDRV_PCM_STREAM_LAST; i++) {
 		ret = snd_soc_usb_set_num_routes(usb, i, max(hdev->uaol_stream_num[i], 1U));
-		if (ret) {
-			snd_soc_usb_free_port(usb);
-			return ret;
-		}
+		if (ret)
+			goto err_free_port;
 	}
 
 	/*
@@ -257,16 +377,12 @@ static int uaol_dai_probe(struct snd_soc_dai *dai)
 	 */
 	ret = snd_soc_card_jack_new(dai->component->card, "USB Offload Jack",
 				    SND_JACK_USB, &hdev->uaol_jack);
-	if (ret) {
-		snd_soc_usb_free_port(usb);
-		return ret;
-	}
+	if (ret)
+		goto err_free_port;
 
 	ret = snd_soc_usb_setup_offload_route_ctl(dai->component, usb);
-	if (ret) {
-		snd_soc_usb_free_port(usb);
-		return ret;
-	}
+	if (ret)
+		goto err_free_port;
 
 	scoped_guard(mutex, &hdev->uaol_mutex)
 		hdev->uaol_usb = usb;
@@ -275,14 +391,32 @@ static int uaol_dai_probe(struct snd_soc_dai *dai)
 	snd_soc_usb_add_port(usb);
 
 	return 0;
+
+err_free_port:
+	snd_soc_usb_free_port(usb);
+	/*
+	 * ASoC does not call remove for a DAI whose probe failed, and the card
+	 * frees the jack of the failed bring-up: do not leave it for the
+	 * connect notifications to report on.
+	 */
+	scoped_guard(mutex, &hdev->uaol_mutex)
+		hdev->uaol_jack.jack = NULL;
+err_free_slot:
+	/* ASoC does not call remove for a DAI whose probe failed */
+	stream->dai = NULL;
+	return ret;
 }
 
 static int uaol_dai_remove(struct snd_soc_dai *dai)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(dai->component);
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct hda_uaol_stream *stream = hda_uaol_stream_get(hdev, dai);
 	struct hda_uaol_dev *dev, *tmp;
 	struct snd_soc_usb *usb;
+
+	if (stream)
+		stream->dai = NULL;
 
 	/*
 	 * Taken away under the lock so that a connect racing with the card
@@ -311,14 +445,286 @@ static int uaol_dai_remove(struct snd_soc_dai *dai)
 	return 0;
 }
 
-/* The link DMA is run like the one of the SSP and DMIC DAIs */
+/*
+ * Which device a backend plays to is the ASoC USB route kcontrol's job to
+ * decide, per route (defaulting to the Nth connected pair for route N, see
+ * snd_soc_usb_get_selected_device()) - this
+ * just resolves that selection back to the Intel-side record that carries
+ * the actual usb_device pointer.
+ */
+static struct usb_device *hda_uaol_selected(struct sof_intel_hda_dev *hdev,
+					    int direction, unsigned int route,
+					    int *pcm_index)
+{
+	struct snd_soc_usb_device *sdev;
+	struct hda_uaol_dev *dev;
+	int ret;
+
+	ret = snd_soc_usb_get_selected_device(hdev->uaol_usb, direction, route,
+					      &sdev, pcm_index);
+	if (ret || !sdev)
+		return NULL;
+
+	scoped_guard(mutex, &hdev->uaol_mutex) {
+		list_for_each_entry(dev, &hdev->uaol_devices, node) {
+			if (&dev->sdev == sdev)
+				return dev->udev;
+		}
+	}
+
+	return NULL;
+}
+
+static void uaol_set_be_format(struct snd_pcm_hw_params *params, snd_pcm_format_t format)
+{
+	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+
+	snd_mask_none(fmt);
+	snd_mask_set_format(fmt, format);
+}
+
+static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
+				 struct hda_uaol_stream *stream);
+
+/*
+ * Take the device away from the host for as long as the DSP drives its
+ * endpoint. The stream is started from hw_params and, after a system
+ * suspend, from prepare, which is the only callback the resume path runs.
+ */
+static int uaol_dai_start_stream(struct snd_pcm_substream *substream,
+				 struct snd_pcm_hw_params *params,
+				 struct hda_uaol_stream *stream)
+{
+	struct snd_soc_dai *cpu_dai = stream->dai;
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	int direction = substream->stream;
+	struct usb_offload_stream_hw hw;
+	struct usb_device *udev;
+	int pcm_index;
+	int ret;
+
+	if (!hdev->uaol)
+		return -ENODEV;
+
+	udev = hda_uaol_selected(hdev, direction, stream->route, &pcm_index);
+	if (!udev) {
+		dev_err(cpu_dai->dev, "no USB device selected for offload\n");
+		return -ENODEV;
+	}
+
+	ret = usb_offload_acquire_stream(hdev->uaol, udev, direction, pcm_index,
+					 params, &hw);
+	if (ret) {
+		dev_err(cpu_dai->dev, "failed to acquire the USB stream: %d\n", ret);
+		return ret;
+	}
+
+	/*
+	 * The device may run the stream in another container than the one the
+	 * frontend negotiated, SOF only ever hands S24_LE for 24 bits and a
+	 * device packing them into 3 bytes will not recognise it. The link DMA
+	 * is set up from the params, so it runs the container of the device,
+	 * the DSP packs the samples on their way to the link. On hw_params
+	 * those are a copy DPCM made for this call, prepare sets them again
+	 * for itself.
+	 */
+	stream->be_format = hw.format;
+	uaol_set_be_format(params, hw.format);
+
+	stream->udev = udev;
+	stream->pcm_index = hw.pcm_index;
+	stream->be = substream;
+
+	/*
+	 * The route control refuses a change once the stream is set here, and
+	 * it decides that under the lock the selection is read back with: a
+	 * change which went through while the device was being acquired is
+	 * seen now, a later one finds the route busy. Back out of the former,
+	 * the stream would play to a device the route no longer selects.
+	 */
+	if (hda_uaol_selected(hdev, direction, stream->route, &pcm_index) != udev ||
+	    pcm_index != hw.pcm_index) {
+		uaol_dai_stop_stream(substream, stream);
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
+static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
+				 struct hda_uaol_stream *stream)
+{
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, stream->dai);
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct usb_device *udev = stream->udev;
+
+	if (!udev)
+		return;
+
+	stream->udev = NULL;
+	stream->be = NULL;
+	usb_offload_release_stream(hdev->uaol, udev, stream->direction, stream->pcm_index);
+}
+
+static int uaol_dai_hw_params(struct snd_pcm_substream *substream,
+			      struct snd_pcm_hw_params *params,
+			      struct snd_soc_dai *cpu_dai)
+{
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	struct hda_uaol_stream *stream = hda_uaol_stream_get(sdev->pdata->hw_pdata, cpu_dai);
+	unsigned int rate, channels;
+	snd_pcm_format_t format;
+	int ret;
+
+	if (!stream)
+		return -ENODEV;
+
+	/*
+	 * A second frontend joining the stream's mixer, the deep buffer, runs
+	 * the backend's hw_params again while the first one still has it. The
+	 * USB stream is acquired once, by whichever frontend came first, and
+	 * stays until the last one is gone.
+	 *
+	 * The two share the one endpoint and the one mixer, so the second one
+	 * can only run what the first one opened the backend with. Refuse it
+	 * here, before the core prepares anything for it: a frontend failing
+	 * further down would take what the first one prepared with it.
+	 */
+	if (stream->udev) {
+		/* pairs with the release once the first frontend's parameters are stored */
+		if (!smp_load_acquire(&stream->params_valid) ||
+		    params_rate(params) != stream->rate ||
+		    params_channels(params) != stream->channels ||
+		    params_format(params) != stream->format) {
+			dev_err(cpu_dai->dev,
+				"stream is open at %u Hz, %u ch, format %d, not %u Hz, %u ch, format %d\n",
+				stream->rate, stream->channels, stream->format,
+				params_rate(params), params_channels(params),
+				params_format(params));
+			return -EBUSY;
+		}
+
+		/* the link DMA runs the format of the device, not the frontend's */
+		uaol_set_be_format(params, stream->be_format);
+
+		return non_hda_dai_hw_params(substream, params, cpu_dai);
+	}
+
+	/* the params are set to the format of the device, keep what the frontend asked for */
+	rate = params_rate(params);
+	channels = params_channels(params);
+	format = params_format(params);
+
+	ret = uaol_dai_start_stream(substream, params, stream);
+	if (ret)
+		return ret;
+
+	ret = non_hda_dai_hw_params(substream, params, cpu_dai);
+	if (ret) {
+		uaol_dai_stop_stream(substream, stream);
+		return ret;
+	}
+
+	stream->rate = rate;
+	stream->channels = channels;
+	stream->format = format;
+	/* publish the parameters to the frontend rules and to a joining frontend */
+	smp_store_release(&stream->params_valid, true);
+
+	return 0;
+}
+
+static int uaol_dai_hw_free(struct snd_pcm_substream *substream,
+			    struct snd_soc_dai *cpu_dai)
+{
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	struct hda_uaol_stream *stream = hda_uaol_stream_get(sdev->pdata->hw_pdata, cpu_dai);
+	int ret = hda_dai_hw_free(substream, cpu_dai);
+
+	if (stream) {
+		/* the next frontend to open the backend decides the parameters */
+		smp_store_release(&stream->params_valid, false);
+		uaol_dai_stop_stream(substream, stream);
+		/* a stream closed while suspended has nothing left to reacquire */
+		stream->suspended = false;
+	}
+
+	return ret;
+}
+
+/*
+ * A system suspend resets the pipeline and frees the DAI copier, and takes
+ * the device's streaming altsetting with it, while the stream itself stays
+ * open. The resume path only runs prepare on the backend, so nothing
+ * reestablishes the USB side on its own and the stream is acquired again
+ * from here, before the pipeline is rebuilt.
+ */
+static int uaol_dai_prepare(struct snd_pcm_substream *substream,
+			    struct snd_soc_dai *cpu_dai)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct hda_uaol_stream *stream = hda_uaol_stream_get(hdev, cpu_dai);
+	struct snd_pcm_hw_params *params;
+	int direction = substream->stream;
+	int ret;
+
+	if (!stream)
+		return non_hda_dai_prepare(substream, cpu_dai);
+
+	params = &rtd->dpcm[direction].hw_params;
+
+	/* left set until the stream is back, for a failed prepare to retry */
+	if (stream->suspended) {
+		uaol_dai_stop_stream(substream, stream);
+
+		ret = uaol_dai_start_stream(substream, params, stream);
+		if (ret)
+			return ret;
+
+		stream->suspended = false;
+	}
+
+	/* the device is gone, the gateway would run on a released resource */
+	if (!stream->udev)
+		return -ENODEV;
+
+	/*
+	 * The common prepare programs the link DMA again after a stop, from
+	 * the backend's own copy of the params, which DPCM keeps at what the
+	 * frontend negotiated. Set the format the stream was acquired with,
+	 * as it was for hw_params.
+	 */
+	uaol_set_be_format(params, stream->be_format);
+
+	return non_hda_dai_prepare(substream, cpu_dai);
+}
+
+/*
+ * The backend is triggered on the way into a system suspend, which is the
+ * only notice this driver gets that the stream will have to be reacquired.
+ */
+static int uaol_dai_trigger(struct snd_pcm_substream *substream, int cmd,
+			    struct snd_soc_dai *cpu_dai)
+{
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	struct hda_uaol_stream *stream = hda_uaol_stream_get(sdev->pdata->hw_pdata, cpu_dai);
+
+	if (stream && cmd == SNDRV_PCM_TRIGGER_SUSPEND)
+		stream->suspended = true;
+
+	return hda_dai_trigger(substream, cmd, cpu_dai);
+}
+
 static const struct snd_soc_dai_ops uaol_dai_ops = {
 	.probe = uaol_dai_probe,
 	.remove = uaol_dai_remove,
-	.hw_params = non_hda_dai_hw_params,
-	.hw_free = hda_dai_hw_free,
-	.trigger = hda_dai_trigger,
-	.prepare = non_hda_dai_prepare,
+	.hw_params = uaol_dai_hw_params,
+	.hw_free = uaol_dai_hw_free,
+	.trigger = uaol_dai_trigger,
+	.prepare = uaol_dai_prepare,
 };
 
 void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
@@ -335,3 +741,5 @@ void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *
 		}
 	}
 }
+
+MODULE_IMPORT_NS("USB_AUDIO_OFFLOAD");

@@ -512,6 +512,41 @@ struct sof_ace3_mic_privacy {
 	struct work_struct work;
 };
 
+/*
+ * One UAOL backend: the DAI it is bound to and the USB stream it holds. This
+ * lives for the lifetime of the card and names the device only indirectly, by
+ * the route of its direction the backend plays to.
+ */
+struct hda_uaol_stream {
+	struct sof_intel_hda_dev *hdev;
+	/* the UAOL CPU DAI, NULL while no DAI is bound to this slot */
+	struct snd_soc_dai *dai;
+	int direction;
+	/* the ASoC USB route of @direction this backend plays to */
+	unsigned int route;
+
+	/* device whose stream the DSP owns, NULL when idle */
+	struct usb_device *udev;
+	/* USB PCM of @udev the stream was acquired on */
+	int pcm_index;
+	/* backend substream the stream runs on, its frontends are stopped on unplug */
+	struct snd_pcm_substream *be;
+	/*
+	 * Parameters the first frontend opened the backend with, as it passed
+	 * them in. A frontend joining it, the deep buffer, shares the backend
+	 * and its mixer and has to use the same.
+	 */
+	unsigned int rate;
+	unsigned int channels;
+	snd_pcm_format_t format;
+	/* the format the device runs the stream in, what the backend is set up with */
+	snd_pcm_format_t be_format;
+	/* @rate, @channels and @format are valid, published after they are set */
+	bool params_valid;
+	/* the stream was suspended and has to be reacquired on prepare */
+	bool suspended;
+};
+
 /* represents DSP HDA controller frontend - i.e. host facing control */
 struct sof_intel_hda_dev {
 	bool imrboot_supported;
@@ -599,6 +634,9 @@ struct sof_intel_hda_dev {
 
 	/* reports whether any offload capable device is connected */
 	struct snd_soc_jack uaol_jack;
+
+	/* one per UAOL CPU DAI, claimed when the DAI probes */
+	struct hda_uaol_stream uaol_streams[SOF_UAOL_NUM_DAIS];
 
 	/* FW clock config, 0:HPRO, 1:LPRO */
 	bool clk_config_lpro;
