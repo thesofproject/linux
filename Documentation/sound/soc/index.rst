@@ -19,3 +19,4 @@ The documentation is split into the following sections:-
    dpcm
    codec-to-codec
    usb
+   sof-uaol

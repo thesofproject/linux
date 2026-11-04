@@ -580,6 +580,7 @@ Selection rules:
 
 Control ``INFO`` and ``VALUE`` change notifications are sent whenever a
 connect, a disconnect or a write changes the item list or the selection.
+For a backend using this model see :doc:`sof-uaol`.
 
 Existing USB Sound Kcontrol
 ---------------------------
