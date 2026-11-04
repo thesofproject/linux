@@ -10,6 +10,8 @@
 // compress buffer and wakes up the reader.
 
 #include <linux/dma-mapping.h>
+#include <linux/log2.h>
+#include <linux/sizes.h>
 #include <linux/module.h>
 #include <linux/workqueue.h>
 #include <sound/compress_driver.h>
@@ -31,50 +33,66 @@ struct imx_probes_stream {
 	dma_addr_t paddr;
 	size_t ring_size;
 	u32 sampling_rate;
-	u64 copied;
+	u64 dsp_wr;	/* bytes written by the DSP (32-bit counter extended) */
+	u64 dsp_rd;	/* bytes consumed from the DSP ring */
+	u64 produced;	/* bytes copied to the compress buffer in this run */
 };
 
 /* only one probes extraction stream exists */
 static struct imx_probes_stream imx_stream;
+
+static void imx_probes_sync_wr(struct imx_probes_stream *s)
+{
+	/* the DSP counter is 32-bit and wraps */
+	s->dsp_wr += (u32)(readl(s->vaddr) - (u32)s->dsp_wr);
+}
 
 static void imx_probes_work(struct work_struct *work)
 {
 	struct imx_probes_stream *s = &imx_stream;
 	struct snd_compr_runtime *rtd;
 	u8 *ring = s->vaddr + IMX_PROBES_HDR_SIZE;
-	u32 wr, n, off;
+	u64 pending, used;
+	u32 n, src, dst;
 
 	if (!s->cstream || !s->vaddr)
 		return;
 
 	rtd = s->cstream->runtime;
-	wr = readl(s->vaddr);
-	n = wr - (u32)s->copied;
+	imx_probes_sync_wr(s);
 
-	if (n > s->ring_size) {
-		/* reader too slow, drop the oldest data */
-		s->copied = wr - s->ring_size;
-		n = s->ring_size;
+	pending = s->dsp_wr - s->dsp_rd;
+	if (pending > s->ring_size) {
+		/* the DSP overwrote data we did not read, skip to the oldest valid */
+		dev_warn_ratelimited(s->dev, "probes ring overrun, dropped %llu bytes\n",
+				     pending - s->ring_size);
+		s->dsp_rd = s->dsp_wr - s->ring_size;
+		pending = s->ring_size;
 	}
 
-	n = min_t(u32, n, rtd->buffer_size);
+	/* never overwrite data the reader has not consumed yet */
+	used = s->produced - rtd->total_bytes_transferred;
+	n = min_t(u64, pending, rtd->buffer_size - used);
 	if (n) {
-		u32 src = (u32)s->copied % s->ring_size;
-		u32 dst = s->copied % rtd->buffer_size;
+		bool copied = false;
 
-		off = src;
+		src = s->dsp_rd % s->ring_size;
+		dst = s->produced % rtd->buffer_size;
 		/* copy in chunks that do not wrap either buffer */
 		while (n) {
-			u32 chunk = min3(n, (u32)(s->ring_size - off),
+			u32 chunk = min3(n, (u32)(s->ring_size - src),
 					 (u32)(rtd->buffer_size - dst));
 
-			memcpy(rtd->dma_area + dst, ring + off, chunk);
-			s->copied += chunk;
-			off = (off + chunk) % s->ring_size;
+			memcpy(rtd->dma_area + dst, ring + src, chunk);
+			s->dsp_rd += chunk;
+			s->produced += chunk;
+			src = (src + chunk) % s->ring_size;
 			dst = (dst + chunk) % rtd->buffer_size;
 			n -= chunk;
+			copied = true;
 		}
-		snd_compr_fragment_elapsed(s->cstream);
+		if (copied)
+			snd_compr_fragment_elapsed(s->cstream);
 	}
 
 	schedule_delayed_work(&s->work, msecs_to_jiffies(IMX_PROBES_POLL_MS));
@@ -84,26 +102,38 @@ static int imx_probes_compr_startup(struct sof_client_dev *cdev,
 				    struct snd_compr_stream *cstream,
 				    struct snd_soc_dai *dai, u32 *stream_id)
 {
+	struct imx_probes_stream *s = &imx_stream;
+
+	/* one stream only: do not touch the active stream's tag */
+	if (s->cstream)
+		return -EBUSY;
+
+	s->cstream = cstream;
 	/* real value (buffer address) is set in set_params */
 	*stream_id = 0;
 	return 0;
 }
 
-static void imx_probes_free(struct imx_probes_stream *s)
+static void imx_probes_free_buf(struct imx_probes_stream *s)
 {
 	cancel_delayed_work_sync(&s->work);
 	if (s->vaddr)
 		dma_free_coherent(s->dev, IMX_PROBES_HDR_SIZE + s->ring_size,
 				  s->vaddr, s->paddr);
 	s->vaddr = NULL;
-	s->cstream = NULL;
 }
 
 static int imx_probes_compr_shutdown(struct sof_client_dev *cdev,
 				     struct snd_compr_stream *cstream,
 				     struct snd_soc_dai *dai)
 {
-	imx_probes_free(&imx_stream);
+	struct imx_probes_stream *s = &imx_stream;
+
+	if (s->cstream != cstream)
+		return 0;
+
+	imx_probes_free_buf(s);
+	s->cstream = NULL;
 	return 0;
 }
 
@@ -116,22 +146,26 @@ static int imx_probes_compr_set_params(struct sof_client_dev *cdev,
 	struct imx_probes_stream *s = &imx_stream;
 	struct snd_soc_pcm_stream *pstream = &dai->driver->capture;
 
-	imx_probes_free(s);
+	imx_probes_free_buf(s);
 
 	s->dev = sof_client_get_dma_dev(cdev);
 	/* DSP can only address 32-bit physical addresses */
 	if (dma_set_coherent_mask(s->dev, DMA_BIT_MASK(32)))
 		return -ENOMEM;
+	/* firmware needs a power-of-two ring of at least 8 KiB */
+	if (cstream->runtime->dma_bytes < SZ_8K ||
+	    !is_power_of_2(cstream->runtime->dma_bytes))
+		return -EINVAL;
 	s->ring_size = cstream->runtime->dma_bytes;
 	s->vaddr = dma_alloc_coherent(s->dev, IMX_PROBES_HDR_SIZE + s->ring_size,
 				      &s->paddr, GFP_KERNEL);
 	if (!s->vaddr)
 		return -ENOMEM;
 
-	s->cstream = cstream;
-	s->copied = 0;
+	s->dsp_wr = 0;
+	s->dsp_rd = 0;
+	s->produced = 0;
 	s->sampling_rate = snd_pcm_rate_bit_to_rate(pstream->rates);
-	INIT_DELAYED_WORK(&s->work, imx_probes_work);
 
 	/* the firmware takes the buffer address from the stream_tag field */
 	priv->extractor_stream_tag = (u32)s->paddr;
@@ -147,10 +181,17 @@ static int imx_probes_compr_trigger(struct sof_client_dev *cdev,
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
+		/* a new run: the core restarts its counters, skip stale data */
+		s->produced = 0;
+		if (s->vaddr) {
+			imx_probes_sync_wr(s);
+			s->dsp_rd = s->dsp_wr;
+		}
 		schedule_delayed_work(&s->work, msecs_to_jiffies(IMX_PROBES_POLL_MS));
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 		cancel_delayed_work_sync(&s->work);
+		s->produced = 0;
 		break;
 	}
 
@@ -162,7 +203,7 @@ static int imx_probes_compr_pointer(struct sof_client_dev *cdev,
 				    struct snd_compr_tstamp64 *tstamp,
 				    struct snd_soc_dai *dai)
 {
-	tstamp->copied_total = imx_stream.copied;
+	tstamp->copied_total = imx_stream.produced;
 	tstamp->sampling_rate = imx_stream.sampling_rate;
 
 	return 0;
@@ -178,6 +219,8 @@ static const struct sof_probes_host_ops imx_probes_ops = {
 
 int imx_probes_register(struct snd_sof_dev *sdev)
 {
+	INIT_DELAYED_WORK(&imx_stream.work, imx_probes_work);
+
 	return sof_client_dev_register(sdev, "imx-probes", 0, &imx_probes_ops,
 				       sizeof(imx_probes_ops));
 }

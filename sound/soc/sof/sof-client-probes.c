@@ -55,7 +55,9 @@ static int sof_probes_compr_startup(struct snd_compr_stream *cstream,
 	ret = ops->startup(cdev, cstream, dai, &priv->extractor_stream_tag);
 	if (ret) {
 		dev_err(dai->dev, "Failed to startup probe stream: %d\n", ret);
-		priv->extractor_stream_tag = SOF_PROBES_INVALID_NODE_ID;
+		/* keep the tag of the stream that is already running */
+		if (ret != -EBUSY)
+			priv->extractor_stream_tag = SOF_PROBES_INVALID_NODE_ID;
 		sof_client_core_module_put(cdev);
 	}
 
