@@ -22,6 +22,7 @@ struct usb_offload_ctx {
 	struct device			*dev;
 	const struct usb_offload_ops	*ops;
 	bool				s24_3le_as_s24_le;
+	bool				async_playback_on_host;
 };
 
 /* Where the host wants a stream's endpoint placed (called from usb-audio.c) */
