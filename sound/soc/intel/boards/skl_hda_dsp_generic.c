@@ -53,6 +53,7 @@ static void skl_set_hda_codec_autosuspend_delay(struct snd_soc_card *card)
 #define DMIC01_BE_ID		6
 #define DMIC16K_BE_ID		7
 #define BT_OFFLOAD_BE_ID	8
+#define UAOL_BE_ID		9
 #define HDMI_IN_BE_ID 		13
 
 #define HDA_LINK_ORDER	SOF_LINK_ORDER(SOF_LINK_IDISP_HDMI,  \
@@ -60,16 +61,16 @@ static void skl_set_hda_codec_autosuspend_delay(struct snd_soc_card *card)
 				       SOF_LINK_DMIC01,     \
 				       SOF_LINK_DMIC16K,    \
 				       SOF_LINK_BT_OFFLOAD, \
-				       SOF_LINK_HDMI_IN,    \
-				       SOF_LINK_NONE)
+				       SOF_LINK_UAOL,       \
+				       SOF_LINK_HDMI_IN)
 
 #define HDA_LINK_IDS	SOF_LINK_ORDER(IDISP_HDMI_BE_ID,  \
 				       HDA_BE_ID,        \
 				       DMIC01_BE_ID,     \
 				       DMIC16K_BE_ID,    \
 				       BT_OFFLOAD_BE_ID, \
-				       HDMI_IN_BE_ID,    \
-				       0)
+				       UAOL_BE_ID,       \
+				       HDMI_IN_BE_ID)
 
 static unsigned long
 skl_hda_get_board_quirk(struct snd_soc_acpi_mach_params *mach_params)
@@ -129,6 +130,10 @@ static int skl_hda_audio_probe(struct platform_device *pdev)
 
 	if (mach->mach_params.codec_mask & IDISP_CODEC_MASK)
 		ctx->hdmi.idisp_codec = true;
+
+	ctx->uaol_link_mask = mach->mach_params.uaol_link_mask;
+	ctx->uaol_playback_num = mach->mach_params.uaol_playback_num;
+	ctx->uaol_capture_num = mach->mach_params.uaol_capture_num;
 
 	ctx->link_order_overwrite = HDA_LINK_ORDER;
 	ctx->link_id_overwrite = HDA_LINK_IDS;
