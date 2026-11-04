@@ -58,14 +58,6 @@ EXPORT_SYMBOL_NS(hda_dai_config, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_LINK)
 
-static struct snd_sof_dev *dai_to_sdev(struct snd_pcm_substream *substream,
-				       struct snd_soc_dai *cpu_dai)
-{
-	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
-
-	return widget_to_sdev(w);
-}
-
 static const struct hda_dai_widget_dma_ops *
 hda_dai_get_ops(struct snd_pcm_substream *substream, struct snd_soc_dai *cpu_dai)
 {
@@ -220,8 +212,8 @@ static int hda_link_dma_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int __maybe_unused hda_dai_hw_free(struct snd_pcm_substream *substream,
-					  struct snd_soc_dai *cpu_dai)
+int hda_dai_hw_free(struct snd_pcm_substream *substream,
+		    struct snd_soc_dai *cpu_dai)
 {
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, cpu_dai);
 	struct hdac_ext_stream *hext_stream;
@@ -312,8 +304,8 @@ static bool hda_dai_has_wov_fe(struct snd_sof_dev *sdev, struct snd_pcm_substrea
  * In contrast to IPC3, the dai trigger in IPC4 mixes pipeline state changes
  * (over IPC channel) and DMA state change (direct host register changes).
  */
-static int __maybe_unused hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
-					  struct snd_soc_dai *dai)
+int hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
+		    struct snd_soc_dai *dai)
 {
 	const struct hda_dai_widget_dma_ops *ops = hda_dai_get_ops(substream, dai);
 	struct hdac_ext_stream *hext_stream;
@@ -407,15 +399,6 @@ static const struct snd_soc_dai_ops hda_dai_ops = {
 
 #endif
 
-static struct sof_ipc4_copier *widget_to_copier(struct snd_soc_dapm_widget *w)
-{
-	struct snd_sof_widget *swidget = w->dobj.private;
-	struct snd_sof_dai *sdai = swidget->private;
-	struct sof_ipc4_copier *ipc4_copier = (struct sof_ipc4_copier *)sdai->private;
-
-	return ipc4_copier;
-}
-
 static int non_hda_dai_hw_params_data(struct snd_pcm_substream *substream,
 				      struct snd_pcm_hw_params *params,
 				      struct snd_soc_dai *cpu_dai,
@@ -504,9 +487,9 @@ static int non_hda_dai_hw_params_data(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int non_hda_dai_hw_params(struct snd_pcm_substream *substream,
-				 struct snd_pcm_hw_params *params,
-				 struct snd_soc_dai *cpu_dai)
+int non_hda_dai_hw_params(struct snd_pcm_substream *substream,
+			  struct snd_pcm_hw_params *params,
+			  struct snd_soc_dai *cpu_dai)
 {
 	struct snd_sof_dai_config_data data = { 0 };
 	unsigned int flags = SOF_DAI_CONFIG_FLAGS_HW_PARAMS;
@@ -514,8 +497,8 @@ static int non_hda_dai_hw_params(struct snd_pcm_substream *substream,
 	return non_hda_dai_hw_params_data(substream, params, cpu_dai, &data, flags);
 }
 
-static int non_hda_dai_prepare(struct snd_pcm_substream *substream,
-			       struct snd_soc_dai *cpu_dai)
+int non_hda_dai_prepare(struct snd_pcm_substream *substream,
+			struct snd_soc_dai *cpu_dai)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	int stream = substream->stream;
@@ -804,6 +787,7 @@ void hda_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
 
 	ssp_set_dai_drv_ops(sdev, ops);
 	dmic_set_dai_drv_ops(sdev, ops);
+	hda_uaol_set_dai_drv_ops(sdev, ops);
 
 	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4 && !hda_use_tplg_nhlt) {
 		struct sof_ipc4_fw_data *ipc4_data = sdev->private;
@@ -1004,7 +988,47 @@ struct snd_soc_dai_driver skl_dai[] = {
 	},
 },
 #endif
+/*
+ * The number of DAIs the component registers is a prefix of this array, so the
+ * UAOL DAIs are kept last: an unconditional entry in the middle would push the
+ * DAIs after it out of the range a configuration not counting the UAOL ones
+ * registers. The pin number tells the DAIs of a direction apart, it is not the
+ * UAOL stream the DAI runs on: that is picked when a USB device is acquired.
+ */
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
+{
+	.name = "UAOL0 Playback Pin0",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
+{
+	.name = "UAOL0 Playback Pin1",
+	.playback = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
+{
+	.name = "UAOL0 Capture Pin0",
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
+{
+	.name = "UAOL0 Capture Pin1",
+	.capture = {
+		.channels_min = 1,
+		.channels_max = 8,
+	},
+},
+#endif
 };
+
+static_assert(ARRAY_SIZE(skl_dai) == SOF_SKL_NUM_DAIS,
+	      "SOF_SKL_NUM_DAIS does not cover skl_dai[]");
 EXPORT_SYMBOL_NS(skl_dai, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_dsp_dais_suspend(struct snd_sof_dev *sdev)
