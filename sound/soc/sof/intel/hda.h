@@ -545,6 +545,8 @@ struct hda_uaol_stream {
 	bool params_valid;
 	/* the stream was suspended and has to be reacquired on prepare */
 	bool suspended;
+	/* link DMA the DSP reads the playback feedback endpoint through, if any */
+	struct hdac_ext_stream *fb_hext_stream;
 };
 
 /* represents DSP HDA controller frontend - i.e. host facing control */
@@ -1178,6 +1180,12 @@ const struct hda_dai_widget_dma_ops *
 hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidget);
 int hda_dai_config(struct snd_soc_dapm_widget *w, unsigned int flags,
 		   struct snd_sof_dai_config_data *data);
+
+struct hdac_ext_stream *hda_uaol_assign_fb_link_stream(struct snd_sof_dev *sdev,
+						       struct snd_pcm_substream *substream,
+						       unsigned int format_val);
+void hda_uaol_release_fb_link_stream(struct snd_sof_dev *sdev,
+				     struct hdac_ext_stream *hext_stream);
 
 static inline struct snd_sof_dev *widget_to_sdev(struct snd_soc_dapm_widget *w)
 {

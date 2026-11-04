@@ -796,14 +796,6 @@ static int uaol_dai_set_endpoint(struct snd_soc_dai *cpu_dai, int direction,
 	return 0;
 }
 
-static void uaol_set_be_format(struct snd_pcm_hw_params *params, snd_pcm_format_t format)
-{
-	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
-
-	snd_mask_none(fmt);
-	snd_mask_set_format(fmt, format);
-}
-
 static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
 				 struct hda_uaol_stream *stream);
 
@@ -846,6 +838,93 @@ static int uaol_check_fifo_fit(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu
 	}
 
 	return 0;
+}
+
+/*
+ * Index of the DMA config TLV describing the feedback link DMA. A UAOL
+ * backend has a single CPU DAI, so the audio link DMA is always TLV 0 and
+ * the firmware takes the second one as the feedback (host_dma_config[1]).
+ */
+#define SOF_UAOL_FB_DMA_TLV_IDX	1
+
+static void uaol_dai_release_feedback(struct snd_sof_dev *sdev,
+				      struct hda_uaol_stream *stream)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(stream->dai, stream->direction);
+	struct sof_ipc4_copier *ipc4_copier = widget_to_copier(w);
+
+	/* a stale TLV would be sent along with the next, feedback-less, device */
+	memset(&ipc4_copier->dma_config_tlv[SOF_UAOL_FB_DMA_TLV_IDX], 0,
+	       sizeof(ipc4_copier->dma_config_tlv[SOF_UAOL_FB_DMA_TLV_IDX]));
+
+	if (!stream->fb_hext_stream)
+		return;
+
+	hda_uaol_release_fb_link_stream(sdev, stream->fb_hext_stream);
+	stream->fb_hext_stream = NULL;
+}
+
+/*
+ * The feedback endpoint is read by the DSP through a link DMA of its own, in
+ * the capture direction. Its stream tag is what the firmware needs to bind
+ * the UAOL feedback stream to, handed over as a second DMA config TLV after
+ * the one of the audio link DMA.
+ */
+static int uaol_dai_setup_feedback(struct snd_pcm_substream *substream,
+				   struct snd_pcm_hw_params *params,
+				   struct hda_uaol_stream *stream)
+{
+	struct snd_soc_dai *cpu_dai = stream->dai;
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
+	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
+	struct sof_ipc4_copier *ipc4_copier = widget_to_copier(w);
+	struct sof_ipc4_dma_config_tlv *dma_config_tlv;
+	struct sof_ipc4_dma_config *dma_config;
+	struct hdac_ext_stream *hext_stream;
+	unsigned int format_val;
+	unsigned int format_bits;
+	int stream_tag;
+
+	if (sdev->dspless_mode_selected)
+		return 0;
+
+	/* one 32-bit feedback value per service interval */
+	format_bits = snd_hdac_stream_format_bits(SNDRV_PCM_FORMAT_S32_LE,
+						  SNDRV_PCM_SUBFORMAT_STD, 32);
+	format_val = snd_hdac_stream_format(1, format_bits, params_rate(params));
+
+	hext_stream = hda_uaol_assign_fb_link_stream(sdev, substream, format_val);
+	if (!hext_stream) {
+		dev_err(cpu_dai->dev, "no link DMA available for the USB feedback\n");
+		return -EBUSY;
+	}
+
+	stream->fb_hext_stream = hext_stream;
+	stream_tag = hdac_stream(hext_stream)->stream_tag;
+
+	dma_config_tlv = &ipc4_copier->dma_config_tlv[SOF_UAOL_FB_DMA_TLV_IDX];
+	dma_config_tlv->type = SOF_IPC4_GTW_DMA_CONFIG_ID;
+	dma_config_tlv->length = sizeof(dma_config_tlv->dma_config);
+
+	dma_config = &dma_config_tlv->dma_config;
+	dma_config->dma_method = SOF_IPC4_DMA_METHOD_HDA;
+	dma_config->pre_allocated_by_host = 1;
+	dma_config->dma_channel_id = stream_tag - 1;
+	dma_config->stream_id = stream_tag;
+	dma_config->dma_stream_channel_map.device_count = 1;
+	dma_config->dma_priv_config_size = 0;
+
+	dev_dbg(cpu_dai->dev, "USB feedback on link DMA stream %d\n", stream_tag);
+
+	return 0;
+}
+
+static void uaol_set_be_format(struct snd_pcm_hw_params *params, snd_pcm_format_t format)
+{
+	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
+
+	snd_mask_none(fmt);
+	snd_mask_set_format(fmt, format);
 }
 
 /*
@@ -898,15 +977,17 @@ static int uaol_dai_start_stream(struct snd_pcm_substream *substream,
 	uaol_set_be_format(params, hw.format);
 
 	ret = uaol_check_fifo_fit(sdev, cpu_dai, substream, params, &hw);
-	if (ret) {
-		usb_offload_release_stream(hdev->uaol, udev, direction, hw.pcm_index);
-		return ret;
-	}
+	if (ret)
+		goto err_release;
 
 	ret = uaol_dai_set_endpoint(cpu_dai, direction, &hw);
-	if (ret) {
-		usb_offload_release_stream(hdev->uaol, udev, direction, hw.pcm_index);
-		return ret;
+	if (ret)
+		goto err_release;
+
+	if (hw.has_feedback) {
+		ret = uaol_dai_setup_feedback(substream, params, stream);
+		if (ret)
+			goto err_release;
 	}
 
 	stream->udev = udev;
@@ -927,6 +1008,10 @@ static int uaol_dai_start_stream(struct snd_pcm_substream *substream,
 	}
 
 	return 0;
+
+err_release:
+	usb_offload_release_stream(hdev->uaol, udev, direction, hw.pcm_index);
+	return ret;
 }
 
 static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
@@ -935,6 +1020,10 @@ static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
 	struct snd_sof_dev *sdev = dai_to_sdev(substream, stream->dai);
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct usb_device *udev = stream->udev;
+
+	/* also after an unplug, which takes only the USB side away */
+	if (stream->fb_hext_stream)
+		uaol_dai_release_feedback(sdev, stream);
 
 	if (!udev)
 		return;
@@ -1082,17 +1171,43 @@ static int uaol_dai_prepare(struct snd_pcm_substream *substream,
 /*
  * The backend is triggered on the way into a system suspend, which is the
  * only notice this driver gets that the stream will have to be reacquired.
+ * The feedback link DMA is not the DAI's DMA data, so the common trigger
+ * does not know about it and it is run from here, alongside the audio one.
  */
 static int uaol_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 			    struct snd_soc_dai *cpu_dai)
 {
 	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
 	struct hda_uaol_stream *stream = hda_uaol_stream_get(sdev->pdata->hw_pdata, cpu_dai);
+	struct hdac_ext_stream *fb_hext_stream = NULL;
+	int ret;
 
-	if (stream && cmd == SNDRV_PCM_TRIGGER_SUSPEND)
+	if (!stream)
+		return hda_dai_trigger(substream, cmd, cpu_dai);
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		fb_hext_stream = stream->fb_hext_stream;
+
+	if (cmd == SNDRV_PCM_TRIGGER_SUSPEND)
 		stream->suspended = true;
 
-	return hda_dai_trigger(substream, cmd, cpu_dai);
+	if (fb_hext_stream &&
+	    (cmd == SNDRV_PCM_TRIGGER_START || cmd == SNDRV_PCM_TRIGGER_PAUSE_RELEASE))
+		snd_hdac_ext_stream_start(fb_hext_stream);
+
+	ret = hda_dai_trigger(substream, cmd, cpu_dai);
+
+	/* nothing was started: do not leave the feedback stream running */
+	if (ret && fb_hext_stream &&
+	    (cmd == SNDRV_PCM_TRIGGER_START || cmd == SNDRV_PCM_TRIGGER_PAUSE_RELEASE))
+		snd_hdac_ext_stream_clear(fb_hext_stream);
+
+	if (fb_hext_stream &&
+	    (cmd == SNDRV_PCM_TRIGGER_STOP || cmd == SNDRV_PCM_TRIGGER_SUSPEND ||
+	     cmd == SNDRV_PCM_TRIGGER_PAUSE_PUSH))
+		snd_hdac_ext_stream_clear(fb_hext_stream);
+
+	return ret;
 }
 
 static const struct snd_soc_dai_ops uaol_dai_ops = {
