@@ -351,8 +351,8 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 
 	ret = sof_pcm_hw_params(component, substream, &spcm->params[substream->stream]);
 	if (ret < 0) {
-		spcm_err(spcm, substream->stream,
-			 "failed to set hw_params after resume\n");
+		spcm_err_ratelimited(spcm, substream->stream,
+				     "failed to set hw_params after resume\n");
 		return ret;
 	}
 
