@@ -74,6 +74,96 @@ static struct snd_soc_usb *snd_soc_find_usb_ctx(struct device *dev)
 	return snd_soc_usb_ctx_lookup(dev);
 }
 
+/**
+ * struct snd_soc_usb_route_entry - one (device, pcm) pair offloadable for a
+ *				    direction
+ * @sdev: the device this pcm belongs to
+ * @pcm_idx: the USB SND PCM device index within @sdev
+ * @name: human readable name for this entry, borrowed from @sdev, valid only
+ *	 as long as @sdev stays in usb->available_devices
+ */
+struct snd_soc_usb_route_entry {
+	struct snd_soc_usb_device *sdev;
+	int pcm_idx;
+	const char *name;
+};
+
+/*
+ * Caller holds ctx_mutex. Walks usb->available_devices in order, treating
+ * every (device, pcm) pair for @direction across every device as one flat,
+ * positionally indexed list - this positional index is what the route
+ * kcontrol's enumerated item number means. Returns false once @index runs
+ * past the end.
+ */
+static bool snd_soc_usb_route_entry_at(struct snd_soc_usb *usb, int direction,
+				       unsigned int index,
+				       struct snd_soc_usb_route_entry *entry)
+{
+	struct snd_soc_usb_device *sdev;
+	unsigned int *pcm_idx;
+	const char * const *pcm_names;
+	int num, i;
+
+	list_for_each_entry(sdev, &usb->available_devices, available_node) {
+		if (direction == SNDRV_PCM_STREAM_PLAYBACK) {
+			num = sdev->num_playback;
+			pcm_idx = sdev->ppcm_idx;
+			pcm_names = sdev->ppcm_names;
+		} else {
+			num = sdev->num_capture;
+			pcm_idx = sdev->cpcm_idx;
+			pcm_names = sdev->cpcm_names;
+		}
+
+		for (i = 0; i < num; i++) {
+			if (index == 0) {
+				entry->sdev = sdev;
+				entry->pcm_idx = pcm_idx[i];
+				entry->name = (pcm_names && pcm_names[i]) ?
+					      pcm_names[i] : "USB PCM";
+				return true;
+			}
+			index--;
+		}
+	}
+
+	return false;
+}
+
+/*
+ * Caller holds ctx_mutex. The pair @route of @direction currently points at,
+ * and its position in the flat list: the one picked for it, or while nothing
+ * is picked (or the picked pair is gone) the one it gets by default. By
+ * default route N gets the Nth pair, wrapping around when there are fewer
+ * pairs than routes, so that the routes spread over what is connected. The
+ * default is worked out here on every call instead of being stored, it
+ * follows the devices as they come and go. Returns false when no pair is
+ * available.
+ */
+static bool snd_soc_usb_route_resolve(struct snd_soc_usb *usb, int direction,
+				      unsigned int route,
+				      struct snd_soc_usb_route_entry *entry,
+				      unsigned int *index)
+{
+	struct snd_soc_usb_route *r = &usb->routes[direction][route];
+	unsigned int i, count = 0;
+
+	for (i = 0; snd_soc_usb_route_entry_at(usb, direction, i, entry); i++) {
+		if (r->sdev && entry->sdev == r->sdev && entry->pcm_idx == r->pcm_idx) {
+			*index = i;
+			return true;
+		}
+		count++;
+	}
+
+	if (!count)
+		return false;
+
+	*index = route % count;
+
+	return snd_soc_usb_route_entry_at(usb, direction, *index, entry);
+}
+
 /* SOC USB sound kcontrols */
 /**
  * snd_soc_usb_setup_offload_jack() - Create USB offloading jack
@@ -147,6 +237,47 @@ exit:
 EXPORT_SYMBOL_GPL(snd_soc_usb_update_offload_route);
 
 /**
+ * snd_soc_usb_get_selected_device() - Get the device/pcm a route points at
+ * @usb: soc usb port
+ * @direction: SNDRV_PCM_STREAM_PLAYBACK or SNDRV_PCM_STREAM_CAPTURE
+ * @route: the route of @direction, below usb->num_routes[direction]
+ * @sdev: set to the routed device, or NULL if nothing is selected
+ * @pcm_index: set to the routed device's USB SND PCM device index
+ *
+ * A backend consults this at stream acquire time instead of picking a device
+ * itself, so the stream goes to whatever the route currently points at.
+ *
+ * Return: 0 on success (even if nothing is selected - check @sdev), negative
+ * on error.
+ */
+int snd_soc_usb_get_selected_device(struct snd_soc_usb *usb, int direction,
+				    unsigned int route,
+				    struct snd_soc_usb_device **sdev,
+				    int *pcm_index)
+{
+	struct snd_soc_usb_route_entry entry;
+	unsigned int index;
+
+	if (!usb || direction < 0 || direction > SNDRV_PCM_STREAM_LAST)
+		return -EINVAL;
+
+	if (route >= usb->num_routes[direction])
+		return -EINVAL;
+
+	guard(mutex)(&ctx_mutex);
+	if (snd_soc_usb_route_resolve(usb, direction, route, &entry, &index)) {
+		*sdev = entry.sdev;
+		*pcm_index = entry.pcm_idx;
+	} else {
+		*sdev = NULL;
+		*pcm_index = -1;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_usb_get_selected_device);
+
+/**
  * snd_soc_usb_find_priv_data() - Retrieve private data stored
  * @usbdev: device reference
  *
@@ -191,6 +322,30 @@ int snd_soc_usb_find_supported_format(int card_idx,
 }
 EXPORT_SYMBOL_GPL(snd_soc_usb_find_supported_format);
 
+/* Not under ctx_mutex: the port is not yet, or no longer, on usb_ctx_list */
+static int snd_soc_usb_alloc_routes(struct snd_soc_usb *usb, int direction,
+				    unsigned int num_routes)
+{
+	struct snd_soc_usb_route *routes;
+	unsigned int i;
+
+	if (!num_routes)
+		return -EINVAL;
+
+	routes = kcalloc(num_routes, sizeof(*routes), GFP_KERNEL);
+	if (!routes)
+		return -ENOMEM;
+
+	for (i = 0; i < num_routes; i++)
+		routes[i].pcm_idx = -1;
+
+	kfree(usb->routes[direction]);
+	usb->routes[direction] = routes;
+	usb->num_routes[direction] = num_routes;
+
+	return 0;
+}
+
 /**
  * snd_soc_usb_allocate_port() - allocate a SoC USB port for offloading support
  * @component: USB DPCM backend DAI component
@@ -200,13 +355,15 @@ EXPORT_SYMBOL_GPL(snd_soc_usb_find_supported_format);
  * different USB audio devices attached, in order to start audio offloading handled
  * by an ASoC entity.  USB device plug in/out events are signaled with a
  * notification, but don't directly impact the memory allocated for the SoC USB
- * port.
+ * port. The port starts out with one route per direction, see
+ * snd_soc_usb_set_num_routes().
  *
  */
 struct snd_soc_usb *snd_soc_usb_allocate_port(struct snd_soc_component *component,
 					      void *data)
 {
 	struct snd_soc_usb *usb;
+	int i;
 
 	usb = kzalloc_obj(*usb);
 	if (!usb)
@@ -215,9 +372,39 @@ struct snd_soc_usb *snd_soc_usb_allocate_port(struct snd_soc_component *componen
 	usb->component = component;
 	usb->priv_data = data;
 
+	INIT_LIST_HEAD(&usb->available_devices);
+	for (i = 0; i <= SNDRV_PCM_STREAM_LAST; i++) {
+		if (snd_soc_usb_alloc_routes(usb, i, 1)) {
+			snd_soc_usb_free_port(usb);
+			return ERR_PTR(-ENOMEM);
+		}
+	}
+
 	return usb;
 }
 EXPORT_SYMBOL_GPL(snd_soc_usb_allocate_port);
+
+/**
+ * snd_soc_usb_set_num_routes() - Set the number of offload routes of a direction
+ * @usb: allocated SoC USB port, not yet added with snd_soc_usb_add_port()
+ * @direction: SNDRV_PCM_STREAM_PLAYBACK or SNDRV_PCM_STREAM_CAPTURE
+ * @num_routes: streams the backend can offload at a time in @direction
+ *
+ * A backend running several offloaded streams in a direction at a time gets
+ * a route per stream, so that each can be pointed at a (device, pcm) pair of
+ * its own. To be called before the port is added.
+ *
+ * Return: 0 on success, negative on error.
+ */
+int snd_soc_usb_set_num_routes(struct snd_soc_usb *usb, int direction,
+			       unsigned int num_routes)
+{
+	if (!usb || direction < 0 || direction > SNDRV_PCM_STREAM_LAST)
+		return -EINVAL;
+
+	return snd_soc_usb_alloc_routes(usb, direction, num_routes);
+}
+EXPORT_SYMBOL_GPL(snd_soc_usb_set_num_routes);
 
 /**
  * snd_soc_usb_free_port() - free a SoC USB port used for offloading support
@@ -229,7 +416,11 @@ EXPORT_SYMBOL_GPL(snd_soc_usb_allocate_port);
  */
 void snd_soc_usb_free_port(struct snd_soc_usb *usb)
 {
+	int i;
+
 	snd_soc_usb_remove_port(usb);
+	for (i = 0; i <= SNDRV_PCM_STREAM_LAST; i++)
+		kfree(usb->routes[i]);
 	kfree(usb);
 }
 EXPORT_SYMBOL_GPL(snd_soc_usb_free_port);
@@ -275,6 +466,20 @@ void snd_soc_usb_remove_port(struct snd_soc_usb *usb)
 }
 EXPORT_SYMBOL_GPL(snd_soc_usb_remove_port);
 
+/* Caller holds ctx_mutex. Whether @sdev is on the port's available_devices. */
+static bool snd_soc_usb_device_listed(struct snd_soc_usb *ctx,
+				      struct snd_soc_usb_device *sdev)
+{
+	struct snd_soc_usb_device *entry;
+
+	list_for_each_entry(entry, &ctx->available_devices, available_node) {
+		if (entry == sdev)
+			return true;
+	}
+
+	return false;
+}
+
 /**
  * snd_soc_usb_connect() - Notification of USB device connection
  * @usbdev: USB bus device
@@ -284,26 +489,40 @@ EXPORT_SYMBOL_GPL(snd_soc_usb_remove_port);
  * handle how the DPCM backend selects, which device to enable USB offloading
  * on.
  *
+ * Return: 0 on success, -ENODEV if no port is registered for @usbdev (the
+ * device is then not listed and must not be reported as disconnected later),
+ * -EEXIST if @sdev is connected already.
  */
 int snd_soc_usb_connect(struct device *usbdev, struct snd_soc_usb_device *sdev)
 {
 	struct snd_soc_usb *ctx;
+	int ret = 0;
 
 	if (!usbdev)
 		return -ENODEV;
 
 	mutex_lock(&ctx_mutex);
 	ctx = snd_soc_find_usb_ctx(usbdev);
-	if (!ctx)
+	if (!ctx) {
+		ret = -ENODEV;
 		goto exit;
+	}
+
+	/* the device is linked into the list through itself, it can only be listed once */
+	if (WARN_ON(snd_soc_usb_device_listed(ctx, sdev))) {
+		ret = -EEXIST;
+		goto exit;
+	}
 
 	if (ctx->connection_status_cb)
 		ctx->connection_status_cb(ctx, sdev, true);
 
+	list_add_tail(&sdev->available_node, &ctx->available_devices);
+
 exit:
 	mutex_unlock(&ctx_mutex);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(snd_soc_usb_connect);
 
@@ -329,6 +548,12 @@ int snd_soc_usb_disconnect(struct device *usbdev, struct snd_soc_usb_device *sde
 
 	if (ctx->connection_status_cb)
 		ctx->connection_status_cb(ctx, sdev, false);
+
+	/* a device the platform never connected has nothing to take back */
+	if (!snd_soc_usb_device_listed(ctx, sdev))
+		goto exit;
+
+	list_del(&sdev->available_node);
 
 exit:
 	mutex_unlock(&ctx_mutex);

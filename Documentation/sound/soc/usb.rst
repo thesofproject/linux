@@ -57,6 +57,8 @@ Structures
   - ``connection_status_cb``: callback to notify connection events
   - ``update_offload_route_info``: callback to fetch selected USB sound card/PCM
     device
+  - ``available_devices``: the connected ``snd_soc_usb_device`` entries
+  - ``routes``, ``num_routes``: the offload routes of each direction
   - ``priv_data``: driver data
 
 The snd_soc_usb structure can be referenced using the ASoC platform card
@@ -73,9 +75,12 @@ registered with, so the caller passes that device.
   - ``chip_idx``: USB sound chip array index
   - ``cpcm_idx``: capture pcm device indexes associated with the USB sound device
   - ``ppcm_idx``: playback pcm device indexes associated with the USB sound device
+  - ``cpcm_names``, ``ppcm_names``: optional human readable names of the PCMs,
+    parallel to the index arrays
   - ``num_playback``: number of playback streams
   - ``num_capture``: number of capture streams
-  - ``list``: list head for the USB sound device list
+  - ``list``: list head for the backend's own use
+  - ``available_node``: list head on ``available_devices``, owned by SoC USB
 
 The struct snd_soc_usb_device is created by the USB sound offload driver.
 This will carry basic parameters/limitations that will be used to
@@ -109,9 +114,13 @@ Returns 0 on success, and -EOPNOTSUPP on failure.
 **snd_soc_usb_connect()** notifies the ASoC USB DPCM BE DAI link of a USB
 audio device detection.  This can be utilized in the BE DAI
 driver to keep track of available USB audio devices.  This is intended
-to be called by the USB offload driver residing in USB SND.
+to be called by the USB offload driver residing in USB SND.  The device is
+added to ``available_devices``.
 
-Returns 0 on success, negative error code on failure.
+Returns 0 on success, -ENODEV when no port is registered for ``usbdev`` (the
+device is then not listed and must not be reported as disconnected later),
+-EEXIST when ``sdev`` is connected already, negative error code on other
+failures.
 
 .. code-block:: rst
 
@@ -187,9 +196,51 @@ Returns 0 on success, negative otherwise.
   - ``data``: private data
 
 **snd_soc_usb_allocate_port()** allocates a SoC USB device and populates standard
-parameters that is used for further operations.
+parameters that is used for further operations.  The port starts out with one
+offload route per direction.
 
 Returns a pointer to struct soc_usb on success, negative on error.
+
+.. code-block:: rst
+
+	int snd_soc_usb_set_num_routes(struct snd_soc_usb *usb, int direction,
+				       unsigned int num_routes);
+..
+
+  - ``usb``: SoC USB device, not yet added with snd_soc_usb_add_port()
+  - ``direction``: SNDRV_PCM_STREAM_PLAYBACK or SNDRV_PCM_STREAM_CAPTURE
+  - ``num_routes``: streams the backend can offload at a time in ``direction``
+
+**snd_soc_usb_set_num_routes()** gives a backend which runs several offloaded
+streams of a direction at a time a route per stream, so that each can be
+pointed at a (device, PCM) pair of its own.  To be called before the port is
+added.
+
+Returns 0 on success, negative on error.
+
+.. code-block:: rst
+
+	int snd_soc_usb_get_selected_device(struct snd_soc_usb *usb, int direction,
+					    unsigned int route,
+					    struct snd_soc_usb_device **sdev,
+					    int *pcm_index);
+..
+
+  - ``usb``: SoC USB device
+  - ``direction``: SNDRV_PCM_STREAM_PLAYBACK or SNDRV_PCM_STREAM_CAPTURE
+  - ``route``: the route of ``direction``
+  - ``sdev``: set to the routed device, NULL if nothing is selected
+  - ``pcm_index``: set to the routed USB SND PCM device index
+
+**snd_soc_usb_get_selected_device()** returns the (device, PCM) pair a route
+currently points at, for the backend to consult when it starts a stream
+instead of picking a device itself. A route nothing was picked for follows its
+default: route N gets the Nth available pair of its direction, wrapping around
+when there are fewer pairs than routes, so that the routes spread over what is
+connected. The default is worked out on every query, it is not stored, so it
+moves as devices connect and disconnect.
+
+Returns 0 on success (also when nothing is selected), negative on error.
 
 .. code-block:: rst
 
