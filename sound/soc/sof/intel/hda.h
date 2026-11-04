@@ -22,6 +22,9 @@
 #include "shim.h"
 
 struct usb_offload_ctx;
+struct usb_device;
+struct usb_offload_usb_dev_info;
+struct snd_soc_usb;
 
 /* PCI registers */
 #define PCI_TCSEL			0x44
@@ -585,6 +588,17 @@ struct sof_intel_hda_dev {
 
 	/* USB audio offload context allocated by the offload library */
 	struct usb_offload_ctx *uaol;
+
+	/* ASoC USB port, non NULL while the UAOL DAI is bound into a card */
+	struct snd_soc_usb *uaol_usb;
+
+	/* offload capable USB audio devices */
+	struct list_head uaol_devices;
+	/* protects uaol_devices */
+	struct mutex uaol_mutex;
+
+	/* reports whether any offload capable device is connected */
+	struct snd_soc_jack uaol_jack;
 
 	/* FW clock config, 0:HPRO, 1:LPRO */
 	bool clk_config_lpro;
@@ -1166,6 +1180,9 @@ int hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
 void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops);
+int hda_uaol_notify_connect(struct device *dev, struct usb_device *udev,
+			    const struct usb_offload_usb_dev_info *id);
+int hda_uaol_notify_disconnect(struct device *dev, struct usb_device *udev);
 #else
 static inline void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev,
 					    struct snd_sof_dsp_ops *ops) { }
