@@ -27,6 +27,15 @@ enum tplg_device_id {
 	TPLG_DEVICE_MAX
 };
 
+#define MAX_FEATURE_VARIANTS 16
+
+static char *function_variant[MAX_FEATURE_VARIANTS];
+static int function_variant_count;
+module_param_array(function_variant, charp, &function_variant_count, 0444);
+MODULE_PARM_DESC(function_variant,
+		 "Function topology variants as basename:variant pairs separated by commas; "
+		 "variant is appended before .tplg");
+
 #define SDCA_DEVICE_MASK (BIT(TPLG_DEVICE_SDCA_JACK) | BIT(TPLG_DEVICE_SDCA_AMP) | \
 			  BIT(TPLG_DEVICE_SDCA_MIC))
 
@@ -70,7 +79,11 @@ static char *get_tplg_filename(struct device *dev, const char *prefix,
 			       const char *platform, const char *tplg_dev_name,
 			       int dai_link_id, int tplg_dev)
 {
-	char *filename = NULL;
+	char *variant_name __free(kfree) = NULL;
+	char *filename __free(kfree) = NULL;
+	char *tplg_filename;
+	int i;
+	int ret;
 
 	/*
 	 * The tplg file naming rule is sof-<platform>-<function>-id<BE id number>.tplg
@@ -83,16 +96,65 @@ static char *get_tplg_filename(struct device *dev, const char *prefix,
 	case TPLG_DEVICE_SSP_AMP:
 	case TPLG_DEVICE_SSP_BT:
 	case TPLG_DEVICE_SSP_HDMI_IN:
-		filename = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-%s-%s-id%d.tplg",
-					  prefix, platform, tplg_dev_name, dai_link_id);
+		filename = kasprintf(GFP_KERNEL, "%s/sof-%s-%s-id%d",
+				     prefix, platform, tplg_dev_name, dai_link_id);
+		if (function_variant_count)
+			variant_name = kasprintf(GFP_KERNEL, "sof-%s-%s-id%d", platform,
+					  tplg_dev_name, dai_link_id);
 		break;
 	default:
-		filename = devm_kasprintf(dev, GFP_KERNEL, "%s/sof-%s-id%d.tplg",
-					  prefix, tplg_dev_name, dai_link_id);
+		filename = kasprintf(GFP_KERNEL, "%s/sof-%s-id%d",
+				     prefix, tplg_dev_name, dai_link_id);
+		if (function_variant_count)
+			variant_name = kasprintf(GFP_KERNEL, "sof-%s-id%d", tplg_dev_name,
+					  dai_link_id);
 		break;
 	}
 
-	return filename;
+	if (!filename)
+		return NULL;
+
+	if (function_variant_count && !variant_name) {
+		dev_warn(dev, "Failed to allocate memory for variant_name, using %s.tplg\n", filename);
+		goto add_extension;
+	}
+
+	for (i = 0; i < function_variant_count; i++) {
+		const char *entry = function_variant[i];
+		const char *separator = strchr(entry, ':');
+
+		if (separator && separator != entry && separator[1]) {
+			if (separator - entry == strlen(variant_name) &&
+			    !strncmp(entry, variant_name, separator - entry)) {
+				const struct firmware *fw;
+				char *variant_filename;
+
+				variant_filename = devm_kasprintf(dev, GFP_KERNEL, "%s-%s.tplg",
+								  filename, separator + 1);
+				if (!variant_filename)
+					return NULL;
+				ret = firmware_request_nowarn(&fw, variant_filename, dev);
+				if (!ret) {
+					release_firmware(fw);
+					return variant_filename;
+				} else {
+					dev_dbg(dev,
+						"Variant topology %s not found, using %s.tplg\n",
+						variant_filename, filename);
+					devm_kfree(dev, variant_filename);
+				}
+				break;
+			}
+		}
+	}
+
+add_extension:
+	tplg_filename = devm_kasprintf(dev, GFP_KERNEL, "%s.tplg", filename);
+
+	if (!tplg_filename)
+		return NULL;
+
+	return tplg_filename;
 }
 
 static int get_dmic_tplg_dev(struct device *dev, int dmic_num,
