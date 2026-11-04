@@ -967,16 +967,10 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 	case XHCI_SIDEBAND_VENDOR:
 		break;
 	case XHCI_SIDEBAND_AUDIO:
-		if (xhci->quirks & XHCI_INTEL_HOST && udev->parent->parent) {
-			dev_dbg(&udev->dev, "Intel Audio sideband not supported behind hub\n");
-			return NULL;
-		}
-
 		if (!xhci_sideband_hw_capable(xhci)) {
 			dev_info(&udev->dev, "Host not sideband capable\n");
 			return NULL;
 		}
-
 		break;
 	default:
 		return NULL;
