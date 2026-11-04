@@ -501,6 +501,8 @@ static int uaol_get_resource_range(struct device *dev, int direction, bool feedb
 }
 
 static const struct usb_offload_ops uaol_callback = {
+	.notify_connect = hda_uaol_notify_connect,
+	.notify_disconnect = hda_uaol_notify_disconnect,
 	.get_resource_range = uaol_get_resource_range,
 };
 
@@ -527,6 +529,9 @@ static int hda_uaol_register(struct snd_sof_dev *sdev)
 		.async_playback_on_host = true,
 	};
 	struct usb_offload_ctx *uaol;
+
+	INIT_LIST_HEAD(&hdev->uaol_devices);
+	mutex_init(&hdev->uaol_mutex);
 
 	if (!hdev->uaol_link_count || !hda_uaol_available(sdev))
 		return 0;
