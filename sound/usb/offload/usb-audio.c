@@ -548,6 +548,140 @@ int usb_offload_release_stream(struct usb_offload_ctx *ctx,
 }
 EXPORT_SYMBOL_NS_GPL(usb_offload_release_stream, "USB_AUDIO_OFFLOAD");
 
+static bool usb_offload_fmt_usable(const struct audioformat *fp,
+				   struct snd_pcm_hw_params *params)
+{
+	struct snd_interval *c = hw_param_interval(params,
+						    SNDRV_PCM_HW_PARAM_CHANNELS);
+	struct snd_interval *r = hw_param_interval(params,
+						    SNDRV_PCM_HW_PARAM_RATE);
+	struct snd_mask fmts;
+
+	snd_mask_none(&fmts);
+	fmts.bits[0] = lower_32_bits(fp->formats);
+	fmts.bits[1] = upper_32_bits(fp->formats);
+	snd_mask_intersect(&fmts,
+			   hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT));
+	if (snd_mask_empty(&fmts))
+		return false;
+
+	if (fp->channels < c->min || fp->channels > c->max)
+		return false;
+
+	if (fp->rate_min > r->max ||
+	    (fp->rate_min == r->max && r->openmax))
+		return false;
+	if (fp->rate_max < r->min ||
+	    (fp->rate_max == r->min && r->openmin))
+		return false;
+
+	return true;
+}
+
+static void usb_offload_fmt_rates(const struct audioformat *fp,
+				  struct snd_pcm_hw_params *params,
+				  unsigned int *rmin, unsigned int *rmax)
+{
+	struct snd_interval *r = hw_param_interval(params,
+						    SNDRV_PCM_HW_PARAM_RATE);
+	unsigned int i;
+
+	if (!fp->rate_table || !fp->nr_rates) {
+		*rmin = min(*rmin, fp->rate_min);
+		*rmax = max(*rmax, fp->rate_max);
+		return;
+	}
+
+	for (i = 0; i < fp->nr_rates; i++) {
+		if (!snd_interval_test(r, fp->rate_table[i]))
+			continue;
+
+		*rmin = min(*rmin, fp->rate_table[i]);
+		*rmax = max(*rmax, fp->rate_table[i]);
+	}
+}
+
+int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
+				 struct usb_device *udev, int direction,
+				 int pcm_index, int var,
+				 struct snd_pcm_hw_params *params)
+{
+	unsigned int rmin = UINT_MAX, rmax = 0;
+	struct snd_usb_substream *subs;
+	struct usb_offload_dev *dev;
+	const struct audioformat *fp;
+	struct snd_usb_stream *as;
+	struct snd_interval t;
+	struct snd_mask m;
+	u64 formats = 0;
+
+	if (!ctx || !udev || !params)
+		return -EINVAL;
+
+	if (direction < 0 || direction > SNDRV_PCM_STREAM_LAST)
+		return -EINVAL;
+
+	if (var != SNDRV_PCM_HW_PARAM_RATE &&
+	    var != SNDRV_PCM_HW_PARAM_CHANNELS &&
+	    var != SNDRV_PCM_HW_PARAM_FORMAT)
+		return -EINVAL;
+
+	guard(mutex)(&usb_offload_ua_lock);
+
+	if (usb_offload_ua_ctx != ctx)
+		return 0;
+
+	dev = usb_offload_ua_find_udev(udev);
+	if (!dev || !dev->connected)
+		return 0;
+
+	list_for_each_entry(as, &dev->chip->pcm_list, list) {
+		if (pcm_index >= 0 &&
+		    (!as->pcm || as->pcm->device != pcm_index))
+			continue;
+
+		subs = &as->substream[direction];
+		if (!subs->ep_num)
+			continue;
+
+		list_for_each_entry(fp, &subs->fmt_list, list) {
+			if (!usb_offload_fmt_usable(fp, params))
+				continue;
+
+			switch (var) {
+			case SNDRV_PCM_HW_PARAM_RATE:
+				usb_offload_fmt_rates(fp, params, &rmin, &rmax);
+				break;
+			case SNDRV_PCM_HW_PARAM_CHANNELS:
+				rmin = min(rmin, fp->channels);
+				rmax = max(rmax, fp->channels);
+				break;
+			case SNDRV_PCM_HW_PARAM_FORMAT:
+				formats |= fp->formats;
+				break;
+			}
+		}
+	}
+
+	if (var == SNDRV_PCM_HW_PARAM_FORMAT) {
+		snd_mask_none(&m);
+		m.bits[0] = lower_32_bits(formats);
+		m.bits[1] = upper_32_bits(formats);
+
+		return snd_mask_refine(hw_param_mask(params, var), &m);
+	}
+
+	if (rmin > rmax) {
+		hw_param_interval(params, var)->empty = 1;
+		return -EINVAL;
+	}
+
+	t = (struct snd_interval){ .min = rmin, .max = rmax, .integer = 1 };
+
+	return snd_interval_refine(hw_param_interval(params, var), &t);
+}
+EXPORT_SYMBOL_NS_GPL(usb_offload_refine_hw_params, "USB_AUDIO_OFFLOAD");
+
 /* Tear down one record. Caller holds usb_offload_ua_lock. */
 static void usb_offload_ua_teardown(struct usb_offload_dev *dev)
 {
