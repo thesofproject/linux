@@ -180,4 +180,15 @@ int usb_offload_release_stream(struct usb_offload_ctx *ctx,
 			       struct usb_device *udev, int direction,
 			       int pcm_index);
 
+/*
+ * Narrow one of SNDRV_PCM_HW_PARAM_RATE, _CHANNELS or _FORMAT (@var) in
+ * @params to what the selected USB PCM of @udev can run at, considering the
+ * other two parameters, as a hardware rule of the host's PCM would. The
+ * selection is the same as for usb_offload_acquire_stream().
+ */
+int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
+				 struct usb_device *udev, int direction,
+				 int pcm_index, int var,
+				 struct snd_pcm_hw_params *params);
+
 #endif /* __SOUND_USB_OFFLOAD_H */
