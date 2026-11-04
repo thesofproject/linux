@@ -48,6 +48,8 @@ struct snd_soc_usb_device {
  * @sdev: the device picked for the route, NULL while nothing is picked and the
  *	  route follows its default
  * @pcm_idx: the PCM index of @sdev picked, -1 while nothing is picked
+ * @kctl: the enumerated route kcontrol, once created by
+ *	  snd_soc_usb_setup_offload_route_ctl()
  *
  * A backend able to run several offloaded streams in a direction at a time
  * has a route per stream. Two routes may point at the same pair; only one of
@@ -56,6 +58,7 @@ struct snd_soc_usb_device {
 struct snd_soc_usb_route {
 	struct snd_soc_usb_device *sdev;
 	int pcm_idx;
+	struct snd_kcontrol *kctl;
 };
 
 /**
@@ -69,6 +72,10 @@ struct snd_soc_usb_route {
  *			       an array used for a kcontrol output for either
  *			       the card or pcm index.  "path" determines the
  *			       which entry to look for. (ie mapped card or pcm)
+ * @is_route_busy: callback reporting whether the backend already has a
+ *		   stream open on route @route of the given direction. Consulted
+ *		   before a route change is allowed, so a link a stream is
+ *		   actively using is never switched out from under it.
  * @available_devices: list of currently connected snd_soc_usb_device entries
  * @routes: the routes of each direction, @num_routes of them
  * @num_routes: number of routes per direction, one unless the backend set
@@ -85,6 +92,8 @@ struct snd_soc_usb {
 					 int card, int pcm, int direction,
 					 enum snd_soc_usb_kctl path,
 					 long *route);
+	bool (*is_route_busy)(struct snd_soc_usb *usb, int direction,
+			      unsigned int route);
 
 	struct list_head available_devices;
 	struct snd_soc_usb_route *routes[SNDRV_PCM_STREAM_LAST + 1];
@@ -116,6 +125,8 @@ int snd_soc_usb_set_num_routes(struct snd_soc_usb *usb, int direction,
 void snd_soc_usb_add_port(struct snd_soc_usb *usb);
 void snd_soc_usb_remove_port(struct snd_soc_usb *usb);
 
+int snd_soc_usb_setup_offload_route_ctl(struct snd_soc_component *component,
+					struct snd_soc_usb *usb);
 int snd_soc_usb_get_selected_device(struct snd_soc_usb *usb, int direction,
 				    unsigned int route,
 				    struct snd_soc_usb_device **sdev,
@@ -179,6 +190,12 @@ static inline void snd_soc_usb_add_port(struct snd_soc_usb *usb)
 
 static inline void snd_soc_usb_remove_port(struct snd_soc_usb *usb)
 { }
+
+static inline int snd_soc_usb_setup_offload_route_ctl(struct snd_soc_component *component,
+						      struct snd_soc_usb *usb)
+{
+	return 0;
+}
 
 static inline int snd_soc_usb_get_selected_device(struct snd_soc_usb *usb, int direction,
 						  unsigned int route,

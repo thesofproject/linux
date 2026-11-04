@@ -245,7 +245,8 @@ EXPORT_SYMBOL_GPL(snd_soc_usb_update_offload_route);
  * @pcm_index: set to the routed device's USB SND PCM device index
  *
  * A backend consults this at stream acquire time instead of picking a device
- * itself, so the stream goes to whatever the route currently points at.
+ * itself, so the stream goes to whatever the route kcontrol (or the
+ * connect-time default) currently points at.
  *
  * Return: 0 on success (even if nothing is selected - check @sdev), negative
  * on error.
@@ -391,8 +392,9 @@ EXPORT_SYMBOL_GPL(snd_soc_usb_allocate_port);
  * @num_routes: streams the backend can offload at a time in @direction
  *
  * A backend running several offloaded streams in a direction at a time gets
- * a route per stream, so that each can be pointed at a (device, pcm) pair of
- * its own. To be called before the port is added.
+ * a route, and with snd_soc_usb_setup_offload_route_ctl() a kcontrol, per
+ * stream, so that each can be pointed at a (device, pcm) pair of its own.
+ * To be called before the route kcontrols are created and the port is added.
  *
  * Return: 0 on success, negative on error.
  */
@@ -537,6 +539,7 @@ EXPORT_SYMBOL_GPL(snd_soc_usb_connect);
 int snd_soc_usb_disconnect(struct device *usbdev, struct snd_soc_usb_device *sdev)
 {
 	struct snd_soc_usb *ctx;
+	int direction;
 
 	if (!usbdev)
 		return -ENODEV;
@@ -555,12 +558,182 @@ int snd_soc_usb_disconnect(struct device *usbdev, struct snd_soc_usb_device *sde
 
 	list_del(&sdev->available_node);
 
+	/* a route picked for the device falls back to its default */
+	for (direction = 0; direction <= SNDRV_PCM_STREAM_LAST; direction++) {
+		unsigned int route;
+
+		for (route = 0; route < ctx->num_routes[direction]; route++) {
+			struct snd_soc_usb_route *r = &ctx->routes[direction][route];
+
+			if (r->sdev == sdev) {
+				r->sdev = NULL;
+				r->pcm_idx = -1;
+			}
+		}
+	}
+
 exit:
 	mutex_unlock(&ctx_mutex);
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_soc_usb_disconnect);
+
+/* The kcontrol's private_value carries the direction and the route */
+#define SND_SOC_USB_KCTL_VALUE(direction, route)	((direction) | ((route) << 8))
+#define SND_SOC_USB_KCTL_DIRECTION(value)		((value) & 0xff)
+#define SND_SOC_USB_KCTL_ROUTE(value)			((value) >> 8)
+
+static int snd_soc_usb_route_info(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_info *uinfo)
+{
+	struct snd_soc_usb *usb = snd_kcontrol_chip(kcontrol);
+	int direction = SND_SOC_USB_KCTL_DIRECTION(kcontrol->private_value);
+	struct snd_soc_usb_route_entry entry;
+	unsigned int count;
+
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+
+	guard(mutex)(&ctx_mutex);
+
+	for (count = 0; snd_soc_usb_route_entry_at(usb, direction, count, &entry); count++)
+		;
+
+	/* with no route available the only item is "None" */
+	if (!count) {
+		uinfo->value.enumerated.items = 1;
+		uinfo->value.enumerated.item = 0;
+		strscpy(uinfo->value.enumerated.name, "None",
+			sizeof(uinfo->value.enumerated.name));
+		return 0;
+	}
+
+	uinfo->value.enumerated.items = count;
+
+	if (uinfo->value.enumerated.item >= count)
+		uinfo->value.enumerated.item = count - 1;
+
+	snd_soc_usb_route_entry_at(usb, direction, uinfo->value.enumerated.item, &entry);
+	strscpy(uinfo->value.enumerated.name, entry.name,
+		sizeof(uinfo->value.enumerated.name));
+
+	return 0;
+}
+
+static int snd_soc_usb_route_get(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_usb *usb = snd_kcontrol_chip(kcontrol);
+	int direction = SND_SOC_USB_KCTL_DIRECTION(kcontrol->private_value);
+	unsigned int route = SND_SOC_USB_KCTL_ROUTE(kcontrol->private_value);
+	struct snd_soc_usb_route_entry entry;
+	unsigned int index = 0;
+
+	scoped_guard(mutex, &ctx_mutex) {
+		/* item 0 is "None" when nothing is available */
+		if (!snd_soc_usb_route_resolve(usb, direction, route, &entry, &index))
+			index = 0;
+	}
+
+	ucontrol->value.enumerated.item[0] = index;
+
+	return 0;
+}
+
+static int snd_soc_usb_route_put(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_usb *usb = snd_kcontrol_chip(kcontrol);
+	int direction = SND_SOC_USB_KCTL_DIRECTION(kcontrol->private_value);
+	unsigned int route = SND_SOC_USB_KCTL_ROUTE(kcontrol->private_value);
+	unsigned int requested = ucontrol->value.enumerated.item[0];
+	struct snd_soc_usb_route *r = &usb->routes[direction][route];
+	struct snd_soc_usb_route_entry entry, current_entry;
+	unsigned int current_index;
+	bool changed;
+
+	guard(mutex)(&ctx_mutex);
+
+	/* item 0 is "None" when nothing is available, accept it as a no-op */
+	if (!snd_soc_usb_route_entry_at(usb, direction, requested, &entry))
+		return requested ? -EINVAL : 0;
+
+	changed = !snd_soc_usb_route_resolve(usb, direction, route, &current_entry,
+					     &current_index) ||
+		  current_index != requested;
+
+	if (changed && usb->is_route_busy && usb->is_route_busy(usb, direction, route))
+		return -EBUSY;
+
+	/* picking what the route points at already pins it there */
+	r->sdev = entry.sdev;
+	r->pcm_idx = entry.pcm_idx;
+
+	return changed;
+}
+
+static const struct snd_kcontrol_new snd_soc_usb_route_ctl_template = {
+	.iface = SNDRV_CTL_ELEM_IFACE_CARD,
+	.info = snd_soc_usb_route_info,
+	.get = snd_soc_usb_route_get,
+	.put = snd_soc_usb_route_put,
+};
+
+/**
+ * snd_soc_usb_setup_offload_route_ctl() - Create the offload route kcontrols
+ * @component: USB DPCM backend DAI component
+ * @usb: soc usb port to attach the controls to
+ *
+ * Creates one writable enumerated kcontrol per route of each direction,
+ * "USB Offload 0 Playback Route", "USB Offload 1 Playback Route", "USB Offload
+ * 0 Capture Route" and so on, letting userspace pick which of the currently
+ * connected devices' PCMs the offloaded stream of that route is routed to.
+ * The number is the route and matches the backend's ordinal, whatever the
+ * number of routes a direction has. The item list is rebuilt live from
+ * usb->available_devices on every query, so it always reflects what is
+ * currently connected; with nothing connected the single item is "None".
+ *
+ * Return: 0 on success, negative on error.
+ */
+int snd_soc_usb_setup_offload_route_ctl(struct snd_soc_component *component,
+					struct snd_soc_usb *usb)
+{
+	static const char * const names[] = {
+		[SNDRV_PCM_STREAM_PLAYBACK] = "Playback",
+		[SNDRV_PCM_STREAM_CAPTURE]  = "Capture",
+	};
+	int direction, ret;
+
+	for (direction = 0; direction <= SNDRV_PCM_STREAM_LAST; direction++) {
+		unsigned int route;
+
+		for (route = 0; route < usb->num_routes[direction]; route++) {
+			struct snd_kcontrol_new kctl = snd_soc_usb_route_ctl_template;
+			char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+			struct snd_kcontrol *kcontrol;
+
+			snprintf(name, sizeof(name), "USB Offload %u %s Route",
+				 route, names[direction]);
+
+			kctl.name = name;
+			kctl.private_value = SND_SOC_USB_KCTL_VALUE(direction, route);
+
+			kcontrol = snd_ctl_new1(&kctl, usb);
+			if (!kcontrol)
+				return -ENOMEM;
+
+			ret = snd_ctl_add(component->card->snd_card, kcontrol);
+			if (ret < 0)
+				return ret;
+
+			usb->routes[direction][route].kctl = kcontrol;
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_soc_usb_setup_offload_route_ctl);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SoC USB driver for offloading");

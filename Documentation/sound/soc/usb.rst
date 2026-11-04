@@ -57,8 +57,11 @@ Structures
   - ``connection_status_cb``: callback to notify connection events
   - ``update_offload_route_info``: callback to fetch selected USB sound card/PCM
     device
+  - ``is_route_busy``: callback reporting whether the backend has a stream open
+    on a route, consulted before a route selection is changed
   - ``available_devices``: the connected ``snd_soc_usb_device`` entries
-  - ``routes``, ``num_routes``: the offload routes of each direction
+  - ``routes``, ``num_routes``: the offload routes of each direction, see
+    `Platform Card Route Kcontrols`_
   - ``priv_data``: driver data
 
 The snd_soc_usb structure can be referenced using the ASoC platform card
@@ -76,7 +79,7 @@ registered with, so the caller passes that device.
   - ``cpcm_idx``: capture pcm device indexes associated with the USB sound device
   - ``ppcm_idx``: playback pcm device indexes associated with the USB sound device
   - ``cpcm_names``, ``ppcm_names``: optional human readable names of the PCMs,
-    parallel to the index arrays
+    parallel to the index arrays, shown as the items of the route kcontrols
   - ``num_playback``: number of playback streams
   - ``num_capture``: number of capture streams
   - ``list``: list head for the backend's own use
@@ -115,7 +118,8 @@ Returns 0 on success, and -EOPNOTSUPP on failure.
 audio device detection.  This can be utilized in the BE DAI
 driver to keep track of available USB audio devices.  This is intended
 to be called by the USB offload driver residing in USB SND.  The device is
-added to ``available_devices``.
+added to ``available_devices``. A route nothing was picked for follows its
+default pair, see the selection rules below.
 
 Returns 0 on success, -ENODEV when no port is registered for ``usbdev`` (the
 device is then not listed and must not be reported as disconnected later),
@@ -132,7 +136,8 @@ failures.
 
 **snd_soc_usb_disconnect()** notifies the ASoC USB DPCM BE DAI link of a USB
 audio device removal.  This is intended to be called by the USB offload
-driver that resides in USB SND.
+driver that resides in USB SND.  Every route that was picked for the device
+goes back to its default pair.
 
 .. code-block:: rst
 
@@ -212,9 +217,25 @@ Returns a pointer to struct soc_usb on success, negative on error.
   - ``num_routes``: streams the backend can offload at a time in ``direction``
 
 **snd_soc_usb_set_num_routes()** gives a backend which runs several offloaded
-streams of a direction at a time a route per stream, so that each can be
-pointed at a (device, PCM) pair of its own.  To be called before the port is
-added.
+streams of a direction at a time a route, and with
+snd_soc_usb_setup_offload_route_ctl() a kcontrol, per stream, so that each can
+be pointed at a (device, PCM) pair of its own.  To be called before the route
+kcontrols are created and the port is added.
+
+Returns 0 on success, negative on error.
+
+.. code-block:: rst
+
+	int snd_soc_usb_setup_offload_route_ctl(struct snd_soc_component *component,
+						struct snd_soc_usb *usb);
+..
+
+  - ``component``: DPCM BE DAI link component
+  - ``usb``: SoC USB device to attach the controls to
+
+**snd_soc_usb_setup_offload_route_ctl()** creates one writable enumerated
+kcontrol per route of each direction on the platform sound card, see
+`Platform Card Route Kcontrols`_.
 
 Returns 0 on success, negative on error.
 
@@ -234,11 +255,7 @@ Returns 0 on success, negative on error.
 
 **snd_soc_usb_get_selected_device()** returns the (device, PCM) pair a route
 currently points at, for the backend to consult when it starts a stream
-instead of picking a device itself. A route nothing was picked for follows its
-default: route N gets the Nth available pair of its direction, wrapping around
-when there are fewer pairs than routes, so that the routes spread over what is
-connected. The default is worked out on every query, it is not stored, so it
-moves as devices connect and disconnect.
+instead of picking a device itself.
 
 Returns 0 on success (also when nothing is selected), negative on error.
 
@@ -393,9 +410,17 @@ USB Offload Related Kcontrols
 Details
 -------
 A set of kcontrols can be utilized by applications to help select the proper sound
-devices to enable USB audio offloading.  SoC USB exposes the get_offload_dev()
-callback that designs can use to ensure that the proper indices are returned to the
-application.
+devices to enable USB audio offloading.  Two models are available: read-only
+controls on the USB sound card reporting where a USB PCM is offloaded to
+(`USB Sound Card Route Kcontrols`_), and writable controls on the platform
+sound card selecting which USB device an offloaded stream goes to
+(`Platform Card Route Kcontrols`_).  A backend uses the one that fits how
+its DSP is driven; the two can coexist.
+
+USB Sound Card Route Kcontrols
+------------------------------
+SoC USB exposes the get_offload_dev() callback that designs can use to ensure
+that the proper indices are returned to the application.
 
 Implementation
 --------------
@@ -509,6 +534,48 @@ execute the registered function calls to the DPCM BE DAI link.
 
 	ret = snd_soc_usb_add_port(usb);
 ..
+
+Platform Card Route Kcontrols
+-----------------------------
+A backend whose offloaded PCMs exist on the platform card whether or not a
+USB device is connected, and which can offload any connected device, lets
+the user choose the device instead: it has a *route* per stream it can
+offload at a time in a direction (see snd_soc_usb_set_num_routes()), and
+snd_soc_usb_setup_offload_route_ctl() creates a writable enumerated kcontrol
+per route on the platform card:
+
+	``USB Offload <n> Playback Route``
+
+	``USB Offload <n> Capture Route``
+
+``<n>`` is the route and is always present, also with a single route per
+direction, so the names do not depend on how many streams a backend runs.
+A backend pairs its PCMs with the controls by naming them the same way,
+``USB Offload <n>``.
+
+The items of a control are every (device, PCM) pair of the direction over
+all connected devices, in connection order and then PCM order, named by the
+backend through ``ppcm_names``/``cpcm_names``; a name should start with the
+USB card and PCM numbers, ``<card>,<pcm>``, so that a sound server can match
+the device it targets.  The item list is rebuilt on every query, so it
+always reflects what is connected; with nothing connected the single item is
+``None``.
+
+Selection rules:
+
+  - A route nothing was picked for follows its default: route N gets the Nth
+    available pair of its direction, wrapping around when there are fewer
+    pairs than routes, so that the routes spread over what is connected.
+    The default is worked out on every query, it is not stored, so it moves
+    as devices connect and disconnect.
+  - A write picks a pair for the route. Picking the pair the route already
+    points at pins it there.
+  - On disconnect, routes picked for the device go back to their default.
+  - A write is refused with ``-EBUSY`` while the backend reports the route
+    busy through ``is_route_busy()``, i.e. while a stream is open on it.
+    Writing the current selection is a no-op.  A selection by itself claims
+    no USB or DSP resource; the backend reads it with
+    snd_soc_usb_get_selected_device() when a stream starts.
 
 Existing USB Sound Kcontrol
 ---------------------------
