@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
 snd-sof-imx8-y := imx8.o
+snd-sof-imx8-$(CONFIG_SND_SOC_SOF_IMX_PROBES) += imx-probes.o
 snd-sof-imx9-y := imx9.o
 
 snd-sof-imx-common-y := imx-common.o
