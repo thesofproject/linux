@@ -313,7 +313,9 @@ static int usb_offload_try_offload(struct usb_device *udev,
  * @direction:		SNDRV_PCM_STREAM_* of the stream.
  * @pcm_index:		USB SND PCM device number of @subs.
  * @resource:		sideband resource ID of the data endpoint.
+ * @fb_resource:	sideband resource ID of the feedback endpoint, 0 if none.
  * @data_host_ep:	the data endpoint.
+ * @feedback_host_ep:	the feedback endpoint, NULL if none.
  *
  * A device can have several PCMs per direction, and each can be offloaded
  * on a stream of its own at the same time.
@@ -324,7 +326,9 @@ struct usb_offload_ua_stream {
 	int				direction;
 	int				pcm_index;
 	u8				resource;
+	u8				fb_resource;
 	struct usb_host_endpoint	*data_host_ep;
+	struct usb_host_endpoint	*feedback_host_ep;
 };
 
 /**
@@ -463,13 +467,17 @@ static void usb_offload_ua_stop_stream(struct usb_offload_dev *dev,
 }
 
 /*
- * Detach the stream's endpoint from its sideband resource, give the
+ * Detach the stream's endpoints from their sideband resources, give the
  * substream back to the host and drop the record. Caller holds
  * usb_offload_ua_lock.
  */
 static void usb_offload_ua_release(struct usb_offload_dev *dev,
 				   struct usb_offload_ua_stream *stream)
 {
+	if (stream->feedback_host_ep) {
+		xhci_sideband_remove_endpoint(dev->sb, stream->feedback_host_ep);
+		xhci_sideband_free_resource_id(dev->sb, stream->fb_resource);
+	}
 	if (stream->data_host_ep) {
 		xhci_sideband_remove_endpoint(dev->sb, stream->data_host_ep);
 		xhci_sideband_free_resource_id(dev->sb, stream->resource);
@@ -515,11 +523,14 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 {
 	const struct audioformat *format;
 	struct usb_host_endpoint *host_ep;
+	struct usb_host_endpoint *fb_host_ep = NULL;
 	struct usb_offload_ua_stream *stream;
 	struct snd_usb_substream *subs;
 	struct usb_offload_dev *dev;
 	struct xhci_sideband_ep_properties ep_prop;
+	struct xhci_sideband_ep_properties fb_ep_prop;
 	struct snd_usb_stream *as;
+	int fb_res_id = 0;
 	u8 interval;
 	int res_id;
 	int ret;
@@ -598,9 +609,42 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	if (ret)
 		goto err_free_data;
 
+	/*
+	 * Implicit feedback reuses another interface's capture data endpoint
+	 * as a sync source; it carries audio samples, not a feedback value
+	 * the DSP can interpret, so only an explicit sync endpoint is claimed.
+	 * usb-audio flags the data endpoint, which syncs with the implicit
+	 * feedback, not the capture endpoint it syncs to.
+	 */
+	if (subs->sync_endpoint && !subs->data_endpoint->implicit_fb_sync) {
+		fb_host_ep = usb_pipe_endpoint(udev, subs->sync_endpoint->pipe);
+		if (!fb_host_ep) {
+			ret = -ENXIO;
+			goto err_remove_data;
+		}
+
+		ret = usb_offload_ua_alloc_resource(dev, fb_host_ep, direction, true);
+		if (ret < 0)
+			goto err_remove_data;
+		fb_res_id = ret;
+
+		ret = xhci_sideband_add_endpoint(dev->sb, fb_host_ep);
+		if (ret)
+			goto err_free_feedback;
+	} else {
+		fb_host_ep = NULL;
+	}
+
 	ret = xhci_sideband_get_ep_properties(dev->sb, host_ep, &ep_prop);
 	if (ret)
-		goto err_remove_data;
+		goto err_remove_feedback;
+
+	if (fb_host_ep) {
+		ret = xhci_sideband_get_ep_properties(dev->sb, fb_host_ep,
+						      &fb_ep_prop);
+		if (ret)
+			goto err_remove_feedback;
+	}
 
 	memset(hw, 0, sizeof(*hw));
 	hw->pcm_index = stream->pcm_index;
@@ -610,7 +654,22 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	usb_offload_fill_ep(&hw->data, host_ep);
 	hw->data.resource = ep_prop.res_id;
 	stream->resource = res_id;
+	stream->fb_resource = fb_res_id;
 	stream->data_host_ep = host_ep;
+	stream->feedback_host_ep = fb_host_ep;
+	if (fb_host_ep) {
+		usb_offload_fill_ep(&hw->feedback, fb_host_ep);
+		hw->feedback.resource = fb_ep_prop.res_id;
+		/*
+		 * The period the feedback value is refreshed at, the one
+		 * snd-usb-audio polls its sync endpoint at: bRefresh of a UAC1
+		 * endpoint, otherwise 2 frames at full speed and bInterval at
+		 * high speed, 1 ms when that is not usable either. It is kept
+		 * as log2 in syncinterval, here in bInterval form.
+		 */
+		hw->feedback.interval = subs->sync_endpoint->syncinterval + 1;
+		hw->has_feedback = true;
+	}
 	hw->split = ep_prop.tt;
 	/*
 	 * The root port's speed is what the link runs at, also for a full
@@ -635,6 +694,12 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 
 	return 0;
 
+err_remove_feedback:
+	if (fb_host_ep)
+		xhci_sideband_remove_endpoint(dev->sb, fb_host_ep);
+err_free_feedback:
+	if (fb_host_ep)
+		xhci_sideband_free_resource_id(dev->sb, fb_res_id);
 err_remove_data:
 	xhci_sideband_remove_endpoint(dev->sb, host_ep);
 err_free_data:
