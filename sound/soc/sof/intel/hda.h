@@ -423,18 +423,25 @@ struct usb_offload_ctx;
 #define SOF_SKL_NUM_DAIS_NOCODEC	9
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
-#define SOF_SKL_NUM_DAIS		16
+#define SOF_SKL_NUM_DAIS_BASE		16
 #else
-#define SOF_SKL_NUM_DAIS		SOF_SKL_NUM_DAIS_NOCODEC
+#define SOF_SKL_NUM_DAIS_BASE		SOF_SKL_NUM_DAIS_NOCODEC
 #endif
 
 /*
- * A UAOL link has a stream per direction for each one it can run
- * concurrently; how many of these the machine driver uses is reported in the
- * mach_params, with these as the ceiling.
+ * The UAOL DAIs are the last entries of skl_dai[]. A link has a stream per
+ * direction for each one it can run concurrently; how many of these the
+ * machine driver uses is reported in the mach_params.
  */
 #define SOF_UAOL_MAX_PLAYBACK_STREAMS	2
 #define SOF_UAOL_MAX_CAPTURE_STREAMS	2
+#define SOF_UAOL_NUM_DAIS		(SOF_UAOL_MAX_PLAYBACK_STREAMS + \
+					 SOF_UAOL_MAX_CAPTURE_STREAMS)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
+#define SOF_SKL_NUM_DAIS		(SOF_SKL_NUM_DAIS_BASE + SOF_UAOL_NUM_DAIS)
+#else
+#define SOF_SKL_NUM_DAIS		SOF_SKL_NUM_DAIS_BASE
+#endif
 
 /* Intel HD Audio SRAM Window 0*/
 #define HDA_DSP_SRAM_REG_ROM_STATUS_SKL	0x8000
@@ -1127,5 +1134,41 @@ static inline struct snd_sof_dev *widget_to_sdev(struct snd_soc_dapm_widget *w)
 
 	return snd_soc_component_get_drvdata(component);
 }
+
+static inline struct snd_sof_dev *dai_to_sdev(struct snd_pcm_substream *substream,
+					      struct snd_soc_dai *cpu_dai)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
+
+	return widget_to_sdev(w);
+}
+
+static inline struct sof_ipc4_copier *widget_to_copier(struct snd_soc_dapm_widget *w)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dai *sdai = swidget->private;
+
+	return sdai->private;
+}
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_LINK)
+/* the DAI callbacks the UAOL DAI builds on, shared with the SSP and DMIC DAIs */
+int non_hda_dai_hw_params(struct snd_pcm_substream *substream,
+			  struct snd_pcm_hw_params *params,
+			  struct snd_soc_dai *cpu_dai);
+int non_hda_dai_prepare(struct snd_pcm_substream *substream,
+			struct snd_soc_dai *cpu_dai);
+int hda_dai_hw_free(struct snd_pcm_substream *substream,
+		    struct snd_soc_dai *cpu_dai);
+int hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
+		    struct snd_soc_dai *dai);
+#endif
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
+void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops);
+#else
+static inline void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev,
+					    struct snd_sof_dsp_ops *ops) { }
+#endif
 
 #endif
