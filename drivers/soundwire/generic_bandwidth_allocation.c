@@ -190,7 +190,8 @@ static void sdw_compute_master_ports(struct sdw_master_runtime *m_rt,
 }
 
 static void _sdw_compute_port_params(struct sdw_bus *bus,
-				     struct sdw_group_params *params, int count)
+				     struct sdw_group_params *params, int count,
+				     struct sdw_stream_runtime *stream, bool prepare)
 {
 	struct sdw_master_runtime *m_rt;
 	int port_bo, i, l;
@@ -211,9 +212,12 @@ static void _sdw_compute_port_params(struct sdw_bus *bus,
 				/*
 				 * Only runtimes with CONFIGURED, PREPARED, ENABLED, and DISABLED
 				 * states should be included in the bandwidth calculation.
+				 * Include the current stream during prepare even if it is
+				 * still in the DEPREPARED state.
 				 */
-				if (m_rt->stream->state > SDW_STREAM_DISABLED ||
-				    m_rt->stream->state < SDW_STREAM_CONFIGURED)
+				if (!(prepare && m_rt->stream == stream) &&
+				    (m_rt->stream->state > SDW_STREAM_DISABLED ||
+				     m_rt->stream->state < SDW_STREAM_CONFIGURED))
 					continue;
 				sdw_compute_master_ports(m_rt, &params[i], &port_bo, hstop);
 			}
@@ -226,7 +230,7 @@ static void _sdw_compute_port_params(struct sdw_bus *bus,
 static int sdw_compute_group_params(struct sdw_bus *bus,
 				    struct sdw_stream_runtime *stream,
 				    struct sdw_group_params *params,
-				    struct sdw_group *group)
+				    struct sdw_group *group, bool prepare)
 {
 	struct sdw_master_runtime *m_rt;
 	struct sdw_port_runtime *p_rt;
@@ -242,20 +246,16 @@ static int sdw_compute_group_params(struct sdw_bus *bus,
 	}
 
 	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
-		if (m_rt->stream == stream) {
-			/* Only runtime during prepare should be added */
-			if (stream->state != SDW_STREAM_CONFIGURED)
-				continue;
-		} else {
-			/*
-			 * Include runtimes with running (ENABLED/PREPARED state) and
-			 * paused (DISABLED state) streams
-			 */
-			if (m_rt->stream->state != SDW_STREAM_ENABLED &&
-			    m_rt->stream->state != SDW_STREAM_PREPARED &&
-			    m_rt->stream->state != SDW_STREAM_DISABLED)
-				continue;
-		}
+		/*
+		 * Include the current stream during prepare even if it is still
+		 * DEPREPARED. Otherwise, include only other running or paused streams.
+		 */
+		if (!(prepare && m_rt->stream == stream) &&
+		    (m_rt->stream == stream ||
+		     (m_rt->stream->state != SDW_STREAM_ENABLED &&
+		      m_rt->stream->state != SDW_STREAM_PREPARED &&
+		      m_rt->stream->state != SDW_STREAM_DISABLED)))
+			continue;
 		list_for_each_entry(p_rt, &m_rt->port_list, port_node) {
 			rate = m_rt->stream->params.rate;
 			bps = m_rt->stream->params.bps;
@@ -333,7 +333,8 @@ static int sdw_add_element_group_count(struct sdw_group *group,
 }
 
 static int sdw_get_group_count(struct sdw_bus *bus,
-			       struct sdw_group *group)
+			       struct sdw_group *group,
+			       struct sdw_stream_runtime *stream, bool prepare)
 {
 	struct sdw_master_runtime *m_rt;
 	struct sdw_port_runtime *p_rt;
@@ -354,7 +355,12 @@ static int sdw_get_group_count(struct sdw_bus *bus,
 	}
 
 	list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
-		if (m_rt->stream->state == SDW_STREAM_DEPREPARED)
+		/*
+		 * Include the current stream during prepare even if it is still
+		 * in the DEPREPARED state.
+		 */
+		if (!(prepare && m_rt->stream == stream) &&
+		    m_rt->stream->state == SDW_STREAM_DEPREPARED)
 			continue;
 
 		rate = m_rt->stream->params.rate;
@@ -385,14 +391,16 @@ static int sdw_get_group_count(struct sdw_bus *bus,
  *
  * @bus: SDW Bus instance
  * @stream: Soundwire stream
+ * @prepare: True when preparing, false when depreparing
  */
-static int sdw_compute_port_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream)
+static int sdw_compute_port_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream,
+				   bool prepare)
 {
 	struct sdw_group_params *params = NULL;
 	struct sdw_group group;
 	int ret;
 
-	ret = sdw_get_group_count(bus, &group);
+	ret = sdw_get_group_count(bus, &group, stream, prepare);
 	if (ret < 0)
 		return ret;
 
@@ -406,11 +414,11 @@ static int sdw_compute_port_params(struct sdw_bus *bus, struct sdw_stream_runtim
 	}
 
 	/* Compute transport parameters for grouped streams */
-	ret = sdw_compute_group_params(bus, stream, params, &group);
+	ret = sdw_compute_group_params(bus, stream, params, &group, prepare);
 	if (ret < 0)
 		goto free_params;
 
-	_sdw_compute_port_params(bus, params, group.count);
+	_sdw_compute_port_params(bus, params, group.count, stream, prepare);
 
 free_params:
 	kfree(params);
@@ -538,8 +546,11 @@ static int get_manager_lane(struct sdw_bus *bus, struct sdw_master_runtime *m_rt
  * sdw_compute_bus_params: Compute bus parameters
  *
  * @bus: SDW Bus instance
+ * @stream: SoundWire stream being prepared or deprepared
+ * @prepare: True when preparing, false when depreparing
  */
-static int sdw_compute_bus_params(struct sdw_bus *bus)
+static int sdw_compute_bus_params(struct sdw_bus *bus,
+				  struct sdw_stream_runtime *stream, bool prepare)
 {
 	struct sdw_master_prop *mstr_prop = &bus->prop;
 	struct sdw_slave_prop *slave_prop;
@@ -582,6 +593,14 @@ static int sdw_compute_bus_params(struct sdw_bus *bus)
 			break;
 
 		list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+			/*
+			 * Select only the current stream's runtime. Check prepare
+			 * to avoid computing m_lane during deprepare, when the
+			 * stream's bandwidth reservation has already been released.
+			 */
+			if (m_rt->stream != stream || !prepare)
+				continue;
+
 			/*
 			 * Get the first s_rt that will be used to find the available lane that
 			 * can be used. No need to check all Peripherals because we can't use
@@ -629,11 +648,25 @@ out:
 			}
 		}
 		/*
-		 * Set Manager lanes. Configure the last m_rt in bus->m_rt_list only since
-		 * we don't want to touch other m_rts that are already working.
+		 * Set Manager lanes for the stream being prepared without changing
+		 * other runtimes that are already working.
 		 */
 		list_for_each_entry(m_p_rt, &m_rt->port_list, port_node) {
 			m_p_rt->lane = m_lane;
+		}
+	} else if (prepare) {
+		/* Clear stale lane assignments when preparing on lane 0. */
+		list_for_each_entry(m_rt, &bus->m_rt_list, bus_node) {
+			if (m_rt->stream != stream)
+				continue;
+
+			list_for_each_entry(m_p_rt, &m_rt->port_list, port_node)
+				m_p_rt->lane = 0;
+
+			list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node)
+				list_for_each_entry(s_p_rt, &s_rt->port_list, port_node)
+					s_p_rt->lane = 0;
+			break;
 		}
 	}
 
@@ -659,13 +692,15 @@ out:
  *
  * @bus: SDW Bus instance
  * @stream: Soundwire stream
+ * @prepare: True when preparing, false when depreparing
  */
-int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream)
+int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream,
+		       bool prepare)
 {
 	int ret;
 
 	/* Computes clock frequency, frame shape and frame frequency */
-	ret = sdw_compute_bus_params(bus);
+	ret = sdw_compute_bus_params(bus, stream, prepare);
 	if (ret < 0)
 		return ret;
 
@@ -675,7 +710,7 @@ int sdw_compute_params(struct sdw_bus *bus, struct sdw_stream_runtime *stream)
 	}
 
 	/* Compute transport and port params */
-	ret = sdw_compute_port_params(bus, stream);
+	ret = sdw_compute_port_params(bus, stream, prepare);
 	if (ret < 0) {
 		dev_err(bus->dev, "Compute transport params failed: %d\n", ret);
 		return ret;
