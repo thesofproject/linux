@@ -19,15 +19,20 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
 #include <linux/usb/audio.h>
+#include <linux/usb/xhci-sideband.h>
 #include <uapi/linux/usb/audio.h>
 #include <uapi/linux/usb/ch9.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
+
+/* PORTSC Port Speed ID of a high-speed root port, xHCI 7.2.2.1.1 */
+#define USB_OFFLOAD_PORT_SPEED_HIGH	3
 
 /*
  * snd_usb_audio and the snd_usb_platform_ops bridge live in the private
@@ -88,6 +93,8 @@ static bool usb_offload_chip_is_candidate(struct snd_usb_audio *chip)
  * @subs:		the claimed usb-audio substream.
  * @direction:		SNDRV_PCM_STREAM_* of the stream.
  * @pcm_index:		USB SND PCM device number of @subs.
+ * @resource:		sideband resource ID of the data endpoint.
+ * @data_host_ep:	the data endpoint.
  *
  * A device can have several PCMs per direction, and each can be offloaded
  * on a stream of its own at the same time.
@@ -97,6 +104,8 @@ struct usb_offload_ua_stream {
 	struct snd_usb_substream	*subs;
 	int				direction;
 	int				pcm_index;
+	u8				resource;
+	struct usb_host_endpoint	*data_host_ep;
 };
 
 /**
@@ -104,6 +113,7 @@ struct usb_offload_ua_stream {
  * @node:		link on usb_offload_ua_devs.
  * @chip:		the owning usb-audio chip.
  * @udev:		shortcut to chip->dev.
+ * @sb:			xHCI sideband instance for this device.
  * @connected:		true once usb_offload_connect() succeeded.
  * @streams:		the streams currently acquired on the device.
  */
@@ -111,6 +121,7 @@ struct usb_offload_dev {
 	struct list_head		node;
 	struct snd_usb_audio		*chip;
 	struct usb_device		*udev;
+	struct xhci_sideband		*sb;
 	bool				connected;
 	struct list_head		streams;
 };
@@ -151,6 +162,14 @@ usb_offload_ua_find_stream(struct usb_offload_dev *dev, int direction, int pcm_i
 		if (stream->direction == direction && stream->pcm_index == pcm_index)
 			return stream;
 	return NULL;
+}
+
+static void usb_offload_fill_ep(struct usb_offload_ep_info *desc,
+				const struct usb_host_endpoint *host_ep)
+{
+	desc->ep_addr = host_ep->desc.bEndpointAddress;
+	desc->maxpacket = usb_endpoint_maxp(&host_ep->desc);
+	desc->interval = host_ep->desc.bInterval;
 }
 
 /*
@@ -223,16 +242,49 @@ static void usb_offload_ua_stop_stream(struct usb_offload_dev *dev,
 }
 
 /*
- * Give the substream back to the host and drop the record. Caller holds
+ * Detach the stream's endpoint from its sideband resource, give the
+ * substream back to the host and drop the record. Caller holds
  * usb_offload_ua_lock.
  */
 static void usb_offload_ua_release(struct usb_offload_dev *dev,
 				   struct usb_offload_ua_stream *stream)
 {
+	if (stream->data_host_ep) {
+		xhci_sideband_remove_endpoint(dev->sb, stream->data_host_ep);
+		xhci_sideband_free_resource_id(dev->sb, stream->resource);
+	}
+
 	usb_offload_ua_stop_stream(dev, stream->subs);
 
 	list_del(&stream->node);
 	kfree(stream);
+}
+
+/*
+ * Reserve the sideband resource @host_ep is offloaded on. The host says
+ * where an endpoint of this function belongs when its engine ties the
+ * resources to functions, and the first free one of those is taken; a host
+ * without an opinion gets the first free resource of the controller.
+ * Caller holds usb_offload_ua_lock.
+ */
+static int usb_offload_ua_alloc_resource(struct usb_offload_dev *dev,
+					 struct usb_host_endpoint *host_ep,
+					 int direction)
+{
+	unsigned int first, last;
+	int ret;
+
+	ret = usb_offload_resource_range(usb_offload_ua_ctx, direction,
+					 &first, &last);
+	if (ret)
+		return ret;
+
+	ret = xhci_sideband_alloc_resource_id(dev->sb, host_ep, first, last);
+	if (ret == -EBUSY)
+		dev_dbg(&dev->udev->dev, "USB offload: no free resource in %u-%u\n",
+			first, last);
+
+	return ret;
 }
 
 int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
@@ -245,7 +297,10 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	struct usb_offload_ua_stream *stream;
 	struct snd_usb_substream *subs;
 	struct usb_offload_dev *dev;
+	struct xhci_sideband_ep_properties ep_prop;
 	struct snd_usb_stream *as;
+	u8 interval;
+	int res_id;
 	int ret;
 
 	if (!ctx || !udev || !params || !hw)
@@ -312,9 +367,45 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 		goto err_stop;
 	}
 
+	/* the endpoint exists only now, so the resource is reserved here */
+	ret = usb_offload_ua_alloc_resource(dev, host_ep, direction);
+	if (ret < 0)
+		goto err_stop;
+	res_id = ret;
+
+	ret = xhci_sideband_add_endpoint(dev->sb, host_ep);
+	if (ret)
+		goto err_free_data;
+
+	ret = xhci_sideband_get_ep_properties(dev->sb, host_ep, &ep_prop);
+	if (ret)
+		goto err_remove_data;
+
 	memset(hw, 0, sizeof(*hw));
 	hw->pcm_index = stream->pcm_index;
-	hw->data.ep_addr = host_ep->desc.bEndpointAddress;
+	hw->slot_id = ep_prop.slot_id;
+	hw->bus_devid = PCI_DEVID(ep_prop.bus,
+				  PCI_DEVFN(ep_prop.device, ep_prop.function));
+	usb_offload_fill_ep(&hw->data, host_ep);
+	hw->data.resource = ep_prop.res_id;
+	stream->resource = res_id;
+	stream->data_host_ep = host_ep;
+	hw->split = ep_prop.tt;
+	/*
+	 * The root port's speed is what the link runs at, also for a full
+	 * speed device behind a high speed hub; the service interval is in
+	 * the device's own frame units, so that one goes by udev->speed.
+	 */
+	hw->high_speed = ep_prop.port_speed == USB_OFFLOAD_PORT_SPEED_HIGH;
+
+	/*
+	 * An isochronous bInterval is an exponent at both speeds, in frames
+	 * (1 ms) at full speed and in microframes (125 us) at high speed, which
+	 * is how the xHC schedules the endpoint (xhci_parse_exponent_interval).
+	 */
+	interval = clamp_t(u8, hw->data.interval, 1, 16);
+	hw->service_interval_us = (udev->speed == USB_SPEED_HIGH ? 125 : 1000) <<
+				  (interval - 1);
 
 	list_add_tail(&stream->node, &dev->streams);
 
@@ -323,6 +414,10 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 
 	return 0;
 
+err_remove_data:
+	xhci_sideband_remove_endpoint(dev->sb, host_ep);
+err_free_data:
+	xhci_sideband_free_resource_id(dev->sb, res_id);
 err_stop:
 	usb_offload_ua_stop_stream(dev, subs);
 err_free:
@@ -386,6 +481,8 @@ static void usb_offload_ua_teardown(struct usb_offload_dev *dev)
 
 	list_for_each_entry_safe(stream, tmp, &dev->streams, node)
 		usb_offload_ua_release(dev, stream);
+
+	xhci_sideband_unregister(dev->sb);
 	list_del(&dev->node);
 	kfree(dev);
 }
@@ -441,6 +538,7 @@ static void usb_offload_ua_connect_cb(struct snd_usb_audio *chip)
 	struct usb_offload_usb_dev_info *id __free(kfree) = NULL;
 	struct usb_offload_ctx *ctx;
 	struct usb_offload_dev *dev;
+	struct usb_interface *audctrl;
 	struct usb_device *udev;
 	int ret;
 
@@ -488,6 +586,28 @@ static void usb_offload_ua_connect_cb(struct snd_usb_audio *chip)
 	dev->chip		= chip;
 	dev->udev		= udev;
 	INIT_LIST_HEAD(&dev->streams);
+	audctrl = usb_ifnum_to_if(udev, chip->ctrl_intf->desc.bInterfaceNumber);
+	if (!audctrl) {
+		ret = -ENODEV;
+		goto free_dev_unlock;
+	}
+
+	/*
+	 * The first registration on a controller asks it for its sideband
+	 * support with a command, which it cannot run while suspended. A
+	 * device found again by the rediscovery may be autosuspended by then,
+	 * and the controller with it.
+	 */
+	ret = usb_autopm_get_interface(audctrl);
+	if (ret)
+		goto free_dev_unlock;
+
+	dev->sb = xhci_sideband_register(audctrl, XHCI_SIDEBAND_AUDIO, NULL);
+	usb_autopm_put_interface(audctrl);
+	if (!dev->sb) {
+		ret = -EOPNOTSUPP;
+		goto free_dev_unlock;
+	}
 
 	list_add_tail(&dev->node, &usb_offload_ua_devs);
 	mutex_unlock(&usb_offload_ua_lock);
@@ -499,8 +619,7 @@ static void usb_offload_ua_connect_cb(struct snd_usb_audio *chip)
 	mutex_lock(&usb_offload_ua_lock);
 	if (ret) {
 		list_del(&dev->node);
-		kfree(dev);
-		goto unlock;
+		goto unregister_sb;
 	}
 	dev->connected = true;
 	mutex_unlock(&usb_offload_ua_lock);
@@ -510,6 +629,11 @@ static void usb_offload_ua_connect_cb(struct snd_usb_audio *chip)
 		chip->ctrl_intf->desc.bInterfaceProtocol);
 	return;
 
+unregister_sb:
+	xhci_sideband_unregister(dev->sb);
+free_dev_unlock:
+	dev_dbg(&udev->dev, "USB offload: sideband setup failed: %d\n", ret);
+	kfree(dev);
 unlock:
 	mutex_unlock(&usb_offload_ua_lock);
 }

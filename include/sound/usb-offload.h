@@ -71,6 +71,14 @@ struct usb_offload_usb_dev_info {
  * struct usb_offload_ops - host callback table, library to host
  * @notify_connect: an offloadable device appeared
  * @notify_disconnect: an offloaded device went away
+ * @get_resource_range: the sideband resources an endpoint may be placed on,
+ *		      as an inclusive range of xHCI Audio Sideband resource
+ *		      IDs, @first to @last. @direction is the SNDRV_PCM_STREAM_*
+ *		      value of the stream. Optional:
+ *		      an offload engine whose firmware ties a function to
+ *		      particular resources answers, one that does not care
+ *		      leaves it unset and the lowest free resource is taken.
+ *		      An error fails the acquisition of the stream.
  *
  * @notify_connect and @notify_disconnect are mandatory. All callbacks run in
  * process context.
@@ -79,6 +87,9 @@ struct usb_offload_ops {
 	int (*notify_connect)(struct device *dev, struct usb_device *udev,
 			      const struct usb_offload_usb_dev_info *id);
 	int (*notify_disconnect)(struct device *dev, struct usb_device *udev);
+
+	int (*get_resource_range)(struct device *dev, int direction,
+				  unsigned int *first, unsigned int *last);
 };
 
 /**
@@ -97,23 +108,42 @@ void usb_offload_unregister(struct usb_offload_ctx *ctx);
 /**
  * struct usb_offload_ep_info - an endpoint handed to the DSP
  * @ep_addr: bEndpointAddress of the endpoint
+ * @resource: xHCI Audio Sideband resource ID the endpoint is bound to
+ * @maxpacket: wMaxPacketSize of the endpoint
+ * @interval: bInterval of the endpoint
  */
 struct usb_offload_ep_info {
 	u8				ep_addr;
+	u8				resource;
+	u16				maxpacket;
+	u8				interval;
 };
 
 /**
  * struct usb_offload_stream_hw - resources reserved for one offloaded stream
  * @pcm_index: USB SND PCM device number the stream was acquired on, to be
  *	       passed back to usb_offload_release_stream()
+ * @bus_devid: PCI bus, device and function of the xHCI controller, as
+ *	       PCI_DEVID() lays them out
+ * @slot_id: xHCI slot ID of the USB device
+ * @high_speed: the root port the device hangs off runs at high speed
+ * @split: the endpoint is reached through a USB 2.0 transaction translator
  * @data: the isochronous data endpoint
+ * @service_interval_us: service interval of @data in microseconds: a multiple
+ *			 of a 1 ms frame for a full speed device, of a 125 us
+ *			 microframe for a high speed one
  *
  * Filled in by usb_offload_acquire_stream() and released again by
  * usb_offload_release_stream().
  */
 struct usb_offload_stream_hw {
 	int				pcm_index;
+	u16				bus_devid;
+	u8				slot_id;
+	bool				high_speed;
+	bool				split;
 	struct usb_offload_ep_info	data;
+	unsigned int			service_interval_us;
 };
 
 /*
