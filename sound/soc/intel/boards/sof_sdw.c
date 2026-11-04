@@ -16,6 +16,7 @@
 #include <sound/core.h>
 #include <sound/soc-acpi.h>
 #include "sof_sdw_common.h"
+#include "sof_uaol_common.h"
 #include "../../codecs/rt711.h"
 
 static unsigned long sof_sdw_quirk = RT711_JD1;
@@ -1225,6 +1226,56 @@ static int create_bt_dailinks(struct snd_soc_card *card,
 	return 0;
 }
 
+static int create_uaol_dailinks(struct snd_soc_card *card,
+				struct snd_soc_dai_link **dai_links, int *be_id,
+				const struct snd_soc_acpi_mach_params *mach_params)
+{
+	unsigned long uaol_mask = mach_params->uaol_link_mask;
+	unsigned int num_streams = max(mach_params->uaol_playback_num,
+				       mach_params->uaol_capture_num);
+	struct device *dev = card->dev;
+	int i, j, stream, ret;
+
+	/*
+	 * Ordinal first, playback before capture within an ordinal: the IDs of
+	 * the first playback and capture backend then do not depend on how many
+	 * streams the link has.
+	 */
+	for_each_set_bit(i, &uaol_mask, BITS_PER_TYPE(uaol_mask)) {
+		for (j = 0; j < num_streams; j++) {
+			for_each_pcm_streams(stream) {
+				bool playback = stream == SNDRV_PCM_STREAM_PLAYBACK;
+				char *cpu_dai_name;
+				char *name;
+
+				if (j >= sof_uaol_stream_num(mach_params, stream))
+					continue;
+
+				name = devm_kasprintf(dev, GFP_KERNEL,
+						      SOF_UAOL_LINK_NAME(stream), i, j);
+				cpu_dai_name = devm_kasprintf(dev, GFP_KERNEL,
+							      SOF_UAOL_CPU_DAI_NAME(stream),
+							      i, j);
+				if (!name || !cpu_dai_name)
+					return -ENOMEM;
+
+				ret = asoc_sdw_init_simple_dai_link(dev, *dai_links, be_id,
+								    name, playback, !playback,
+								    cpu_dai_name, "dummy",
+								    snd_soc_dummy_dlc.name,
+								    snd_soc_dummy_dlc.dai_name,
+								    1, NULL, NULL);
+				if (ret)
+					return ret;
+
+				(*dai_links)++;
+			}
+		}
+	}
+
+	return 0;
+}
+
 static int create_echoref_dailink(struct snd_soc_card *card,
 				  struct snd_soc_dai_link **dai_links, int *be_id)
 {
@@ -1257,7 +1308,7 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 {
 	struct device *dev = card->dev;
 	struct snd_soc_acpi_mach *mach = dev_get_platdata(card->dev);
-	int sdw_be_num = 0, ssp_num = 0, dmic_num = 0, bt_num = 0;
+	int sdw_be_num = 0, ssp_num = 0, dmic_num = 0, bt_num = 0, uaol_num = 0;
 	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct intel_mc_ctx *intel_ctx = (struct intel_mc_ctx *)ctx->private;
 	struct snd_soc_acpi_mach_params *mach_params = &mach->mach_params;
@@ -1351,9 +1402,11 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	if (sof_sdw_quirk & SOF_SSP_BT_OFFLOAD_PRESENT || mach_params->bt_link_mask)
 		bt_num = 1;
 
-	dev_dbg(dev, "DAI link numbers: sdw %d, ssp %d, dmic %d, hdmi %d, bt: %d\n",
+	uaol_num = sof_uaol_link_count(mach_params);
+
+	dev_dbg(dev, "DAI link numbers: sdw %d, ssp %d, dmic %d, hdmi %d, bt: %d, uaol %d\n",
 		sdw_be_num, ssp_num, dmic_num,
-		intel_ctx->hdmi.idisp_codec ? hdmi_num : 0, bt_num);
+		intel_ctx->hdmi.idisp_codec ? hdmi_num : 0, bt_num, uaol_num);
 
 	codec_conf = devm_kcalloc(dev, num_confs, sizeof(*codec_conf), GFP_KERNEL);
 	if (!codec_conf) {
@@ -1366,7 +1419,7 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	 * This should be the last DAI link and it is expected both for monolithic
 	 * and functional SOF topologies to support echo reference.
 	 */
-	num_links = sdw_be_num + ssp_num + dmic_num + hdmi_num + bt_num + 1;
+	num_links = sdw_be_num + ssp_num + dmic_num + hdmi_num + bt_num + uaol_num + 1;
 	dai_links = devm_kcalloc(dev, num_links, sizeof(*dai_links), GFP_KERNEL);
 	if (!dai_links) {
 		ret = -ENOMEM;
@@ -1411,6 +1464,13 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	/* BT */
 	if (bt_num) {
 		ret = create_bt_dailinks(card, &dai_links, &be_id);
+		if (ret)
+			goto err_end;
+	}
+
+	/* UAOL */
+	if (uaol_num) {
+		ret = create_uaol_dailinks(card, &dai_links, &be_id, mach_params);
 		if (ret)
 			goto err_end;
 	}
