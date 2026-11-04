@@ -31,6 +31,7 @@
 #include "debug.h"
 #include "messages.h"
 #include "pcm.h"
+#include "soundwire.h"
 
 static u32 pgctl_mask = AZX_PGCTL_LSRMD_MASK;
 module_param(pgctl_mask, uint, 0444);
@@ -230,6 +231,11 @@ static void avs_hda_probe_work(struct work_struct *work)
 	list_for_each_entry(hlink, &bus->hlink_list, list)
 		snd_hdac_ext_bus_link_put(bus, hlink);
 
+	/* Soundwire component is optional */
+	ret = avs_sdw_probe(adev);
+	if (ret && ret != -ENODEV)
+		dev_err(adev->dev, "failed to probe sdw: %d\n", ret);
+
 	snd_hdac_ext_bus_ppcap_enable(bus, true);
 	snd_hdac_ext_bus_ppcap_int_enable(bus, true);
 	avs_debugfs_init(adev);
@@ -239,6 +245,14 @@ static void avs_hda_probe_work(struct work_struct *work)
 		return;
 
 	acpi_nhlt_get_gbl_table();
+
+	ret = avs_sdw_startup(adev);
+	if (ret) {
+		dev_err(adev->dev, "failed to startup sdw: %d\n", ret);
+		return;
+	}
+
+	avs_sdw_enable_irq(adev, true);
 
 	avs_register_all_boards(adev);
 
@@ -344,7 +358,7 @@ static irqreturn_t avs_dsp_irq_thread(int irq, void *dev_id)
 
 	status = readl(bus->ppcap + AZX_REG_PP_PPSTS);
 	if (status & AZX_PPCTL_PIE)
-		avs_dsp_op(adev, dsp_interrupt);
+		avs_dsp_op(adev, dsp_interrupt, irq);
 
 	/* Unmask GIE, masked in irq_handler(). */
 	snd_hdac_chip_updatel(bus, INTCTL, AZX_INT_GLOBAL_EN, AZX_INT_GLOBAL_EN);
@@ -561,6 +575,8 @@ static void avs_pci_shutdown(struct pci_dev *pci)
 	snd_hdac_bus_stop_chip(bus);
 	snd_hdac_display_power(bus, HDA_CODEC_IDX_CONTROLLER, false);
 
+	avs_sdw_enable_irq(adev, false);
+
 	pci_free_irq(pci, 0, adev);
 	pci_free_irq(pci, 0, bus);
 	pci_free_irq_vectors(pci);
@@ -579,6 +595,7 @@ static void avs_pci_remove(struct pci_dev *pci)
 
 	acpi_nhlt_put_gbl_table();
 	avs_debugfs_exit(adev);
+	avs_sdw_exit(adev);
 
 	if (avs_platattr_test(adev, CLDMA))
 		hda_cldma_free(&code_loader);
@@ -661,6 +678,7 @@ static int avs_suspend_common(struct avs_dev *adev, bool low_power)
 	}
 
 	avs_ipc_block(adev->ipc);
+	avs_sdw_enable_irq(adev, false);
 	avs_dsp_op(adev, int_control, false);
 	snd_hdac_ext_bus_ppcap_int_enable(bus, false);
 
@@ -719,6 +737,8 @@ static int avs_resume_common(struct avs_dev *adev, bool low_power, bool purge)
 		dev_err(adev->dev, "firmware boot failed: %d\n", ret);
 		return ret;
 	}
+
+	avs_sdw_enable_irq(adev, true);
 
 	return 0;
 }

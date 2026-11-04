@@ -45,7 +45,7 @@ struct avs_dsp_ops {
 	int (* const power)(struct avs_dev *, u32, bool);
 	int (* const reset)(struct avs_dev *, u32, bool);
 	int (* const stall)(struct avs_dev *, u32, bool);
-	irqreturn_t (* const dsp_interrupt)(struct avs_dev *);
+	irqreturn_t (* const dsp_interrupt)(struct avs_dev *, int irq);
 	void (* const int_control)(struct avs_dev *, bool);
 	int (* const load_basefw)(struct avs_dev *, struct firmware *);
 	int (* const load_lib)(struct avs_dev *, struct firmware *, u32);
@@ -136,6 +136,7 @@ struct avs_dev {
 	void __iomem *dsp_ba;
 	const struct avs_spec *spec;
 	struct avs_ipc *ipc;
+	struct sdw_intel_ctx *sdw;
 
 	struct avs_fw_cfg fw_cfg;
 	struct avs_hw_cfg hw_cfg;
@@ -273,8 +274,8 @@ int avs_mtl_core_stall(struct avs_dev *adev, u32 core_mask, bool stall);
 int avs_lnl_core_stall(struct avs_dev *adev, u32 core_mask, bool stall);
 void avs_mtl_interrupt_control(struct avs_dev *adev, bool enable);
 void avs_skl_ipc_interrupt(struct avs_dev *adev);
-irqreturn_t avs_cnl_dsp_interrupt(struct avs_dev *adev);
-irqreturn_t avs_mtl_dsp_interrupt(struct avs_dev *adev);
+irqreturn_t avs_cnl_dsp_interrupt(struct avs_dev *adev, int irq);
+irqreturn_t avs_mtl_dsp_interrupt(struct avs_dev *adev, int irq);
 int avs_apl_enable_logs(struct avs_dev *adev, enum avs_log_enable enable, u32 aging_period,
 			u32 fifo_full_period, unsigned long resource_mask, u32 *priorities);
 int avs_icl_enable_logs(struct avs_dev *adev, enum avs_log_enable enable, u32 aging_period,
@@ -345,14 +346,6 @@ struct avs_soc_component {
 #define to_avs_soc_component(comp) snd_soc_component_to_priv(comp)
 
 extern const struct snd_soc_dai_ops avs_dai_fe_ops;
-
-int avs_register_dmic_component(struct avs_dev *adev, const char *name);
-int avs_register_i2s_component(struct avs_dev *adev, const char *name, unsigned long port_mask,
-			       unsigned long *tdms);
-int avs_register_hda_component(struct avs_dev *adev, const char *name);
-int avs_register_component(struct device *dev, const char *name,
-			   struct snd_soc_component_driver *drv,
-			   struct snd_soc_dai_driver *cpu_dais, int num_cpu_dais);
 
 int avs_register_all_boards(struct avs_dev *adev);
 void avs_unregister_all_boards(struct avs_dev *adev);

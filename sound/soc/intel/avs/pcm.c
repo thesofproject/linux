@@ -22,26 +22,6 @@
 #include "utils.h"
 #include "../../codecs/hda.h"
 
-struct avs_dma_data {
-	struct avs_tplg_path_template *template;
-	struct avs_path *path;
-	struct avs_dev *adev;
-
-	/* LINK-stream utilized in BE operations while HOST in FE ones. */
-	union {
-		struct hdac_ext_stream *link_stream;
-		struct hdac_ext_stream *host_stream;
-	};
-
-	struct snd_pcm_hw_constraint_list rate_list;
-	struct snd_pcm_hw_constraint_list channels_list;
-	struct snd_pcm_hw_constraint_list sample_bits_list;
-
-	struct work_struct period_elapsed_work;
-	struct hdac_ext_link *link;
-	struct snd_pcm_substream *substream;
-};
-
 static struct avs_tplg_path_template *
 avs_dai_find_path_template(struct snd_soc_dai *dai, bool is_fe, int direction)
 {
@@ -117,7 +97,7 @@ static int avs_hw_constraints_init(struct snd_pcm_substream *substream, struct s
 	return 0;
 }
 
-static int avs_dai_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+int avs_dai_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct avs_dev *adev = to_avs_dev(dai->component->dev);
@@ -147,7 +127,7 @@ static int avs_dai_startup(struct snd_pcm_substream *substream, struct snd_soc_d
 	return avs_hw_constraints_init(substream, dai);
 }
 
-static void avs_dai_shutdown(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+void avs_dai_shutdown(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct avs_dma_data *data;
@@ -165,10 +145,10 @@ static void avs_dai_shutdown(struct snd_pcm_substream *substream, struct snd_soc
 	kfree(data);
 }
 
-static int avs_dai_hw_params(struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *fe_hw_params,
-			     struct snd_pcm_hw_params *be_hw_params, struct snd_soc_dai *dai,
-			     int dma_id)
+int avs_dai_hw_params(struct snd_pcm_substream *substream,
+		      struct snd_pcm_hw_params *fe_hw_params,
+		      struct snd_pcm_hw_params *be_hw_params,
+		      struct snd_soc_dai *dai, int dma_id)
 {
 	struct avs_dma_data *data;
 	struct avs_path *path;
@@ -199,9 +179,9 @@ static int avs_dai_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int avs_dai_be_hw_params(struct snd_pcm_substream *substream,
-				struct snd_pcm_hw_params *be_hw_params, struct snd_soc_dai *dai,
-				int dma_id)
+int avs_dai_be_hw_params(struct snd_pcm_substream *substream,
+			 struct snd_pcm_hw_params *be_hw_params,
+			 struct snd_soc_dai *dai, int dma_id)
 {
 	struct snd_pcm_hw_params *fe_hw_params = NULL;
 	struct snd_soc_pcm_runtime *fe, *be;
@@ -217,7 +197,7 @@ static int avs_dai_be_hw_params(struct snd_pcm_substream *substream,
 	return avs_dai_hw_params(substream, fe_hw_params, be_hw_params, dai, dma_id);
 }
 
-static int avs_dai_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+int avs_dai_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
 	struct avs_dma_data *data;
 	int ret;
@@ -1374,7 +1354,7 @@ static int avs_component_new(struct snd_soc_component *component,
 	return 0;
 }
 
-static struct snd_soc_component_driver avs_component_driver = {
+struct snd_soc_component_driver avs_component_driver = {
 	.name			= "avs-pcm",
 	.probe			= avs_component_probe,
 	.remove			= avs_component_remove,

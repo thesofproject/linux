@@ -166,7 +166,7 @@ static void avs_mtl_ipc_interrupt(struct avs_dev *adev)
 			      AVS_ADSP_HIPCCTL_DONE | AVS_ADSP_HIPCCTL_BUSY);
 }
 
-irqreturn_t avs_mtl_dsp_interrupt(struct avs_dev *adev)
+irqreturn_t avs_mtl_dsp_interrupt(struct avs_dev *adev, int irq)
 {
 	u32 adspis = snd_hdac_adsp_readl(adev, MTL_DWICTL_REG_FINALSTATUSL);
 	irqreturn_t ret = IRQ_NONE;

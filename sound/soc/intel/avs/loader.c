@@ -18,6 +18,7 @@
 #include "messages.h"
 #include "registers.h"
 #include "topology.h"
+#include "soundwire.h"
 
 #define AVS_ROM_STS_MASK		0xFF
 #define AVS_ROM_INIT_DONE		0x1
@@ -344,6 +345,8 @@ static int avs_imr_load_basefw(struct avs_dev *adev)
 	ret = avs_hda_init_rom(adev, 0, false);
 	if (ret < 0)
 		return ret;
+
+	avs_sdw_process_wakeen_event(adev);
 
 	ret = wait_for_completion_timeout(&adev->fw_ready,
 					  msecs_to_jiffies(AVS_FW_INIT_TIMEOUT_MS));

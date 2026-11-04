@@ -7,6 +7,7 @@
 #include <linux/acpi.h>
 #include <linux/irqreturn.h>
 #include <linux/soundwire/sdw.h>
+#include <linux/soundwire/sdw_cadence.h>
 
 /*********************************************************************
  * cAVS and ACE1.x definitions
@@ -358,6 +359,8 @@ struct sdw_intel_res {
 	struct mutex *eml_lock;
 };
 
+#if IS_ENABLED(CONFIG_SOUNDWIRE_INTEL)
+
 /*
  * On Intel platforms, the SoundWire IP has dependencies on power
  * rails shared with the DSP, and the initialization steps are split
@@ -384,6 +387,44 @@ void sdw_intel_exit(struct sdw_intel_ctx *ctx);
 
 irqreturn_t sdw_intel_thread(int irq, void *dev_id);
 
+void sdw_intel_pdi_config(struct sdw_bus *bus, struct sdw_cdns_pdi *pdi);
+
+#else
+
+static inline int sdw_intel_acpi_scan(acpi_handle parent_handle, struct sdw_intel_acpi_info *info)
+{
+	return -ENODEV;
+}
+
+static inline void sdw_intel_process_wakeen_event(struct sdw_intel_ctx *ctx)
+{
+}
+
+static inline struct sdw_intel_ctx *sdw_intel_probe(struct sdw_intel_res *res)
+{
+	return NULL;
+}
+
+static inline int sdw_intel_startup(struct sdw_intel_ctx *ctx)
+{
+	return 0;
+}
+
+static inline void sdw_intel_exit(struct sdw_intel_ctx *ctx)
+{
+}
+
+static inline irqreturn_t sdw_intel_thread(int irq, void *dev_id)
+{
+	return 0;
+}
+
+static inline void sdw_intel_pdi_config(struct sdw_bus *bus, struct sdw_cdns_pdi *pdi)
+{
+}
+
+#endif
+
 #define SDW_INTEL_QUIRK_MASK_BUS_DISABLE      BIT(1)
 
 struct sdw_intel;
@@ -392,7 +433,8 @@ struct sdw_intel;
  * @debugfs_init: initialize all debugfs capabilities
  * @debugfs_exit: close and cleanup debugfs capabilities
  * @get_link_count: fetch link count from hardware registers
- * @register_dai: read all PDI information and register DAIs
+ * @init_pdis: read all PDI information
+ * @register_dai: register DAIs
  * @check_clock_stop: throw error message if clock is not stopped.
  * @start_bus: normal start
  * @start_bus_after_reset: start after reset
@@ -418,6 +460,7 @@ struct sdw_intel_hw_ops {
 
 	int (*get_link_count)(struct sdw_intel *sdw);
 
+	int (*init_pdis)(struct sdw_intel *sdw);
 	int (*register_dai)(struct sdw_intel *sdw);
 
 	void (*check_clock_stop)(struct sdw_intel *sdw);

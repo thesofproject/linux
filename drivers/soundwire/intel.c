@@ -674,6 +674,22 @@ intel_pdi_alh_configure(struct sdw_intel *sdw, struct sdw_cdns_pdi *pdi)
 	intel_writel(alh, SDW_ALH_STRMZCFG(pdi->intel_alh_id), conf);
 }
 
+/**
+ * sdw_intel_pdi_config - Configure specified PDI
+ * @bus: SoundWire bus instance
+ * @pdi: PDI instance to configure
+ */
+void sdw_intel_pdi_config(struct sdw_bus *bus, struct sdw_cdns_pdi *pdi)
+{
+	struct sdw_cdns *cdns = bus_to_cdns(bus);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
+
+	intel_pdi_shim_configure(sdw, pdi);
+	intel_pdi_alh_configure(sdw, pdi);
+	sdw_cdns_config_stream(cdns, pdi->ch_count, pdi->dir, pdi);
+}
+EXPORT_SYMBOL(sdw_intel_pdi_config);
+
 static int intel_params_stream(struct sdw_intel *sdw,
 			       struct snd_pcm_substream *substream,
 			       struct snd_soc_dai *dai,
@@ -1011,22 +1027,28 @@ static int intel_create_dai(struct sdw_cdns *cdns,
 	return 0;
 }
 
-static int intel_register_dai(struct sdw_intel *sdw)
+static int intel_init_pdis(struct sdw_intel *sdw)
 {
-	struct sdw_cdns_dai_runtime **dai_runtime_array;
 	struct sdw_cdns_stream_config config;
-	struct sdw_cdns *cdns = &sdw->cdns;
-	struct sdw_cdns_streams *stream;
-	struct snd_soc_dai_driver *dais;
-	int num_dai, ret, off = 0;
+	int ret;
 
 	/* Read the PDI config and initialize cadence PDI */
 	intel_pdi_init(sdw, &config);
-	ret = sdw_cdns_pdi_init(cdns, config);
+	ret = sdw_cdns_pdi_init(&sdw->cdns, config);
 	if (ret)
 		return ret;
 
 	intel_pdi_stream_ch_update(sdw, &sdw->cdns.pcm);
+	return 0;
+}
+
+static int intel_register_dai(struct sdw_intel *sdw)
+{
+	struct sdw_cdns_dai_runtime **dai_runtime_array;
+	struct sdw_cdns *cdns = &sdw->cdns;
+	struct sdw_cdns_streams *stream;
+	struct snd_soc_dai_driver *dais;
+	int num_dai, ret, off = 0;
 
 	/* DAIs are created based on total number of PDIs supported */
 	num_dai = cdns->pcm.num_pdi;
@@ -1071,6 +1093,7 @@ const struct sdw_intel_hw_ops sdw_intel_cnl_hw_ops = {
 	.debugfs_init = intel_debugfs_init,
 	.debugfs_exit = intel_debugfs_exit,
 
+	.init_pdis = intel_init_pdis,
 	.register_dai = intel_register_dai,
 
 	.check_clock_stop = intel_check_clock_stop,

@@ -423,6 +423,10 @@ int intel_link_startup(struct auxiliary_device *auxdev)
 	if (ret)
 		goto err_init;
 
+	ret = sdw_intel_init_pdis(sdw);
+	if (ret)
+		goto err_power_up;
+
 	/* Register DAIs */
 	ret = sdw_intel_register_dai(sdw);
 	if (ret) {
