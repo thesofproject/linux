@@ -6,6 +6,7 @@
 #include "../common/soc-intel-quirks.h"
 #include "hda_dsp_common.h"
 #include "sof_board_helpers.h"
+#include "sof_uaol_common.h"
 
 /*
  * Intel HDMI DAI Link
@@ -497,6 +498,86 @@ static int set_hda_codec_link(struct device *dev, struct snd_soc_dai_link *link,
 	return 0;
 }
 
+static int set_uaol_link(struct device *dev, struct snd_soc_dai_link *link,
+			 int be_id, int uaol_id, int stream, int index)
+{
+	bool playback = stream == SNDRV_PCM_STREAM_PLAYBACK;
+	struct snd_soc_dai_link_component *cpus;
+
+	dev_dbg(dev, "link %d: uaol %d, %s %d\n", be_id, uaol_id,
+		playback ? "playback" : "capture", index);
+
+	link->name = devm_kasprintf(dev, GFP_KERNEL, SOF_UAOL_LINK_NAME(stream),
+				    uaol_id, index);
+	if (!link->name)
+		return -ENOMEM;
+
+	/* cpus */
+	cpus = devm_kzalloc(dev, sizeof(struct snd_soc_dai_link_component),
+			    GFP_KERNEL);
+	if (!cpus)
+		return -ENOMEM;
+
+	cpus->dai_name = devm_kasprintf(dev, GFP_KERNEL, SOF_UAOL_CPU_DAI_NAME(stream),
+					uaol_id, index);
+	if (!cpus->dai_name)
+		return -ENOMEM;
+
+	link->cpus = cpus;
+	link->num_cpus = 1;
+
+	/* codecs */
+	link->codecs = &snd_soc_dummy_dlc;
+	link->num_codecs = 1;
+
+	/* platforms */
+	link->platforms = platform_component;
+	link->num_platforms = ARRAY_SIZE(platform_component);
+
+	link->id = be_id;
+	link->no_pcm = 1;
+	if (playback)
+		link->playback_only = 1;
+	else
+		link->capture_only = 1;
+
+	return 0;
+}
+
+/*
+ * One backend per stream of each direction of UAOL link @uaol_id. Ordinal
+ * first, playback before capture within an ordinal: the IDs of the first
+ * playback and capture backend then do not depend on how many streams the
+ * link has.
+ */
+static int set_uaol_links(struct device *dev, struct sof_card_private *ctx,
+			  struct snd_soc_dai_link *links, int *idx,
+			  unsigned long *be_id, int uaol_id)
+{
+	unsigned int num_streams = max(ctx->uaol_playback_num, ctx->uaol_capture_num);
+	int stream, i, ret;
+
+	for (i = 0; i < num_streams; i++) {
+		for_each_pcm_streams(stream) {
+			unsigned int num = stream == SNDRV_PCM_STREAM_PLAYBACK ?
+					   ctx->uaol_playback_num : ctx->uaol_capture_num;
+
+			if (i >= num)
+				continue;
+
+			ret = set_uaol_link(dev, &links[*idx], *be_id, uaol_id,
+					    stream, i);
+			if (ret)
+				return ret;
+
+			(*idx)++;
+			(*be_id)++;
+		}
+	}
+
+	return 0;
+}
+
 static int calculate_num_links(struct sof_card_private *ctx)
 {
 	int num_links = 0;
@@ -530,6 +611,10 @@ static int calculate_num_links(struct sof_card_private *ctx)
 	if (ctx->hda_codec_present)
 		num_links += 2;
 
+	/* USB offload, one link per stream of each direction */
+	num_links += hweight_long(ctx->uaol_link_mask) *
+		     (ctx->uaol_playback_num + ctx->uaol_capture_num);
+
 	return num_links;
 }
 
@@ -542,6 +627,7 @@ int sof_intel_board_set_dai_link(struct device *dev, struct snd_soc_card *card,
 	int idx = 0;
 	int ret;
 	int ssp_hdmi_in = 0;
+	int uaol_id = 0;
 	unsigned long link_order, link;
 	unsigned long link_ids, be_id;
 
@@ -712,6 +798,17 @@ int sof_intel_board_set_dai_link(struct device *dev, struct snd_soc_card *card,
 			}
 
 			idx++;
+			break;
+		case SOF_LINK_UAOL:
+			/* USB offload */
+			for_each_set_bit(uaol_id, &ctx->uaol_link_mask,
+					 BITS_PER_TYPE(ctx->uaol_link_mask)) {
+				ret = set_uaol_links(dev, ctx, links, &idx, &be_id, uaol_id);
+				if (ret) {
+					dev_err(dev, "fail to set uaol link, ret %d\n", ret);
+					return ret;
+				}
+			}
 			break;
 		case SOF_LINK_NONE:
 			/* caught here if it's not used as terminator in macro */
