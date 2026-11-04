@@ -370,6 +370,10 @@ EXPORT_SYMBOL(snd_sof_resume);
 
 int snd_sof_suspend(struct device *dev)
 {
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+
+	sdev->system_suspend_started = true;
+
 	return sof_suspend(dev, false);
 }
 EXPORT_SYMBOL(snd_sof_suspend);
@@ -378,6 +382,10 @@ int snd_sof_prepare(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 	const struct sof_dev_desc *desc = sdev->pdata->desc;
+	int ret;
+
+	sdev->system_suspend_started = false;
+	sdev->system_suspend_retention_revoked = false;
 
 	/* will suspend to S3 by default */
 	sdev->system_suspend_target = SOF_SUSPEND_S3;
@@ -388,10 +396,10 @@ int snd_sof_prepare(struct device *dev)
 	 */
 	if (sdev->fw_state == SOF_FW_CRASHED ||
 	    sdev->fw_state == SOF_FW_BOOT_FAILED)
-		return 0;
+		return snd_sof_pcm_clear_suspend_ignored(sdev);
 
 	if (!desc->use_acpi_target_states)
-		return 0;
+		return snd_sof_pcm_clear_suspend_ignored(sdev);
 
 #if defined(CONFIG_ACPI)
 	switch (acpi_target_system_state()) {
@@ -414,7 +422,14 @@ int snd_sof_prepare(struct device *dev)
 	}
 #endif
 
-	return 0;
+	if (sdev->system_suspend_target != SOF_SUSPEND_S0IX)
+		return snd_sof_pcm_clear_suspend_ignored(sdev);
+
+	ret = snd_sof_pcm_prepare_suspend(sdev);
+	if (ret)
+		sdev->system_suspend_target = SOF_SUSPEND_NONE;
+
+	return ret;
 }
 EXPORT_SYMBOL(snd_sof_prepare);
 
@@ -422,6 +437,13 @@ void snd_sof_complete(struct device *dev)
 {
 	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
 
+	snd_sof_pcm_complete_suspend(sdev);
+
+	if (sdev->system_suspend_retention_revoked && !sdev->system_suspend_started)
+		dev_err(sdev->dev, "system suspend aborted after revoking WoV retention; close and reopen PCM\n");
+
+	sdev->system_suspend_started = false;
+	sdev->system_suspend_retention_revoked = false;
 	sdev->system_suspend_target = SOF_SUSPEND_NONE;
 }
 EXPORT_SYMBOL(snd_sof_complete);

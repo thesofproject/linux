@@ -355,6 +355,7 @@ void snd_soc_dapm_mark_endpoints_dirty(struct snd_soc_card *card)
 
 	snd_soc_dapm_mutex_unlock(card);
 }
+EXPORT_SYMBOL_GPL(snd_soc_dapm_mark_endpoints_dirty);
 
 /* create a new dapm widget */
 static inline struct snd_soc_dapm_widget *dapm_cnew_widget(
