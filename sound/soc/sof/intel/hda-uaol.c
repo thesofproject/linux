@@ -1062,6 +1062,8 @@ static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
 
 	/* a stream closed while suspended has nothing left to reacquire */
 	stream->suspended = false;
+	/* nor one closed after a stop anything to restart */
+	stream->quiesced = false;
 
 	/* also after an unplug, which takes only the USB side away */
 	if (stream->fb_hext_stream)
@@ -1208,29 +1210,59 @@ static int uaol_dai_prepare(struct snd_pcm_substream *substream,
  * only notice this driver gets that the stream will have to be reacquired.
  * The feedback link DMA is not the DAI's DMA data, so the common trigger
  * does not know about it and it is run from here, alongside the audio one.
+ *
+ * On the way down the xHCI endpoints are stopped right after the DSP has
+ * stopped the UAOL streams, not left to hw_free, which runs only after the
+ * DAI copier has been freed and the UAOL link powered off. An endpoint the
+ * controller keeps servicing past that point, the feedback IN endpoint in
+ * particular, has nowhere to deliver to and can lock up the controller.
+ * They are not stopped any earlier: a UAOL stream cannot go idle once the
+ * xHCI no longer services its endpoint, and the DSP times out stopping it.
+ *
+ * A stopped endpoint stays stopped, so a stream started again without a
+ * hw_free in between, as on the recovery from an xrun, restarts them before
+ * the DSP starts its side of the link, the way they run on the first start.
  */
 static int uaol_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 			    struct snd_soc_dai *cpu_dai)
 {
 	struct snd_sof_dev *sdev = dai_to_sdev(substream, cpu_dai);
-	struct hda_uaol_stream *stream = hda_uaol_stream_get(sdev->pdata->hw_pdata, cpu_dai);
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct hda_uaol_stream *stream = hda_uaol_stream_get(hdev, cpu_dai);
 	struct hdac_ext_stream *fb_hext_stream = NULL;
+	int direction = substream->stream;
 	int ret;
 
 	if (!stream)
 		return hda_dai_trigger(substream, cmd, cpu_dai);
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+	if (direction == SNDRV_PCM_STREAM_PLAYBACK)
 		fb_hext_stream = stream->fb_hext_stream;
 
 	if (cmd == SNDRV_PCM_TRIGGER_SUSPEND)
 		stream->suspended = true;
+
+	if (cmd == SNDRV_PCM_TRIGGER_START && stream->quiesced && stream->udev) {
+		ret = usb_offload_restart_stream(hdev->uaol, stream->udev, direction,
+						 stream->pcm_index);
+		if (ret)
+			return ret;
+
+		stream->quiesced = false;
+	}
 
 	if (fb_hext_stream &&
 	    (cmd == SNDRV_PCM_TRIGGER_START || cmd == SNDRV_PCM_TRIGGER_PAUSE_RELEASE))
 		snd_hdac_ext_stream_start(fb_hext_stream);
 
 	ret = hda_dai_trigger(substream, cmd, cpu_dai);
+
+	if ((cmd == SNDRV_PCM_TRIGGER_STOP || cmd == SNDRV_PCM_TRIGGER_SUSPEND) &&
+	    stream->udev) {
+		usb_offload_quiesce_stream(hdev->uaol, stream->udev, direction,
+					   stream->pcm_index);
+		stream->quiesced = true;
+	}
 
 	if (fb_hext_stream &&
 	    (cmd == SNDRV_PCM_TRIGGER_STOP || cmd == SNDRV_PCM_TRIGGER_SUSPEND ||
