@@ -545,6 +545,8 @@ struct hda_uaol_stream {
 	bool params_valid;
 	/* the stream was suspended and has to be reacquired on prepare */
 	bool suspended;
+	/* the USB endpoints were stopped and have to be restarted on start */
+	bool quiesced;
 	/* link DMA the DSP reads the playback feedback endpoint through, if any */
 	struct hdac_ext_stream *fb_hext_stream;
 };
