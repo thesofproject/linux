@@ -23,6 +23,11 @@ struct usb_offload_ctx {
 	const struct usb_offload_ops	*ops;
 };
 
+/* Where the host wants a stream's endpoint placed (called from usb-audio.c) */
+int  usb_offload_resource_range(struct usb_offload_ctx *ctx, int direction,
+				bool feedback, unsigned int *first,
+				unsigned int *last);
+
 /*
  * Candidate filter + USB-audio device ownership (usb-audio.c)
  *
