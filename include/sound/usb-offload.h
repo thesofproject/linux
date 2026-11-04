@@ -106,11 +106,21 @@ struct usb_offload_ops {
  *		     the host's own pipeline only has a 24-bit representation
  *		     as S24_LE (24 valid bits in a 4-byte container) and cannot
  *		     take S24_3LE directly; leave false otherwise.
+ * @async_playback_on_host: keep playback streams which need clock feedback
+ *		     (an asynchronous OUT endpoint, explicit or implicit
+ *		     feedback) on the host: their PCMs are not reported in the
+ *		     device identity when no other format can be offloaded, the
+ *		     formats are skipped when refining hw_params,
+ *		     and usb_offload_acquire_stream() refuses them. Set this
+ *		     when the DSP applies the feedback in a way that degrades
+ *		     the audio. The allow_feedback module parameter of the
+ *		     library overrides it for testing.
  */
 struct usb_offload_res {
 	struct device			*dev;
 	const struct usb_offload_ops	*ops;
 	bool				s24_3le_as_s24_le;
+	bool				async_playback_on_host;
 };
 
 struct usb_offload_ctx *usb_offload_register(const struct usb_offload_res *res);
