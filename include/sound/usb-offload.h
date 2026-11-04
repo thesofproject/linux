@@ -74,7 +74,8 @@ struct usb_offload_usb_dev_info {
  * @get_resource_range: the sideband resources an endpoint may be placed on,
  *		      as an inclusive range of xHCI Audio Sideband resource
  *		      IDs, @first to @last. @direction is the SNDRV_PCM_STREAM_*
- *		      value of the stream. Optional:
+ *		      value of the stream and @feedback tells a playback stream's
+ *		      clock feedback endpoint from its data endpoint. Optional:
  *		      an offload engine whose firmware ties a function to
  *		      particular resources answers, one that does not care
  *		      leaves it unset and the lowest free resource is taken.
@@ -88,7 +89,7 @@ struct usb_offload_ops {
 			      const struct usb_offload_usb_dev_info *id);
 	int (*notify_disconnect)(struct device *dev, struct usb_device *udev);
 
-	int (*get_resource_range)(struct device *dev, int direction,
+	int (*get_resource_range)(struct device *dev, int direction, bool feedback,
 				  unsigned int *first, unsigned int *last);
 };
 
@@ -110,7 +111,10 @@ void usb_offload_unregister(struct usb_offload_ctx *ctx);
  * @ep_addr: bEndpointAddress of the endpoint
  * @resource: xHCI Audio Sideband resource ID the endpoint is bound to
  * @maxpacket: wMaxPacketSize of the endpoint
- * @interval: bInterval of the endpoint
+ * @interval: period of the endpoint as an isochronous bInterval, 2^(n-1)
+ *	      frames (full speed) or microframes (high speed). For a feedback
+ *	      endpoint this is the refresh period the host would poll it at,
+ *	      which a UAC1 device states in bRefresh rather than bInterval.
  */
 struct usb_offload_ep_info {
 	u8				ep_addr;
@@ -129,6 +133,9 @@ struct usb_offload_ep_info {
  * @high_speed: the root port the device hangs off runs at high speed
  * @split: the endpoint is reached through a USB 2.0 transaction translator
  * @data: the isochronous data endpoint
+ * @feedback: the explicit clock feedback endpoint of a playback stream,
+ *	      valid when @has_feedback is set
+ * @has_feedback: @feedback has been reserved for the DSP
  * @service_interval_us: service interval of @data in microseconds: a multiple
  *			 of a 1 ms frame for a full speed device, of a 125 us
  *			 microframe for a high speed one
@@ -143,6 +150,8 @@ struct usb_offload_stream_hw {
 	bool				high_speed;
 	bool				split;
 	struct usb_offload_ep_info	data;
+	struct usb_offload_ep_info	feedback;
+	bool				has_feedback;
 	unsigned int			service_interval_us;
 };
 

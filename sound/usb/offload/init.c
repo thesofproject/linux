@@ -109,11 +109,12 @@ void usb_offload_disconnect(struct usb_offload_ctx *ctx, struct usb_device *udev
  * Runs from the stream acquisition path, under the usb-audio side's lock.
  */
 int usb_offload_resource_range(struct usb_offload_ctx *ctx, int direction,
-			       unsigned int *first, unsigned int *last)
+			       bool feedback, unsigned int *first,
+			       unsigned int *last)
 {
 	if (ctx->ops->get_resource_range)
 		return ctx->ops->get_resource_range(ctx->dev, direction,
-						    first, last);
+						    feedback, first, last);
 
 	*first = 0;
 	*last = 0;

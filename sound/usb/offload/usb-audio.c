@@ -94,7 +94,9 @@ static bool usb_offload_chip_is_candidate(struct snd_usb_audio *chip)
  * @direction:		SNDRV_PCM_STREAM_* of the stream.
  * @pcm_index:		USB SND PCM device number of @subs.
  * @resource:		sideband resource ID of the data endpoint.
+ * @fb_resource:	sideband resource ID of the feedback endpoint, 0 if none.
  * @data_host_ep:	the data endpoint.
+ * @feedback_host_ep:	the feedback endpoint, NULL if none.
  *
  * A device can have several PCMs per direction, and each can be offloaded
  * on a stream of its own at the same time.
@@ -105,7 +107,9 @@ struct usb_offload_ua_stream {
 	int				direction;
 	int				pcm_index;
 	u8				resource;
+	u8				fb_resource;
 	struct usb_host_endpoint	*data_host_ep;
+	struct usb_host_endpoint	*feedback_host_ep;
 };
 
 /**
@@ -242,17 +246,46 @@ static void usb_offload_ua_stop_stream(struct usb_offload_dev *dev,
 }
 
 /*
- * Detach the stream's endpoint from its sideband resource, give the
+ * Detach @host_ep from its sideband resource and free the resource. -ENODEV
+ * means the endpoint is not attached to the sideband (any more), nothing
+ * holds on to the resource then. On any other failure the xHC may still have
+ * the endpoint on the resource, so the reservation is kept rather than given
+ * to the next stream: the endpoint cannot be offloaded again until the
+ * sideband goes away with the device, but no two endpoints share a resource.
+ */
+static void usb_offload_ua_unclaim_ep(struct usb_offload_dev *dev,
+				      struct usb_host_endpoint *host_ep, int res_id)
+{
+	int ret;
+
+	ret = xhci_sideband_remove_endpoint(dev->sb, host_ep);
+	if (ret && ret != -ENODEV) {
+		dev_warn(&dev->udev->dev,
+			 "USB offload: ep %#x not detached (%d), keeping resource %d\n",
+			 host_ep->desc.bEndpointAddress, ret, res_id);
+		return;
+	}
+
+	ret = xhci_sideband_free_resource_id(dev->sb, res_id);
+	if (ret)
+		dev_warn(&dev->udev->dev,
+			 "USB offload: ep %#x resource %d not freed: %d\n",
+			 host_ep->desc.bEndpointAddress, res_id, ret);
+}
+
+/*
+ * Detach the stream's endpoints from their sideband resources, give the
  * substream back to the host and drop the record. Caller holds
  * usb_offload_ua_lock.
  */
 static void usb_offload_ua_release(struct usb_offload_dev *dev,
 				   struct usb_offload_ua_stream *stream)
 {
-	if (stream->data_host_ep) {
-		xhci_sideband_remove_endpoint(dev->sb, stream->data_host_ep);
-		xhci_sideband_free_resource_id(dev->sb, stream->resource);
-	}
+	if (stream->feedback_host_ep)
+		usb_offload_ua_unclaim_ep(dev, stream->feedback_host_ep,
+					  stream->fb_resource);
+	if (stream->data_host_ep)
+		usb_offload_ua_unclaim_ep(dev, stream->data_host_ep, stream->resource);
 
 	usb_offload_ua_stop_stream(dev, stream->subs);
 
@@ -269,20 +302,51 @@ static void usb_offload_ua_release(struct usb_offload_dev *dev,
  */
 static int usb_offload_ua_alloc_resource(struct usb_offload_dev *dev,
 					 struct usb_host_endpoint *host_ep,
-					 int direction)
+					 int direction, bool feedback)
 {
 	unsigned int first, last;
 	int ret;
 
-	ret = usb_offload_resource_range(usb_offload_ua_ctx, direction,
+	ret = usb_offload_resource_range(usb_offload_ua_ctx, direction, feedback,
 					 &first, &last);
 	if (ret)
 		return ret;
 
 	ret = xhci_sideband_alloc_resource_id(dev->sb, host_ep, first, last);
 	if (ret == -EBUSY)
-		dev_dbg(&dev->udev->dev, "USB offload: no free resource in %u-%u\n",
-			first, last);
+		dev_dbg(&dev->udev->dev, "USB offload: no free %s resource in %u-%u\n",
+			feedback ? "feedback" : "data", first, last);
+
+	return ret;
+}
+
+/*
+ * Reserve a sideband resource for @host_ep, attach the endpoint to it and read
+ * back what the xHC knows about it. Undone by usb_offload_ua_unclaim_ep().
+ * Caller holds usb_offload_ua_lock.
+ */
+static int usb_offload_ua_claim_ep(struct usb_offload_dev *dev,
+				   struct usb_host_endpoint *host_ep, int direction,
+				   bool feedback, int *res_id,
+				   struct xhci_sideband_ep_properties *prop)
+{
+	int ret;
+
+	ret = usb_offload_ua_alloc_resource(dev, host_ep, direction, feedback);
+	if (ret < 0)
+		return ret;
+	*res_id = ret;
+
+	/* nothing is attached when the add fails, only the reservation is undone */
+	ret = xhci_sideband_add_endpoint(dev->sb, host_ep);
+	if (ret) {
+		xhci_sideband_free_resource_id(dev->sb, *res_id);
+		return ret;
+	}
+
+	ret = xhci_sideband_get_ep_properties(dev->sb, host_ep, prop);
+	if (ret)
+		usb_offload_ua_unclaim_ep(dev, host_ep, *res_id);
 
 	return ret;
 }
@@ -294,11 +358,14 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 {
 	const struct audioformat *format;
 	struct usb_host_endpoint *host_ep;
+	struct usb_host_endpoint *fb_host_ep = NULL;
 	struct usb_offload_ua_stream *stream;
 	struct snd_usb_substream *subs;
 	struct usb_offload_dev *dev;
 	struct xhci_sideband_ep_properties ep_prop;
+	struct xhci_sideband_ep_properties fb_ep_prop;
 	struct snd_usb_stream *as;
+	int fb_res_id = 0;
 	u8 interval;
 	int res_id;
 	int ret;
@@ -368,18 +435,29 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	}
 
 	/* the endpoint exists only now, so the resource is reserved here */
-	ret = usb_offload_ua_alloc_resource(dev, host_ep, direction);
-	if (ret < 0)
+	ret = usb_offload_ua_claim_ep(dev, host_ep, direction, false, &res_id, &ep_prop);
+	if (ret)
 		goto err_stop;
-	res_id = ret;
 
-	ret = xhci_sideband_add_endpoint(dev->sb, host_ep);
-	if (ret)
-		goto err_free_data;
+	/*
+	 * Implicit feedback reuses another interface's capture data endpoint
+	 * as a sync source; it carries audio samples, not a feedback value
+	 * the DSP can interpret, so only an explicit sync endpoint is claimed.
+	 * usb-audio flags the data endpoint, which syncs with the implicit
+	 * feedback, not the capture endpoint it syncs to.
+	 */
+	if (subs->sync_endpoint && !subs->data_endpoint->implicit_fb_sync) {
+		fb_host_ep = usb_pipe_endpoint(udev, subs->sync_endpoint->pipe);
+		if (!fb_host_ep) {
+			ret = -ENXIO;
+			goto err_unclaim_data;
+		}
 
-	ret = xhci_sideband_get_ep_properties(dev->sb, host_ep, &ep_prop);
-	if (ret)
-		goto err_remove_data;
+		ret = usb_offload_ua_claim_ep(dev, fb_host_ep, direction, true,
+					      &fb_res_id, &fb_ep_prop);
+		if (ret)
+			goto err_unclaim_data;
+	}
 
 	memset(hw, 0, sizeof(*hw));
 	hw->pcm_index = stream->pcm_index;
@@ -389,7 +467,22 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	usb_offload_fill_ep(&hw->data, host_ep);
 	hw->data.resource = ep_prop.res_id;
 	stream->resource = res_id;
+	stream->fb_resource = fb_res_id;
 	stream->data_host_ep = host_ep;
+	stream->feedback_host_ep = fb_host_ep;
+	if (fb_host_ep) {
+		usb_offload_fill_ep(&hw->feedback, fb_host_ep);
+		hw->feedback.resource = fb_ep_prop.res_id;
+		/*
+		 * The period the feedback value is refreshed at, the one
+		 * snd-usb-audio polls its sync endpoint at: bRefresh of a UAC1
+		 * endpoint, otherwise 2 frames at full speed and bInterval at
+		 * high speed, 1 ms when that is not usable either. It is kept
+		 * as log2 in syncinterval, here in bInterval form.
+		 */
+		hw->feedback.interval = subs->sync_endpoint->syncinterval + 1;
+		hw->has_feedback = true;
+	}
 	hw->split = ep_prop.tt;
 	/*
 	 * The root port's speed is what the link runs at, also for a full
@@ -414,10 +507,8 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 
 	return 0;
 
-err_remove_data:
-	xhci_sideband_remove_endpoint(dev->sb, host_ep);
-err_free_data:
-	xhci_sideband_free_resource_id(dev->sb, res_id);
+err_unclaim_data:
+	usb_offload_ua_unclaim_ep(dev, host_ep, res_id);
 err_stop:
 	usb_offload_ua_stop_stream(dev, subs);
 err_free:
