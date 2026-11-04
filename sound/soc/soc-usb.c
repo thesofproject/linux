@@ -468,6 +468,31 @@ void snd_soc_usb_remove_port(struct snd_soc_usb *usb)
 }
 EXPORT_SYMBOL_GPL(snd_soc_usb_remove_port);
 
+/*
+ * Caller holds ctx_mutex. The device list changed: the items of every route
+ * control did, and so can the pair a route which was not picked for follows.
+ */
+static void snd_soc_usb_notify_routes_changed(struct snd_soc_usb *ctx)
+{
+	int direction;
+
+	if (!ctx->component || !ctx->component->card)
+		return;
+
+	for (direction = 0; direction <= SNDRV_PCM_STREAM_LAST; direction++) {
+		unsigned int route;
+
+		for (route = 0; route < ctx->num_routes[direction]; route++) {
+			struct snd_kcontrol *kctl = ctx->routes[direction][route].kctl;
+
+			if (kctl)
+				snd_ctl_notify(ctx->component->card->snd_card,
+					       SNDRV_CTL_EVENT_MASK_INFO |
+					       SNDRV_CTL_EVENT_MASK_VALUE, &kctl->id);
+		}
+	}
+}
+
 /* Caller holds ctx_mutex. Whether @sdev is on the port's available_devices. */
 static bool snd_soc_usb_device_listed(struct snd_soc_usb *ctx,
 				      struct snd_soc_usb_device *sdev)
@@ -521,6 +546,8 @@ int snd_soc_usb_connect(struct device *usbdev, struct snd_soc_usb_device *sdev)
 
 	list_add_tail(&sdev->available_node, &ctx->available_devices);
 
+	snd_soc_usb_notify_routes_changed(ctx);
+
 exit:
 	mutex_unlock(&ctx_mutex);
 
@@ -571,6 +598,8 @@ int snd_soc_usb_disconnect(struct device *usbdev, struct snd_soc_usb_device *sde
 			}
 		}
 	}
+
+	snd_soc_usb_notify_routes_changed(ctx);
 
 exit:
 	mutex_unlock(&ctx_mutex);

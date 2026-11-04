@@ -118,8 +118,9 @@ Returns 0 on success, and -EOPNOTSUPP on failure.
 audio device detection.  This can be utilized in the BE DAI
 driver to keep track of available USB audio devices.  This is intended
 to be called by the USB offload driver residing in USB SND.  The device is
-added to ``available_devices``. A route nothing was picked for follows its
-default pair, see the selection rules below.
+added to ``available_devices`` and the route controls are notified. A route
+nothing was picked for follows its default pair, see the selection rules
+below.
 
 Returns 0 on success, -ENODEV when no port is registered for ``usbdev`` (the
 device is then not listed and must not be reported as disconnected later),
@@ -576,6 +577,9 @@ Selection rules:
     Writing the current selection is a no-op.  A selection by itself claims
     no USB or DSP resource; the backend reads it with
     snd_soc_usb_get_selected_device() when a stream starts.
+
+Control ``INFO`` and ``VALUE`` change notifications are sent whenever a
+connect, a disconnect or a write changes the item list or the selection.
 
 Existing USB Sound Kcontrol
 ---------------------------
