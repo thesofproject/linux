@@ -1696,20 +1696,20 @@ void hda_set_mach_params(struct snd_soc_acpi_mach *mach,
  */
 static unsigned int hda_uaol_stream_num(struct snd_sof_dev *sdev, int direction)
 {
-	unsigned int tx_streams, rx_streams;
-	u32 caps;
+	unsigned int playback, capture;
 
-	if (hda_uaol_link_caps(sdev, 0, &caps))
+	/* what the gateway configuration can hold is what the DAIs have to offer */
+	static_assert(SOF_UAOL_MAX_PLAYBACK_STREAMS >= SOF_IPC4_UAOL_FIFO_SAO_STREAMS &&
+		      SOF_UAOL_MAX_CAPTURE_STREAMS >= SOF_IPC4_UAOL_FIFO_SAO_STREAMS);
+
+	if (!hda_uaol_available(sdev))
 		return 0;
 
-	tx_streams = FIELD_GET(SOF_IPC4_UAOL_OUTPUT_STREAMS_MASK, caps);
-	rx_streams = FIELD_GET(SOF_IPC4_UAOL_INPUT_STREAMS_MASK, caps);
+	/* the counts the gateway configuration can be built for, see the topology side */
+	if (sof_ipc4_uaol_get_stream_counts(sdev, 0, &playback, &capture))
+		return 0;
 
-	if (direction == SNDRV_PCM_STREAM_PLAYBACK)
-		return min(tx_streams, SOF_UAOL_MAX_PLAYBACK_STREAMS);
-
-	return min(rx_streams > tx_streams ? rx_streams - tx_streams : 0,
-		   SOF_UAOL_MAX_CAPTURE_STREAMS);
+	return direction == SNDRV_PCM_STREAM_PLAYBACK ? playback : capture;
 }
 
 void hda_finalize_mach_params(struct snd_sof_dev *sdev,

@@ -805,6 +805,169 @@ static void sof_ipc4_widget_free_comp_pcm(struct snd_sof_widget *swidget)
 	swidget->private = NULL;
 }
 
+/**
+ * struct sof_ipc4_uaol_fifo_layout - division of a UAOL link FIFO
+ * @tx_size: space available to each transmit stream
+ * @rx_base: start offset of the first receive stream
+ * @rx_size: space available to each receive stream
+ */
+struct sof_ipc4_uaol_fifo_layout {
+	u32 tx_size;
+	u32 rx_base;
+	u32 rx_size;
+};
+
+/**
+ * sof_ipc4_uaol_get_stream_counts - audio streams a UAOL link can run
+ * @sdev: SOF device
+ * @link_idx: index of the UAOL link
+ * @playback: set to the number of playback streams
+ * @capture: set to the number of capture streams
+ *
+ * The firmware reports the output streams of the link and the input streams,
+ * of which one per output stream carries the clock feedback and not audio.
+ * The gateway configuration has the start offsets of two streams per direction
+ * in fixed width fields. A link with more than that, or with no stream to play
+ * to or record from, cannot be configured, and is reported as not usable
+ * instead of having its streams offered and failing later.
+ *
+ * Return: 0 on success, negative error code if the link cannot be used.
+ */
+int sof_ipc4_uaol_get_stream_counts(struct snd_sof_dev *sdev, int link_idx,
+				    unsigned int *playback, unsigned int *capture)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct sof_ipc4_intel_uaol_link_caps *caps;
+	u32 tx_streams, rx_streams;
+
+	if (!ipc4_data->uaol_caps || link_idx >= ipc4_data->uaol_caps->link_count)
+		return -ENODEV;
+
+	caps = &ipc4_data->uaol_caps->link_caps[link_idx];
+
+	tx_streams = FIELD_GET(SOF_IPC4_UAOL_OUTPUT_STREAMS_MASK, caps->stream_caps);
+	rx_streams = FIELD_GET(SOF_IPC4_UAOL_INPUT_STREAMS_MASK, caps->stream_caps);
+
+	if (!tx_streams || rx_streams <= tx_streams)
+		return -EINVAL;
+
+	rx_streams -= tx_streams;
+
+	if (tx_streams > SOF_IPC4_UAOL_FIFO_SAO_STREAMS ||
+	    rx_streams > SOF_IPC4_UAOL_FIFO_SAO_STREAMS)
+		return -EINVAL;
+
+	*playback = tx_streams;
+	*capture = rx_streams;
+
+	return 0;
+}
+EXPORT_SYMBOL(sof_ipc4_uaol_get_stream_counts);
+
+/*
+ * Only the start offset of a stream is programmable, the space it can use
+ * reaches up to the start offset of the next one, so the FIFOs are divided
+ * evenly between the hardware's full stream count for the link - not how
+ * many DAIs SOF happens to configure. Which of the hardware's stream slots
+ * a given USB device's acquire lands on is decided by the xHCI sideband
+ * resource the endpoint gets, within the range of its function, which is
+ * independent of SOF's own widget count: even with only ever one stream
+ * actually running, that one stream can land on any slot of its function,
+ * so every slot needs a real, non-zero share regardless of how many are ever
+ * simultaneously active. Each transmit stream has a clock feedback channel
+ * taking one bus word at the beginning of the receive FIFO, so the receive
+ * streams carrying audio are the reported ones less the transmit stream
+ * count.
+ */
+static int sof_ipc4_uaol_get_fifo_layout(struct snd_sof_dev *sdev, int link_idx,
+					 struct sof_ipc4_uaol_fifo_layout *layout)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct sof_ipc4_intel_uaol_link_caps *caps;
+	unsigned int tx_streams, rx_streams;
+	int ret;
+
+	ret = sof_ipc4_uaol_get_stream_counts(sdev, link_idx, &tx_streams, &rx_streams);
+	if (ret) {
+		dev_err(sdev->dev, "UAOL link %d has no usable streams: %d\n", link_idx, ret);
+		return ret;
+	}
+
+	caps = &ipc4_data->uaol_caps->link_caps[link_idx];
+
+	layout->tx_size = round_down(caps->max_tx_fifo_size / tx_streams,
+				     SOF_IPC4_UAOL_FIFO_BUS_WIDTH);
+	layout->rx_base = tx_streams * SOF_IPC4_UAOL_FIFO_BUS_WIDTH;
+	if (caps->max_rx_fifo_size > layout->rx_base)
+		layout->rx_size = round_down((caps->max_rx_fifo_size - layout->rx_base) /
+					     rx_streams, SOF_IPC4_UAOL_FIFO_BUS_WIDTH);
+	else
+		layout->rx_size = 0;
+
+	if (!layout->tx_size || !layout->rx_size ||
+	    !FIELD_FIT(SOF_IPC4_UAOL_FIFO_SAO_TX1, layout->tx_size) ||
+	    !FIELD_FIT(SOF_IPC4_UAOL_FIFO_SAO_RX1, layout->rx_base + layout->rx_size)) {
+		dev_err(sdev->dev, "UAOL link %d: FIFO sizes tx %u rx %u do not fit the gateway configuration\n",
+			link_idx, caps->max_tx_fifo_size, caps->max_rx_fifo_size);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int sof_ipc4_widget_setup_uaol(struct snd_sof_dev *sdev,
+				      struct snd_sof_widget *swidget,
+				      struct sof_ipc4_copier *ipc4_copier)
+{
+	struct sof_ipc4_uaol_configuration_blob *blob;
+	struct sof_ipc4_uaol_fifo_layout layout;
+	int ret;
+
+	ret = sof_ipc4_uaol_get_fifo_layout(sdev, ipc4_copier->dai_index, &layout);
+	if (ret)
+		return ret;
+
+	blob = kzalloc_obj(*blob);
+	if (!blob)
+		return -ENOMEM;
+
+	blob->xhci_bdf_tlv.type = SOF_IPC4_UAOL_XHCI_BDF_ID;
+	blob->xhci_bdf_tlv.length = sizeof(blob->xhci_bdf);
+	blob->config_tlv.type = SOF_IPC4_UAOL_CONFIG_ID;
+	blob->config_tlv.length = sizeof(blob->config);
+	blob->fifo_sao_tlv.type = SOF_IPC4_UAOL_FIFO_SAO_ID;
+	blob->fifo_sao_tlv.length = sizeof(blob->fifo_sao_tx) + sizeof(blob->fifo_sao_rx);
+	blob->ep_info_tlv.type = SOF_IPC4_UAOL_EP_INFO_ID;
+	blob->ep_info_tlv.length = sizeof(blob->ep_info);
+	blob->feedback_ep_info_tlv.type = SOF_IPC4_UAOL_FEEDBACK_EP_INFO_ID;
+	blob->feedback_ep_info_tlv.length = sizeof(blob->feedback_ep_info);
+	blob->art_divider_tlv.type = SOF_IPC4_UAOL_ART_DIVIDER_ID;
+	blob->art_divider_tlv.length = sizeof(blob->art_divider);
+	blob->service_interval_tlv.type = SOF_IPC4_UAOL_SERVICE_INTERVAL_ID;
+	blob->service_interval_tlv.length = sizeof(blob->service_interval_us);
+
+	/* the stream is only known once the sideband resource is allocated */
+	blob->config = FIELD_PREP(SOF_IPC4_UAOL_CONFIG_LINK_IDX, ipc4_copier->dai_index);
+
+	/* the xHCI global time is already expressed in DSP timer ticks */
+	blob->art_divider = FIELD_PREP(SOF_IPC4_UAOL_ART_MULTIPLIER, 1) |
+			    FIELD_PREP(SOF_IPC4_UAOL_ART_DIVIDER, 1);
+
+	/*
+	 * The transmit stream 0 and the clock feedback channels both start at
+	 * offset 0, every stream after them starts where its predecessor ends.
+	 */
+	blob->fifo_sao_tx = FIELD_PREP(SOF_IPC4_UAOL_FIFO_SAO_TX1, layout.tx_size);
+	blob->fifo_sao_rx = FIELD_PREP(SOF_IPC4_UAOL_FIFO_SAO_RX0, layout.rx_base) |
+			    FIELD_PREP(SOF_IPC4_UAOL_FIFO_SAO_RX1,
+				       layout.rx_base + layout.rx_size);
+
+	ipc4_copier->copier_config = (uint32_t *)blob;
+	ipc4_copier->data.gtw_cfg.config_length = sizeof(*blob) >> 2;
+
+	return 0;
+}
+
 static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
@@ -924,6 +1087,11 @@ static int sof_ipc4_widget_setup_comp_dai(struct snd_sof_widget *swidget)
 		/* set DMIC DAI index as the node_id */
 		ipc4_copier->data.gtw_cfg.node_id |=
 			SOF_IPC4_NODE_INDEX_INTEL_DMIC(ipc4_copier->dai_index);
+		break;
+	case SOF_DAI_INTEL_UAOL:
+		ret = sof_ipc4_widget_setup_uaol(sdev, swidget, ipc4_copier);
+		if (ret)
+			goto free_available_fmt;
 		break;
 	default:
 		ipc4_copier->gtw_attr = kzalloc_obj(*ipc4_copier->gtw_attr);
