@@ -359,6 +359,9 @@ struct snd_sof_dsp_ops {
 	struct snd_soc_acpi_mach * (*machine_select)(struct snd_sof_dev *sdev); /* optional */
 	void (*set_mach_params)(struct snd_soc_acpi_mach *mach,
 				struct snd_sof_dev *sdev); /* optional */
+	/* last word on the params handed to the machine driver, runs with the firmware booted */
+	void (*finalize_mach_params)(struct snd_sof_dev *sdev,
+				     struct snd_soc_acpi_mach_params *params); /* optional */
 
 	/* IPC client ops */
 	int (*register_ipc_clients)(struct snd_sof_dev *sdev); /* optional */
