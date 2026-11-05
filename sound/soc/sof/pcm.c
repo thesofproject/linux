@@ -216,6 +216,19 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	int err = 0;
 
 	if (spcm->prepared[substream->stream]) {
+		if (spcm->stream[dir].suspend_ignored && pcm_ops && pcm_ops->trigger) {
+			ret = pcm_ops->trigger(sdev->component, substream, spcm,
+					       SNDRV_PCM_TRIGGER_STOP, dir);
+			if (ret < 0) {
+				spcm_err(spcm, substream->stream,
+					 "retained stream stop failed %d\n", ret);
+				err = ret;
+			}
+			if (!pcm_ops->platform_stop_during_hw_free)
+				snd_sof_pcm_platform_trigger(sdev, substream,
+						     SNDRV_PCM_TRIGGER_STOP);
+		}
+
 		/* stop DMA first if needed */
 		if (pcm_ops && pcm_ops->platform_stop_during_hw_free)
 			snd_sof_pcm_platform_trigger(sdev, substream,
@@ -235,6 +248,8 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 		spcm->prepared[substream->stream] = false;
 		spcm->pending_stop[substream->stream] = false;
 	}
+
+	spcm->stream[dir].suspend_ignored = false;
 
 	/* reset the DMA */
 	ret = snd_sof_pcm_platform_hw_free(sdev, substream);
@@ -269,8 +284,7 @@ int sof_pcm_free_all_streams(struct snd_sof_dev *sdev)
 		for_each_pcm_streams(dir) {
 			substream = spcm->stream[dir].substream;
 
-			if (!substream || !substream->runtime ||
-			    spcm->stream[dir].suspend_ignored)
+			if (!substream || !substream->runtime)
 				continue;
 
 			if (spcm->stream[dir].list) {
@@ -337,12 +351,12 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	spcm_dbg(spcm, substream->stream, "Entry: prepare\n");
 
 	if (spcm->prepared[substream->stream]) {
+		/* a retained stream is still running, nothing to rebuild */
 		if (!spcm->pending_stop[substream->stream])
 			return 0;
 
 		/*
-		 * this case should be reached in case of xruns where we absolutely
-		 * want to free-up and reset all PCM/DMA resources
+		 * Reset PCM/DMA resources after an xrun.
 		 */
 		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
 		if (ret < 0)
@@ -499,6 +513,10 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		break;
 	}
 
+	if (!ret && (cmd == SNDRV_PCM_TRIGGER_STOP ||
+		     cmd == SNDRV_PCM_TRIGGER_PAUSE_PUSH))
+		spcm->stream[substream->stream].suspend_ignored = false;
+
 	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
 	if (!ret && reset_hw_params)
 		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, false);
@@ -636,6 +654,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 		 */
 	}
 
+	spcm->stream[substream->stream].suspend_ignored = false;
 	spcm->stream[substream->stream].substream = NULL;
 
 	return 0;

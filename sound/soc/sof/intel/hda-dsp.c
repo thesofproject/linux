@@ -852,7 +852,6 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 	hda_dsp_ctrl_ppcap_enable(sdev, false);
 	hda_dsp_ctrl_ppcap_int_enable(sdev, false);
 skip_dsp:
-
 	/* disable hda bus irq and streams */
 	hda_dsp_ctrl_stop_chip(sdev);
 
