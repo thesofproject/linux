@@ -437,6 +437,8 @@ static inline int sof_ipc4_uaol_link_stream(unsigned int stream)
 	return link_stream[stream];
 }
 
+int sof_ipc4_uaol_get_fifo_size(struct snd_sof_dev *sdev, int link_idx, int direction);
+
 /**
  * struct sof_ipc4_copier - copier config data
  * @data: IPC copier data
