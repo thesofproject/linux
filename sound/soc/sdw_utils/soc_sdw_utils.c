@@ -10,6 +10,8 @@
 #include <linux/module.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
+#include <sound/pcm_params.h>
+#include <sound/sdw.h>
 #include <sound/sdca_function.h>
 #include <sound/soc_sdw_utils.h>
 
@@ -2014,6 +2016,192 @@ void asoc_sdw_shutdown(struct snd_pcm_substream *substream)
 	sdw_shutdown_stream(substream);
 }
 EXPORT_SYMBOL_NS(asoc_sdw_shutdown, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_probe(struct snd_soc_dai *dai)
+{
+	void *data = dev_get_drvdata(dai->dev);
+
+	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
+
+	snd_soc_dai_set_drvdata(dai, data);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_probe, "SND_SOC_SDW_UTILS");
+
+void *asoc_sdw_c_amp_get_sdw_stream(struct snd_soc_dai *dai, int direction)
+{
+	void *data = snd_soc_dai_get_drvdata(dai);
+
+	dev_dbg(dai->dev, "%s %s id %d direction %d", __func__, dai->name, dai->id, direction);
+
+	if (data && dai->stream[direction].dma_data)
+		return dai->stream[direction].dma_data;
+	else
+		return ERR_PTR(-EINVAL);
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_get_sdw_stream, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+{
+	struct sdw_stream_runtime *sdw_stream = NULL;
+	int ret;
+
+	dev_dbg(dai->dev, "%s substream stream %d dai %s id %d",
+		__func__, substream->stream, dai->name, dai->id);
+
+	ret = sdw_startup_stream(substream);
+	if (ret) {
+		dev_err(dai->dev, "%s startup failed: %d\n", __func__, ret);
+		return ret;
+	}
+
+	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
+	if (IS_ERR(sdw_stream)) {
+		dev_err(dai->dev, "no stream found for DAI %s\n", dai->name);
+		return PTR_ERR(sdw_stream);
+	}
+
+	sdw_stream->transport_type = SDW_TRANSPORT_PERIPHERAL_PERIPHERAL;
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_startup, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
+{
+	struct sdw_slave *slave = dev_to_sdw_dev(dai->dev);
+	struct sdw_stream_runtime *sdw_stream = NULL;
+	struct sdw_stream_config sconfig = {0};
+	struct sdw_port_config pconfig;
+	int retval;
+
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
+
+	sdw_stream = snd_soc_dai_get_dma_data(dai, substream);
+	if (!sdw_stream)
+		return -EINVAL;
+
+	snd_sdw_params_to_config(substream, params, &sconfig, &pconfig);
+
+	sconfig.type = SDW_STREAM_PCM;
+	sconfig.transport_type = SDW_TRANSPORT_PERIPHERAL_PERIPHERAL;
+	pconfig.num = 2;  /* Use port 2 as port 0 and 1 can be used for BPT */
+
+	retval = sdw_stream_add_master(slave->bus, &sconfig, &pconfig, 1, sdw_stream);
+	if (retval) {
+		dev_err(dai->dev, "%s: Unable to add master, ret=%d\n", __func__, retval);
+		return retval;
+	}
+
+	snd_soc_dai_set_stream(dai, sdw_stream, SNDRV_PCM_STREAM_PLAYBACK);
+	snd_soc_dai_set_stream(dai, sdw_stream, SNDRV_PCM_STREAM_CAPTURE);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_hw_params, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+{
+	struct sdw_stream_runtime *sdw_stream;
+	int ret;
+
+	/*
+	 * whether SNDRV_PCM_STREAM_PLAYBACK/SNDRV_PCM_STREAM_CAPTURE direction is used
+	 * all can enables the companion stream
+	 */
+
+	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
+
+	/* Find stream from first CPU DAI */
+
+	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
+	if (IS_ERR(sdw_stream)) {
+		dev_err(dai->dev, "%s no stream found for DAI %s id %d\n", __func__, dai->name, dai->id);
+		return PTR_ERR(sdw_stream);
+	}
+
+	ret = sdw_prepare_stream(sdw_stream);
+	if (ret) {
+		dev_err(dai->dev, "%s prepare failed: %d\n", __func__, ret);
+		return ret;
+	}
+
+	ret = sdw_enable_stream(sdw_stream);
+	if (ret)
+		dev_err(dai->dev, "%s trigger failed: %d\n", __func__, ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_prepare, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_hw_free(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai)
+{
+	struct sdw_slave *slave = dev_to_sdw_dev(dai->dev);
+	struct sdw_stream_runtime *sdw_stream =
+		snd_soc_dai_get_dma_data(dai, substream);
+	int ret;
+
+	dev_dbg(dai->dev, "%s substream stream %d dai %s id %d",
+		__func__, substream->stream, dai->name, dai->id);
+
+	/* Find stream from first CPU DAI */
+	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
+	if (IS_ERR(sdw_stream)) {
+		dev_err(dai->dev, "%s no stream found for DAI %s\n", __func__, dai->name);
+		return PTR_ERR(sdw_stream);
+	}
+
+	/* A failed prepare/enable leaves the stream CONFIGURED/PREPARED; still remove it from the bus */
+	if (sdw_stream->state == SDW_STREAM_ENABLED) {
+		ret = sdw_disable_stream(sdw_stream);
+		if (ret) {
+			dev_err(dai->dev, "%s trigger (disable stream) failed: %d\n", __func__, ret);
+			return ret;
+		}
+	}
+
+	if (sdw_stream->state == SDW_STREAM_PREPARED ||
+	    sdw_stream->state == SDW_STREAM_DISABLED) {
+		ret = sdw_deprepare_stream(sdw_stream);
+		if (ret) {
+			dev_err(dai->dev, "%s deprepare failed: %d\n", __func__, ret);
+			return ret;
+		}
+	}
+
+	ret = sdw_stream_remove_slave(slave, sdw_stream);
+	if (ret < 0) {
+		dev_err(dai->dev, "%s: remove slave failed: %d\n", __func__, ret);
+		return ret;
+	}
+
+	ret = sdw_stream_remove_master(slave->bus, sdw_stream);
+	if (ret < 0) {
+		dev_err(dai->dev, "remove master from stream %s failed: %d\n",
+			sdw_stream->name, ret);
+		return ret;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_hw_free, "SND_SOC_SDW_UTILS");
+
+void asoc_sdw_c_amp_shutdown(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai)
+{
+	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
+
+	sdw_shutdown_stream(substream);
+
+	snd_soc_dai_stream_dma_data_set_playback(dai, NULL);
+	snd_soc_dai_stream_dma_data_set_capture(dai, NULL);
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_shutdown, "SND_SOC_SDW_UTILS");
 
 static bool asoc_sdw_is_unique_device(const struct snd_soc_acpi_link_adr *adr_link,
 				      unsigned int sdw_version,
