@@ -815,6 +815,79 @@ static int hda_dai_suspend(struct hdac_bus *bus)
 	return 0;
 }
 
+/* An aggregated BE has one link DMA per CPU DAI, find the DAI which owns @hext_stream. */
+static struct snd_soc_dai *
+hda_dai_find_cpu_dai(struct snd_pcm_substream *substream, struct hdac_ext_stream *hext_stream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai;
+	int i;
+
+	for_each_rtd_cpu_dais(rtd, i, cpu_dai) {
+		if (snd_soc_dai_get_dma_data(cpu_dai, substream) == hext_stream)
+			return cpu_dai;
+	}
+
+	return NULL;
+}
+
+/*
+ * A retained WoV BE gets no SUSPEND trigger when its PCM stays suspended into a
+ * D3 transition, so run the SUSPEND sequence here, before its pipeline is freed.
+ */
+static int hda_dai_release_retained_streams(struct snd_sof_dev *sdev)
+{
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	bool skip_fw_ipc = sdev->fw_state != SOF_FW_BOOT_COMPLETE;
+	struct hdac_stream *s;
+	int ret;
+
+	list_for_each_entry(s, &bus->stream_list, list) {
+		struct hdac_ext_stream *hext_stream = stream_to_hdac_ext_stream(s);
+		const struct hda_dai_widget_dma_ops *ops;
+		struct sof_intel_hda_stream *hda_stream;
+		struct snd_pcm_substream *substream;
+		struct snd_soc_dai *cpu_dai;
+
+		hda_stream = hstream_to_sof_hda_stream(hext_stream);
+		substream = hext_stream->link_substream;
+		if (!hda_stream->suspend_ignored || !substream)
+			continue;
+
+		cpu_dai = hda_dai_find_cpu_dai(substream, hext_stream);
+		if (!cpu_dai)
+			return -EINVAL;
+
+		ops = hda_dai_get_ops(substream, cpu_dai);
+		if (!ops)
+			return -EINVAL;
+
+		if (ops->pre_trigger && !skip_fw_ipc) {
+			ret = ops->pre_trigger(sdev, cpu_dai, substream, SNDRV_PCM_TRIGGER_SUSPEND);
+			if (ret < 0)
+				return ret;
+		}
+
+		if (ops->trigger) {
+			ret = ops->trigger(sdev, cpu_dai, substream, SNDRV_PCM_TRIGGER_SUSPEND);
+			if (ret < 0)
+				return ret;
+		}
+
+		if (ops->post_trigger) {
+			ret = ops->post_trigger(sdev, cpu_dai, substream, SNDRV_PCM_TRIGGER_SUSPEND);
+			if (ret < 0)
+				return ret;
+		}
+
+		ret = hda_link_dma_cleanup(substream, hext_stream, cpu_dai, true);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static void ssp_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
 {
 	const struct sof_intel_dsp_desc *chip;
@@ -1088,3 +1161,13 @@ int hda_dsp_dais_suspend(struct snd_sof_dev *sdev)
 
 	return 0;
 }
+
+int hda_dsp_release_retained_streams(struct snd_sof_dev *sdev)
+{
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_LINK)
+	return hda_dai_release_retained_streams(sdev);
+#else
+	return 0;
+#endif
+}
+EXPORT_SYMBOL_NS(hda_dsp_release_retained_streams, "SND_SOC_SOF_INTEL_HDA_COMMON");
