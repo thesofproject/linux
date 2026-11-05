@@ -43,6 +43,7 @@ const struct snd_sof_dsp_ops sof_hda_common_ops = {
 	.machine_register = sof_machine_register,
 	.machine_unregister = sof_machine_unregister,
 	.set_mach_params = hda_set_mach_params,
+	.finalize_mach_params = hda_finalize_mach_params,
 
 	/* debug */
 	.dbg_dump	= hda_dsp_dump,
