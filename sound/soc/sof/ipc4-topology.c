@@ -3736,9 +3736,11 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		ipc_data = ipc4_copier->ipc_config_data;
 
 		/*
-		 * Refresh copier_data and dma_config_tlv in ipc_config_data.
-		 * These may have been updated after ipc_prepare, e.g. when
-		 * link DMA stream tags change after a suspend/resume cycle.
+		 * Refresh copier_data, the gateway configuration and
+		 * dma_config_tlv in ipc_config_data. These may have been
+		 * updated after ipc_prepare, e.g. when link DMA stream tags
+		 * change after a suspend/resume cycle, or when the DAI
+		 * reconfigures its gateway for the resources it reacquired.
 		 *
 		 * copier_data->gtw_cfg.config_length does not include the
 		 * TLV size (it was restored after sof_ipc4_prepare_copier_module),
@@ -3751,6 +3753,10 @@ static int sof_ipc4_widget_setup(struct snd_sof_dev *sdev, struct snd_sof_widget
 		copier_data->gtw_cfg.config_length += tlv_size / 4;
 		memcpy(ipc_data, copier_data, sizeof(*copier_data));
 		copier_data->gtw_cfg.config_length = gtw_cfg_config_length / 4;
+
+		if (gtw_cfg_config_length && ipc4_copier->copier_config)
+			memcpy(ipc_data + sizeof(*copier_data),
+			       ipc4_copier->copier_config, gtw_cfg_config_length);
 
 		if (tlv_size)
 			memcpy(ipc_data + sizeof(*copier_data) + gtw_cfg_config_length,

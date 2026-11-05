@@ -9,6 +9,8 @@
 // over the UAOL instead of the host.
 //
 
+#include <linux/usb/ch9.h>
+#include <linux/usb.h>
 #include <sound/pcm_params.h>
 #include <sound/hdaudio_ext.h>
 #include <sound/hda-mlink.h>
@@ -475,6 +477,78 @@ static struct usb_device *hda_uaol_selected(struct sof_intel_hda_dev *hdev,
 	return NULL;
 }
 
+static u32 uaol_ep_info(const struct usb_offload_stream_hw *hw,
+			const struct usb_offload_ep_info *ep)
+{
+	return FIELD_PREP(SOF_IPC4_UAOL_EP_INFO_DIRECTION,
+			  !!(ep->ep_addr & USB_DIR_IN)) |
+	       FIELD_PREP(SOF_IPC4_UAOL_EP_INFO_NUMBER,
+			  ep->ep_addr & USB_ENDPOINT_NUMBER_MASK) |
+	       FIELD_PREP(SOF_IPC4_UAOL_EP_INFO_SLOT, hw->slot_id) |
+	       FIELD_PREP(SOF_IPC4_UAOL_EP_INFO_SPLIT, hw->split) |
+	       FIELD_PREP(SOF_IPC4_UAOL_EP_INFO_HIGH_SPEED, hw->high_speed) |
+	       FIELD_PREP(SOF_IPC4_UAOL_EP_INFO_MAX_PACKET, ep->maxpacket);
+}
+
+/*
+ * The gateway only knows which USB endpoint to drive once the device is
+ * acquired, so complete the configuration the topology set up.
+ */
+static int uaol_dai_set_endpoint(struct snd_soc_dai *cpu_dai, int direction,
+				 const struct usb_offload_stream_hw *hw)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, direction);
+	struct sof_ipc4_uaol_configuration_blob *blob;
+	struct sof_ipc4_copier *ipc4_copier;
+	u32 stream = hw->data.resource - 1;
+	int link_stream;
+
+	link_stream = sof_ipc4_uaol_link_stream(stream);
+	if (link_stream < 0) {
+		dev_err(cpu_dai->dev, "invalid UAOL stream %u\n", stream);
+		return link_stream;
+	}
+
+	ipc4_copier = widget_to_copier(w);
+	blob = (struct sof_ipc4_uaol_configuration_blob *)ipc4_copier->copier_config;
+
+	blob->config &= ~SOF_IPC4_UAOL_CONFIG_STREAM_IDX;
+	blob->config |= FIELD_PREP(SOF_IPC4_UAOL_CONFIG_STREAM_IDX, stream);
+
+	ipc4_copier->data.gtw_cfg.node_id &= ~SOF_IPC4_NODE_INDEX_MASK;
+	ipc4_copier->data.gtw_cfg.node_id |= SOF_IPC4_NODE_INDEX(link_stream);
+
+	blob->xhci_bdf = FIELD_PREP(SOF_IPC4_UAOL_XHCI_BDF_BUS,
+				    PCI_BUS_NUM(hw->bus_devid)) |
+			 FIELD_PREP(SOF_IPC4_UAOL_XHCI_BDF_DEVICE,
+				    PCI_SLOT(hw->bus_devid)) |
+			 FIELD_PREP(SOF_IPC4_UAOL_XHCI_BDF_FUNCTION,
+				    PCI_FUNC(hw->bus_devid));
+
+	blob->ep_info = uaol_ep_info(hw, &hw->data);
+
+	/* Service interval from the USB endpoint descriptor */
+	blob->service_interval_us = hw->service_interval_us;
+
+	/* the feedback fields are left over from the previously offloaded device */
+	if (hw->has_feedback) {
+		blob->feedback_ep_info = uaol_ep_info(hw, &hw->feedback);
+		blob->config &= ~(SOF_IPC4_UAOL_CONFIG_FEEDBACK_IDX |
+				  SOF_IPC4_UAOL_CONFIG_FEEDBACK_PERIOD);
+		blob->config |= FIELD_PREP(SOF_IPC4_UAOL_CONFIG_FEEDBACK_IDX,
+					   hw->feedback.resource - 1) |
+				/* bInterval form, the firmware polls every 2^(n-1) (micro)frames */
+				FIELD_PREP(SOF_IPC4_UAOL_CONFIG_FEEDBACK_PERIOD,
+					   hw->feedback.interval);
+	} else {
+		blob->feedback_ep_info = 0;
+		blob->config &= ~(SOF_IPC4_UAOL_CONFIG_FEEDBACK_IDX |
+				  SOF_IPC4_UAOL_CONFIG_FEEDBACK_PERIOD);
+	}
+
+	return 0;
+}
+
 static void uaol_set_be_format(struct snd_pcm_hw_params *params, snd_pcm_format_t format)
 {
 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
@@ -487,9 +561,12 @@ static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
 				 struct hda_uaol_stream *stream);
 
 /*
- * Take the device away from the host for as long as the DSP drives its
- * endpoint. The stream is started from hw_params and, after a system
- * suspend, from prepare, which is the only callback the resume path runs.
+ * Take the device away from the host and finish the gateway configuration
+ * with what the acquire reports. The two belong together: the sideband
+ * resource the endpoint lands on is what the stream index and the node
+ * index are derived from, and it need not come back the same. The stream
+ * is started from hw_params and, after a system suspend, from prepare,
+ * which is the only callback the resume path runs.
  */
 static int uaol_dai_start_stream(struct snd_pcm_substream *substream,
 				 struct snd_pcm_hw_params *params,
@@ -531,6 +608,12 @@ static int uaol_dai_start_stream(struct snd_pcm_substream *substream,
 	 */
 	stream->be_format = hw.format;
 	uaol_set_be_format(params, hw.format);
+
+	ret = uaol_dai_set_endpoint(cpu_dai, direction, &hw);
+	if (ret) {
+		usb_offload_release_stream(hdev->uaol, udev, direction, hw.pcm_index);
+		return ret;
+	}
 
 	stream->udev = udev;
 	stream->pcm_index = hw.pcm_index;
