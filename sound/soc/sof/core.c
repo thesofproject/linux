@@ -825,18 +825,21 @@ EXPORT_SYMBOL(snd_sof_device_shutdown);
 int sof_machine_register(struct snd_sof_dev *sdev, void *pdata)
 {
 	struct snd_sof_pdata *plat_data = pdata;
-	const char *drv_name;
-	const void *mach;
-	int size;
+	struct snd_soc_acpi_mach mach;
 
-	drv_name = plat_data->machine->drv_name;
-	mach = plat_data->machine;
-	size = sizeof(*plat_data->machine);
+	/*
+	 * The machine driver gets a copy of the selected machine. The platform
+	 * can adjust the params of that copy with what it only learned from the
+	 * booted firmware, the selected machine itself stays as it was.
+	 */
+	memcpy(&mach, plat_data->machine, sizeof(mach));
+	if (sof_ops(sdev)->finalize_mach_params)
+		sof_ops(sdev)->finalize_mach_params(sdev, &mach.mach_params);
 
 	/* register machine driver, pass machine info as pdata */
 	plat_data->pdev_mach =
-		platform_device_register_data(sdev->dev, drv_name,
-					      PLATFORM_DEVID_NONE, mach, size);
+		platform_device_register_data(sdev->dev, mach.drv_name,
+					      PLATFORM_DEVID_NONE, &mach, sizeof(mach));
 	if (IS_ERR(plat_data->pdev_mach))
 		return PTR_ERR(plat_data->pdev_mach);
 
