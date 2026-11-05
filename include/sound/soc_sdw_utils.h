@@ -153,6 +153,17 @@ int asoc_sdw_hw_params(struct snd_pcm_substream *substream,
 int asoc_sdw_hw_free(struct snd_pcm_substream *substream);
 void asoc_sdw_shutdown(struct snd_pcm_substream *substream);
 
+int asoc_sdw_c_amp_probe(struct snd_soc_dai *dai);
+void *asoc_sdw_c_amp_get_sdw_stream(struct snd_soc_dai *dai, int direction);
+int asoc_sdw_c_amp_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai);
+int asoc_sdw_c_amp_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai);
+int asoc_sdw_c_amp_hw_free(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai);
+int asoc_sdw_c_amp_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai);
+void asoc_sdw_c_amp_shutdown(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai);
+
 const char *asoc_sdw_get_codec_name(struct device *dev,
 				    const struct asoc_sdw_dai_info *dai_info,
 				    const struct snd_soc_acpi_link_adr *adr_link,
