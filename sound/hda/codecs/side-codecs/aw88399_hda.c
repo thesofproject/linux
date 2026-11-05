@@ -12,6 +12,7 @@
 #include <linux/mutex.h>
 #include <linux/pm_runtime.h>
 #include <linux/string.h>
+#include <linux/string_helpers.h>
 #include <sound/hda_codec.h>
 #include "../generic.h"
 #include "hda_component.h"
@@ -129,9 +130,16 @@ static int aw88399_hda_init(struct aw88399_hda *aw88399)
 	if (core->aw_pa)
 		aw88399_dev_set_channel(core, aw88399->channel);
 
-	ret = aw88399_request_firmware_file(core);
+	char *fw_name __free(kfree) =
+		kasprintf(GFP_KERNEL, "awinic/aw88399_acf_%s.bin", aw88399->acpi_subsystem_id);
+	if (!fw_name)
+		return -ENOMEM;
+	string_lower(fw_name, fw_name);
+	ret = aw88399_request_firmware_file(core, fw_name);
 	if (ret)
 		return ret;
+
+	dev_info(dev, "Loaded firmware %s\n", fw_name);
 
 	aw88399->core = core;
 	aw88399->aw_dev = core->aw_pa;
@@ -164,6 +172,8 @@ static const struct aw88399_prop_model aw88399_prop_model_table[] = {
 	{ "17AA3907", aw88399_swap_channels },
 	{ "17AA3927", aw88399_swap_channels },
 	{ "17AA3928", aw88399_swap_channels },
+	{ "17AA3934", aw88399_swap_channels },
+	{ "17AA3935", aw88399_swap_channels },
 	{ "17AA3936", aw88399_swap_channels },
 	{ "17AA3937", aw88399_swap_channels },
 	{ "17AA3938", aw88399_swap_channels },
@@ -187,15 +197,16 @@ static int aw88399_hda_acpi_probe(struct aw88399_hda *aw88399)
 		return -ENODEV;
 	}
 
-	struct device *physdev __free(put_device) =
-		get_device(acpi_get_first_physical_node(adev));
+	struct device *physdev __free(put_device) = acpi_bus_get_primary_device(adev);
 	acpi_dev_put(adev);
 	if (!physdev)
 		return -ENODEV;
 
 	sub = acpi_get_subsystem_id(ACPI_HANDLE(physdev));
-	if (IS_ERR_OR_NULL(sub))
-		return 0;
+	if (IS_ERR_OR_NULL(sub)) {
+		dev_err(aw88399->dev, "ACPI subsystem ID not available\n");
+		return -ENODEV;
+	}
 
 	aw88399->acpi_subsystem_id = devm_kstrdup(aw88399->dev, sub, GFP_KERNEL);
 	kfree(sub);
@@ -348,4 +359,4 @@ MODULE_DESCRIPTION("AW88399 HDA driver");
 MODULE_AUTHOR("Yakov Till <yakov.till@gmail.com>");
 MODULE_AUTHOR("Marco Giunta <marco_giunta@outlook.it>");
 MODULE_LICENSE("GPL");
-MODULE_FIRMWARE("aw88399_acf.bin");
+MODULE_FIRMWARE("awinic/aw88399_acf_*.bin");
