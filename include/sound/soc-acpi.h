@@ -75,6 +75,8 @@ static inline struct snd_soc_acpi_mach *snd_soc_acpi_codec_list(void *arg)
  *		      subsystem_vendor and subsystem_device.
  * @bt_link_mask: BT offload link enabled on the board
  * @uaol_link_mask: USB audio offload links available on the board
+ * @uaol_playback_num: playback streams of each USB audio offload link
+ * @uaol_capture_num: capture streams of each USB audio offload link
  */
 struct snd_soc_acpi_mach_params {
 	u32 acpi_ipc_irq_index;
@@ -92,6 +94,8 @@ struct snd_soc_acpi_mach_params {
 	bool subsystem_id_set;
 	u32 bt_link_mask;
 	u32 uaol_link_mask;
+	u32 uaol_playback_num;
+	u32 uaol_capture_num;
 };
 
 /**

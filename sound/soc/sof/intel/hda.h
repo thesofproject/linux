@@ -21,6 +21,8 @@
 #include "../sof-audio.h"
 #include "shim.h"
 
+struct usb_offload_ctx;
+
 /* PCI registers */
 #define PCI_TCSEL			0x44
 #define PCI_PGCTL			PCI_TCSEL
@@ -426,6 +428,14 @@
 #define SOF_SKL_NUM_DAIS		SOF_SKL_NUM_DAIS_NOCODEC
 #endif
 
+/*
+ * A UAOL link has a stream per direction for each one it can run
+ * concurrently; how many of these the machine driver uses is reported in the
+ * mach_params, with these as the ceiling.
+ */
+#define SOF_UAOL_MAX_PLAYBACK_STREAMS	2
+#define SOF_UAOL_MAX_CAPTURE_STREAMS	2
+
 /* Intel HD Audio SRAM Window 0*/
 #define HDA_DSP_SRAM_REG_ROM_STATUS_SKL	0x8000
 #define HDA_ADSP_SRAM0_BASE_SKL		0x8000
@@ -525,6 +535,8 @@ struct sof_intel_hda_dev {
 
 	/* USB Audio Offload links on the controller, 0 if UAOL is not present */
 	int uaol_link_count;
+	/* streams a link runs per direction, as reported to the machine driver */
+	unsigned int uaol_stream_num[SNDRV_PCM_STREAM_LAST + 1];
 
 	/*
 	 * ACE2+ link DMA stream allocation constraints (stream index =
@@ -563,6 +575,9 @@ struct sof_intel_hda_dev {
 
 	/* sdw context allocated by SoundWire driver */
 	struct sdw_intel_ctx *sdw;
+
+	/* USB audio offload context allocated by the offload library */
+	struct usb_offload_ctx *uaol;
 
 	/* FW clock config, 0:HPRO, 1:LPRO */
 	bool clk_config_lpro;
@@ -934,6 +949,8 @@ static inline bool hda_common_check_sdw_irq(struct snd_sof_dev *sdev)
 
 #endif
 
+int hda_machine_register(struct snd_sof_dev *sdev, void *pdata);
+
 int sdw_hda_dai_hw_params(struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,
 			  struct snd_soc_dai *cpu_dai,
@@ -1016,6 +1033,8 @@ void hda_unregister_clients(struct snd_sof_dev *sdev);
 struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev);
 void hda_set_mach_params(struct snd_soc_acpi_mach *mach,
 			 struct snd_sof_dev *sdev);
+void hda_finalize_mach_params(struct snd_sof_dev *sdev,
+			      struct snd_soc_acpi_mach_params *params);
 
 /* PCI driver selection and probe */
 int hda_pci_intel_probe(struct pci_dev *pci, const struct pci_device_id *pci_id);
