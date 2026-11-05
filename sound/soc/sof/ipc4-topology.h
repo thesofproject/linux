@@ -437,6 +437,7 @@ static inline int sof_ipc4_uaol_link_stream(unsigned int stream)
 	return link_stream[stream];
 }
 
+int sof_ipc4_uaol_get_fifo_size(struct snd_sof_dev *sdev, int link_idx, int direction);
 int sof_ipc4_uaol_get_stream_counts(struct snd_sof_dev *sdev, int link_idx,
 				    unsigned int *playback, unsigned int *capture);
 

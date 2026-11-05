@@ -915,6 +915,28 @@ static int sof_ipc4_uaol_get_fifo_layout(struct snd_sof_dev *sdev, int link_idx,
 	return 0;
 }
 
+/**
+ * sof_ipc4_uaol_get_fifo_size - space in the link FIFO for one UAOL stream
+ * @sdev: SOF device
+ * @link_idx: index of the UAOL link
+ * @direction: SNDRV_PCM_STREAM_PLAYBACK or SNDRV_PCM_STREAM_CAPTURE
+ *
+ * Return: the number of bytes a stream of @direction can use on the link, or a
+ * negative error code.
+ */
+int sof_ipc4_uaol_get_fifo_size(struct snd_sof_dev *sdev, int link_idx, int direction)
+{
+	struct sof_ipc4_uaol_fifo_layout layout;
+	int ret;
+
+	ret = sof_ipc4_uaol_get_fifo_layout(sdev, link_idx, &layout);
+	if (ret)
+		return ret;
+
+	return direction == SNDRV_PCM_STREAM_PLAYBACK ? layout.tx_size : layout.rx_size;
+}
+EXPORT_SYMBOL(sof_ipc4_uaol_get_fifo_size);
+
 static int sof_ipc4_widget_setup_uaol(struct snd_sof_dev *sdev,
 				      struct snd_sof_widget *swidget,
 				      struct sof_ipc4_copier *ipc4_copier)

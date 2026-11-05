@@ -477,6 +477,153 @@ static struct usb_device *hda_uaol_selected(struct sof_intel_hda_dev *hdev,
 	return NULL;
 }
 
+/*
+ * The gateway stages a service interval worth of payload in the link FIFO, so
+ * the space a stream takes is its byte rate per interval. Two intervals have to
+ * fit for the DSP to be able to refill the FIFO while the link drains it.
+ */
+#define SOF_UAOL_FIFO_INTERVALS		2
+
+/*
+ * The gateway is programmed with the valid bits of the format and the link
+ * packs the samples to that width, so the container is not what occupies the
+ * FIFO. S24_LE is 3 bytes: the HDA DMA only knows a 32 bit container, of which
+ * it takes the 24 MSBs and drops the LSB byte. Only a full 32 bit format
+ * takes 4 bytes.
+ */
+static unsigned int uaol_sample_bytes(snd_pcm_format_t format)
+{
+	int width = snd_pcm_format_width(format);
+
+	return width > 0 ? DIV_ROUND_UP(width, BITS_PER_BYTE) : 0;
+}
+
+static unsigned int uaol_min_sample_bytes(const struct snd_mask *formats)
+{
+	unsigned int min_bytes = UINT_MAX;
+	snd_pcm_format_t format;
+
+	pcm_for_each_format(format) {
+		unsigned int bytes;
+
+		if (!snd_mask_test_format(formats, format))
+			continue;
+
+		bytes = uaol_sample_bytes(format);
+		if (bytes)
+			min_bytes = min(min_bytes, bytes);
+	}
+
+	return min_bytes == UINT_MAX ? 0 : min_bytes;
+}
+
+/*
+ * The budget is one dimensional in the byte rate, so the bound it puts on any
+ * one of the three parameters depends on the other two. Taking the smallest
+ * value the other two can still take keeps each bound the loosest one that is
+ * valid, and the refining converges on the combinations that fit.
+ */
+static int uaol_rule_rate_channels(struct snd_pcm_hw_params *params,
+				   struct snd_pcm_hw_rule *rule)
+{
+	/* the product of the two is what the budget bounds, so one limits the other */
+	int other = rule->var == SNDRV_PCM_HW_PARAM_RATE ? SNDRV_PCM_HW_PARAM_CHANNELS :
+							   SNDRV_PCM_HW_PARAM_RATE;
+	struct snd_interval *other_i = hw_param_interval(params, other);
+	unsigned int budget = (uintptr_t)rule->private;
+	unsigned int bytes;
+	struct snd_interval t = { .integer = 1 };
+
+	bytes = uaol_min_sample_bytes(hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT));
+	if (!bytes || !other_i->min)
+		return 0;
+
+	t.max = budget / (other_i->min * bytes);
+
+	return snd_interval_refine(hw_param_interval(params, rule->var), &t);
+}
+
+static int uaol_rule_format(struct snd_pcm_hw_params *params, struct snd_pcm_hw_rule *rule)
+{
+	struct snd_interval *channels = hw_param_interval(params, SNDRV_PCM_HW_PARAM_CHANNELS);
+	struct snd_interval *rate = hw_param_interval(params, SNDRV_PCM_HW_PARAM_RATE);
+	unsigned int budget = (uintptr_t)rule->private;
+	snd_pcm_format_t format;
+	struct snd_mask m;
+
+	if (!rate->min || !channels->min)
+		return 0;
+
+	snd_mask_none(&m);
+	pcm_for_each_format(format) {
+		unsigned int bytes = uaol_sample_bytes(format);
+
+		if (bytes && (u64)channels->min * bytes * rate->min <= budget)
+			snd_mask_set_format(&m, format);
+	}
+
+	return snd_mask_refine(hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT), &m);
+}
+
+/*
+ * The share of the link FIFO a stream gets is fixed when the gateway is
+ * configured, and the rate, the channel count and the format together decide
+ * whether what the stream produces fits in it. Overrunning it is not reported
+ * anywhere, the audio simply comes out corrupted, so keep the combinations that
+ * do not fit off the table.
+ *
+ * This is a property of the link and not of the connected device, hence it is
+ * applied whether or not there is a device to narrow to.
+ */
+static void hda_uaol_set_fifo_constraint(struct snd_sof_dev *sdev,
+					 struct snd_soc_dai *be_dai,
+					 struct snd_pcm_substream *substream)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(be_dai, substream->stream);
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct sof_ipc4_copier *ipc4_copier;
+	unsigned int budget;
+	int size;
+
+	if (!w)
+		return;
+
+	ipc4_copier = widget_to_copier(w);
+
+	size = sof_ipc4_uaol_get_fifo_size(sdev, ipc4_copier->dai_index, substream->stream);
+	if (size <= 0)
+		return;
+
+	/*
+	 * The real service interval is only known once a device's altsetting is
+	 * actually resolved, so this early negotiation-time rule can only offer a
+	 * coarse pre-filter: assume the shortest possible interval (125 us), which
+	 * keeps high-bandwidth devices from being needlessly capped here.
+	 */
+	budget = size / SOF_UAOL_FIFO_INTERVALS * (USEC_PER_SEC / 125);
+
+	snd_pcm_hw_rule_add(runtime, 0, SNDRV_PCM_HW_PARAM_RATE,
+			    uaol_rule_rate_channels, (void *)(uintptr_t)budget,
+			    SNDRV_PCM_HW_PARAM_CHANNELS, SNDRV_PCM_HW_PARAM_FORMAT, -1);
+	snd_pcm_hw_rule_add(runtime, 0, SNDRV_PCM_HW_PARAM_CHANNELS,
+			    uaol_rule_rate_channels, (void *)(uintptr_t)budget,
+			    SNDRV_PCM_HW_PARAM_RATE, SNDRV_PCM_HW_PARAM_FORMAT, -1);
+	snd_pcm_hw_rule_add(runtime, 0, SNDRV_PCM_HW_PARAM_FORMAT,
+			    uaol_rule_format, (void *)(uintptr_t)budget,
+			    SNDRV_PCM_HW_PARAM_RATE, SNDRV_PCM_HW_PARAM_CHANNELS, -1);
+}
+
+/*
+ * A UAOL frontend advertises what the topology configured the link for. Narrow
+ * it to what the link can carry.
+ */
+static void hda_uaol_set_constraint(struct snd_sof_dev *sdev,
+				    struct snd_soc_dai *be_dai,
+				    struct snd_pcm_substream *substream)
+{
+	hda_uaol_set_fifo_constraint(sdev, be_dai, substream);
+}
+
 static u32 uaol_ep_info(const struct usb_offload_stream_hw *hw,
 			const struct usb_offload_ep_info *ep)
 {
@@ -561,6 +708,47 @@ static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
 				 struct hda_uaol_stream *stream);
 
 /*
+ * The negotiation-time rule assumes the shortest service interval. Once the
+ * device's endpoint is known, check the payload of SOF_UAOL_FIFO_INTERVALS
+ * actual service intervals, in whole sample frames, against the FIFO share.
+ * A stream taking exactly the whole share is valid, e.g. 384 kHz stereo on a
+ * 500 us endpoint, only a payload that is larger than the share overruns it.
+ */
+static int uaol_check_fifo_fit(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
+			       struct snd_pcm_substream *substream,
+			       struct snd_pcm_hw_params *params,
+			       const struct usb_offload_stream_hw *hw)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
+	struct sof_ipc4_copier *ipc4_copier;
+	u64 frames, bytes;
+	int size;
+
+	if (!w || !hw->service_interval_us)
+		return 0;
+
+	ipc4_copier = widget_to_copier(w);
+
+	size = sof_ipc4_uaol_get_fifo_size(sdev, ipc4_copier->dai_index, substream->stream);
+	if (size <= 0)
+		return 0;
+
+	frames = DIV_ROUND_UP_ULL((u64)params_rate(params) * hw->service_interval_us,
+				  USEC_PER_SEC);
+	bytes = frames * params_channels(params) *
+		uaol_sample_bytes(params_format(params)) * SOF_UAOL_FIFO_INTERVALS;
+
+	if (bytes > size) {
+		dev_err(cpu_dai->dev,
+			"stream needs %llu bytes of link FIFO, only %d available\n",
+			bytes, size);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/*
  * Take the device away from the host and finish the gateway configuration
  * with what the acquire reports. The two belong together: the sideband
  * resource the endpoint lands on is what the stream index and the node
@@ -608,6 +796,12 @@ static int uaol_dai_start_stream(struct snd_pcm_substream *substream,
 	 */
 	stream->be_format = hw.format;
 	uaol_set_be_format(params, hw.format);
+
+	ret = uaol_check_fifo_fit(sdev, cpu_dai, substream, params, &hw);
+	if (ret) {
+		usb_offload_release_stream(hdev->uaol, udev, direction, hw.pcm_index);
+		return ret;
+	}
 
 	ret = uaol_dai_set_endpoint(cpu_dai, direction, &hw);
 	if (ret) {
@@ -809,6 +1003,26 @@ static const struct snd_soc_dai_ops uaol_dai_ops = {
 	.trigger = uaol_dai_trigger,
 	.prepare = uaol_dai_prepare,
 };
+
+/*
+ * Called for every frontend the platform component opens, so the backends it
+ * routes to are what says whether there is anything to do here.
+ */
+void hda_apply_constraint_from_be(struct snd_sof_dev *sdev,
+				  struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dpcm *dpcm;
+
+	for_each_dpcm_be(rtd, substream->stream, dpcm) {
+		struct snd_soc_dai *be_dai = snd_soc_rtd_to_cpu(dpcm->be, 0);
+
+		if (be_dai->driver->ops == &uaol_dai_ops) {
+			hda_uaol_set_constraint(sdev, be_dai, substream);
+			return;
+		}
+	}
+}
 
 void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops)
 {

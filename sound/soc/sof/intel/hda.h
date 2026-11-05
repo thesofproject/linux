@@ -1218,12 +1218,16 @@ int hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
 void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops);
+void hda_apply_constraint_from_be(struct snd_sof_dev *sdev,
+				  struct snd_pcm_substream *substream);
 int hda_uaol_notify_connect(struct device *dev, struct usb_device *udev,
 			    const struct usb_offload_usb_dev_info *id);
 int hda_uaol_notify_disconnect(struct device *dev, struct usb_device *udev);
 #else
 static inline void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev,
 					    struct snd_sof_dsp_ops *ops) { }
+static inline void hda_apply_constraint_from_be(struct snd_sof_dev *sdev,
+						struct snd_pcm_substream *substream) { }
 #endif
 
 #endif
