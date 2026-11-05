@@ -87,6 +87,7 @@
 enum {
 	RT1320_AIF1,
 	RT1320_AIF2,
+	RT1320_AIF3,
 };
 
 /*
