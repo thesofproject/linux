@@ -66,6 +66,37 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL(snd_sof_pcm_period_elapsed);
 
+static int sof_pcm_set_dai_ignore_suspend(struct snd_soc_pcm_runtime *rtd, int dir)
+{
+	struct snd_soc_dai *dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_dapm_widget *widget = snd_soc_dai_get_widget(dai, dir);
+	struct snd_soc_dapm_widget_list *list;
+	int i, ret;
+
+	if (!widget)
+		return -ENODEV;
+
+	ret = snd_soc_dapm_dai_get_connected_widgets(dai, dir, &list, NULL);
+	if (ret < 0)
+		return ret;
+
+	ret = -ENODEV;
+	snd_soc_dapm_mutex_lock(rtd->card);
+	for (i = 0; i < list->num_widgets; i++) {
+		if (list->widgets[i]->is_ep & SND_SOC_DAPM_EP_SOURCE) {
+			list->widgets[i]->ignore_suspend = 1;
+			ret = 0;
+		}
+	}
+	if (!ret)
+		widget->ignore_suspend = 1;
+	snd_soc_dapm_mutex_unlock(rtd->card);
+
+	snd_soc_dapm_dai_free_widgets(&list);
+
+	return ret;
+}
+
 int
 sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
 				struct snd_sof_pcm *spcm, struct snd_pcm_hw_params *params,
@@ -462,6 +493,11 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		    substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
 		    spcm->stream[substream->stream].d0i3_compatible &&
 		    spcm->stream[substream->stream].dsp_max_burst_size_in_ms <= 1) {
+			ret = sof_pcm_set_dai_ignore_suspend(rtd, substream->stream);
+			if (ret < 0)
+				spcm_err(spcm, substream->stream,
+					 "failed to retain DAPM widgets for WoV: %d\n", ret);
+
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}
