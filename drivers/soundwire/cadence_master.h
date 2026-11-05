@@ -89,6 +89,8 @@ struct sdw_cdns_stream_config {
  * @link_id: Master link id
  * @suspended: status set when suspended, to be used in .prepare
  * @paused: status set in .trigger, to be used in suspend
+ * @retention_revoked: stream retention was revoked in .prepare, to be restored if
+ *	the system suspend is aborted
  * @direction: stream direction
  */
 struct sdw_cdns_dai_runtime {
@@ -100,6 +102,7 @@ struct sdw_cdns_dai_runtime {
 	int link_id;
 	bool suspended;
 	bool paused;
+	bool retention_revoked;
 	int direction;
 };
 
