@@ -349,6 +349,14 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 	     !spcm->stream[substream->stream].pause_supported))
 		runtime->hw.info &= ~SNDRV_PCM_INFO_PAUSE;
 
+	/*
+	 * The backends this frontend can reach are resolved before it is opened,
+	 * and everything the core does to runtime->hw afterwards only narrows
+	 * it, so this is the place to bring in a capability which is only known
+	 * at runtime, like what a UAOL backend can carry.
+	 */
+	hda_apply_constraint_from_be(sdev, substream);
+
 	if (hda_always_enable_dmi_l1 ||
 	    direction == SNDRV_PCM_STREAM_PLAYBACK ||
 	    spcm->stream[substream->stream].d0i3_compatible)
