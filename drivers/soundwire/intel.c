@@ -12,6 +12,7 @@
 #include <linux/io.h>
 #include <sound/pcm_params.h>
 #include <linux/pm_runtime.h>
+#include <linux/suspend.h>
 #include <sound/soc.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
@@ -952,14 +953,19 @@ static int intel_component_dais_suspend(struct snd_soc_component *component)
 	for_each_component_dais(component, dai) {
 		struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
 		struct sdw_cdns_dai_runtime *dai_runtime;
-
-		if (sdw_bus_ignore_suspend(&cdns->bus))
-			continue;
+		struct sdw_stream_runtime *stream;
 
 		dai_runtime = cdns->dai_runtime_array[dai->id];
+		if (!dai_runtime)
+			continue;
 
-		if (dai_runtime)
-			dai_runtime->suspended = true;
+		stream = dai_runtime->stream;
+		if (pm_suspend_target_state == PM_SUSPEND_TO_IDLE &&
+		    stream && stream->ignore_suspend &&
+		    stream->state == SDW_STREAM_ENABLED)
+			continue;
+
+		dai_runtime->suspended = true;
 	}
 
 	return 0;
