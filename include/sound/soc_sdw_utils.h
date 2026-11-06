@@ -30,6 +30,7 @@
  */
 #define SOC_SDW_SIDECAR_AMPS		BIT(16)
 #define SOC_SDW_CODEC_MIC		BIT(17)
+#define SOC_SDW_COMPANION_AMPS		BIT(18)
 
 #define SOC_SDW_UNUSED_DAI_ID		-1
 #define SOC_SDW_JACK_OUT_DAI_ID		0
@@ -128,6 +129,11 @@ struct asoc_sdw_dailink {
 	struct list_head endpoints;
 };
 
+struct asoc_sdw_companion_amp_endpoint {
+	struct asoc_sdw_endpoint *main_amp;
+	struct list_head comp_ends;
+};
+
 extern struct asoc_sdw_codec_info codec_info_list[];
 int asoc_sdw_get_codec_info_list_count(void);
 
@@ -176,10 +182,13 @@ int asoc_sdw_init_simple_dai_link(struct device *dev, struct snd_soc_dai_link *d
 				  const struct snd_soc_ops *ops);
 
 int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
-				 int *num_devs, int *num_ends, int *num_aux);
+				 int *num_devs, int *num_ends, int *num_aux, int *num_comp_amps);
 
 struct asoc_sdw_dailink *asoc_sdw_find_dailink(struct asoc_sdw_dailink *dailinks,
 					       const struct snd_soc_acpi_endpoint *new);
+int asoc_sdw_find_amp_endpoints(struct asoc_sdw_dailink *dailink,
+				struct asoc_sdw_endpoint **amp_ends,
+				int max_ends);
 int asoc_sdw_get_dai_type(u32 type);
 
 int asoc_sdw_parse_sdw_endpoints(struct device *dev,
@@ -187,6 +196,7 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 				 struct snd_soc_aux_dev *soc_aux,
 				 struct asoc_sdw_dailink *soc_dais,
 				 struct asoc_sdw_endpoint *soc_ends,
+				 struct asoc_sdw_companion_amp_endpoint *comp_ends,
 				 int *num_devs);
 
 int asoc_sdw_rtd_init(struct snd_soc_pcm_runtime *rtd);

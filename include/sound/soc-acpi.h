@@ -96,12 +96,14 @@ struct snd_soc_acpi_mach_params {
  * struct snd_soc_acpi_endpoint - endpoint descriptor
  * @num: endpoint number (mandatory, unique per device)
  * @aggregated: 0 (independent) or 1 (logically grouped)
+ * @companion: 0 (independent) or 1 (within a companion amp group)
  * @group_position: zero-based order (only when @aggregated is 1)
- * @group_id: platform-unique group identifier (only when @aggregrated is 1)
+ * @group_id: platform-unique group identifier (only when @aggregrated or companion is 1)
  */
 struct snd_soc_acpi_endpoint {
 	u8 num;
 	u8 aggregated;
+	u8 companion;
 	u8 group_position;
 	u8 group_id;
 };
