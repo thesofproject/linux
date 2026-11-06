@@ -14,6 +14,7 @@
 #include <linux/auxiliary_bus.h>
 #include <sound/pcm_params.h>
 #include <linux/pm_runtime.h>
+#include <linux/suspend.h>
 #include <sound/soc.h>
 #include <linux/soundwire/sdw_registers.h>
 #include <linux/soundwire/sdw.h>
@@ -582,7 +583,7 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_bus *bus = &cdns->bus;
 	u32 clock_stop_quirks;
-	int ret;
+	int i, ret;
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
 		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
@@ -633,6 +634,34 @@ static int __maybe_unused intel_pm_prepare(struct device *dev)
 			dev_err(dev, "%s: intel_resume_child_device failed: %d\n", __func__, ret);
 	}
 
+	/*
+	 * Revoke retention from an earlier S0ix before any controller or codec
+	 * suspends. An already-suspended PCM will not issue another trigger.
+	 */
+	if (pm_suspend_target_state != PM_SUSPEND_TO_IDLE) {
+		for (i = 0; i < cdns->pcm.num_pdi; i++) {
+			struct sdw_cdns_dai_runtime *dai_runtime = cdns->dai_runtime_array[i];
+			struct sdw_stream_runtime *stream;
+
+			if (!dai_runtime || !dai_runtime->stream)
+				continue;
+
+			stream = dai_runtime->stream;
+			if (!stream->ignore_suspend)
+				continue;
+
+			if (stream->state == SDW_STREAM_ENABLED) {
+				ret = sdw_disable_stream(stream);
+				if (ret) {
+					dev_err(dev, "failed to disable retained stream %s: %d\n",
+						stream->name, ret);
+					return ret;
+				}
+			}
+			stream->ignore_suspend = false;
+		}
+	}
+
 	return 0;
 }
 
@@ -649,6 +678,14 @@ static int __maybe_unused intel_suspend(struct device *dev)
 			bus->link_id);
 		return 0;
 	}
+
+	/*
+	 * ignore_suspend is set by the PCM trigger for S0ix and may remain set
+	 * if a later sleep transition does not issue another PCM trigger.
+	 */
+	if (pm_suspend_target_state == PM_SUSPEND_TO_IDLE &&
+	    sdw_bus_ignore_suspend(bus))
+		return 0;
 
 	/* Prevent runtime PM from racing with the code below. */
 	pm_runtime_disable(dev);
@@ -733,6 +770,13 @@ static int __maybe_unused intel_resume(struct device *dev)
 
 	if (bus->prop.hw_disabled || !sdw->startup_done) {
 		dev_dbg(dev, "SoundWire master %d is disabled or not-started, ignoring\n",
+			bus->link_id);
+		return 0;
+	}
+
+	if (pm_suspend_target_state == PM_SUSPEND_TO_IDLE &&
+	    sdw_bus_ignore_suspend(bus)) {
+		dev_dbg(dev, "SoundWire master %d remained active during system suspend\n",
 			bus->link_id);
 		return 0;
 	}

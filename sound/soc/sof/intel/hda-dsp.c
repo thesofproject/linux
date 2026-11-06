@@ -852,6 +852,17 @@ static int hda_suspend(struct snd_sof_dev *sdev, bool runtime_suspend)
 	hda_dsp_ctrl_ppcap_enable(sdev, false);
 	hda_dsp_ctrl_ppcap_int_enable(sdev, false);
 skip_dsp:
+	if (!runtime_suspend) {
+		struct hdac_stream *s;
+
+		/* Do not carry WoV retention state across a system D3 transition. */
+		list_for_each_entry(s, &bus->stream_list, list) {
+			struct sof_intel_hda_stream *hda_stream;
+
+			hda_stream = hstream_to_sof_hda_stream(stream_to_hdac_ext_stream(s));
+			hda_stream->suspend_ignored = false;
+		}
+	}
 
 	/* disable hda bus irq and streams */
 	hda_dsp_ctrl_stop_chip(sdev);
