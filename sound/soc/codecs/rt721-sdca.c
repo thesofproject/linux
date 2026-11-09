@@ -121,9 +121,9 @@ static void rt721_sdca_jack_detect_handler(struct work_struct *work)
 			return;
 		}
 
-			rt_sdca_index_read(rt721->mbq_regmap, RT721_JD_CTRL,
-				RT721_JD_1PIN_GAT_STA1, &real_JD);
-			real_JD &= 0x1;
+		rt_sdca_index_read(rt721->mbq_regmap, RT721_JD_CTRL,
+			RT721_JD_1PIN_GAT_STA1, &real_JD);
+		real_JD &= 0x1;
 		if (real_JD == 0x0)
 			rt721_sdca_jack_reset_state(rt721);
 
@@ -247,6 +247,17 @@ static void rt721_sdca_jack_detect_handler(struct work_struct *work)
 		btn_type = rt_sdca_button_detect(rt721->regmap,
 					RT721_SDCA_ENT_HID01, RT721_BUF_ADDR_HID1,
 					RT721_SDCA_HID_ID);
+
+	if (btn_type < 0) {
+		unsigned int mask = SND_JACK_HEADSET;
+
+		if (rt721->jack_type != SND_JACK_HEADSET)
+			mask |= SND_JACK_BTN_0 | SND_JACK_BTN_1 |
+				SND_JACK_BTN_2 | SND_JACK_BTN_3;
+
+		snd_soc_jack_report(rt721->hs_jack, rt721->jack_type, mask);
+		return;
+	}
 
 	if (rt721->jack_type == 0)
 		btn_type = 0;
