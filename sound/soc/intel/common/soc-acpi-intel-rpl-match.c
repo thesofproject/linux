@@ -8,6 +8,8 @@
 #include <sound/soc-acpi.h>
 #include <sound/soc-acpi-intel-match.h>
 #include <sound/soc-acpi-intel-ssp-common.h>
+#include "soc-acpi-intel-sdca-quirks.h"
+#include "sof-function-topology-lib.h"
 
 static const struct snd_soc_acpi_endpoint single_endpoint = {
 	.num = 0,
@@ -28,6 +30,21 @@ static const struct snd_soc_acpi_endpoint spk_r_endpoint = {
 	.aggregated = 1,
 	.group_position = 1,
 	.group_id = 1,
+};
+
+static const struct snd_soc_acpi_endpoint jack_dmic_endpoints[] = {
+	{
+		.num = 0,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
+	{
+		.num = 1,
+		.aggregated = 0,
+		.group_position = 0,
+		.group_id = 0,
+	},
 };
 
 static const struct snd_soc_acpi_endpoint cs42l43_endpoints[] = {
@@ -162,6 +179,24 @@ static const struct snd_soc_acpi_adr_device rt1318_2_group1_adr[] = {
 		.num_endpoints = 1,
 		.endpoints = &spk_r_endpoint,
 		.name_prefix = "rt1318-2"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt713_vb_0_adr[] = {
+	{
+		.adr = 0x000030025D071301ull,
+		.num_endpoints = ARRAY_SIZE(jack_dmic_endpoints),
+		.endpoints = jack_dmic_endpoints,
+		.name_prefix = "rt713"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt1320_1_single_adr[] = {
+	{
+		.adr = 0x000130025D132001ull,
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt1320-1"
 	}
 };
 
@@ -373,6 +408,20 @@ static const struct snd_soc_acpi_link_adr rpl_sdw_rt1316_link12_rt714_link0[] = 
 	{}
 };
 
+static const struct snd_soc_acpi_link_adr rpl_rt713_vb_l0_rt1320_l1[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(rt713_vb_0_adr),
+		.adr_d = rt713_vb_0_adr,
+	},
+	{
+		.mask = BIT(1),
+		.num_adr = ARRAY_SIZE(rt1320_1_single_adr),
+		.adr_d = rt1320_1_single_adr,
+	},
+	{}
+};
+
 static const struct snd_soc_acpi_link_adr rpl_sdca_rvp[] = {
 	{
 		.mask = BIT(0),
@@ -491,6 +540,14 @@ EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_rpl_machines);
 
 /* this table is used when there is no I2S codec present */
 struct snd_soc_acpi_mach snd_soc_acpi_intel_rpl_sdw_machines[] = {
+	{
+		.link_mask = BIT(0) | BIT(1),
+		.links = rpl_rt713_vb_l0_rt1320_l1,
+		.drv_name = "sof_sdw",
+		.machine_check = snd_soc_acpi_intel_sdca_is_device_rt712_vb,
+		.sof_tplg_filename = "sof-rpl-dummy.tplg",
+		.get_function_tplg_files = sof_sdw_get_tplg_files,
+	},
 	{
 		.link_mask = BIT(0),
 		.links = rpl_cs42l43_l0,
