@@ -769,7 +769,7 @@ static int amd_sdw_hw_params(struct snd_pcm_substream *substream,
 {
 	struct amd_sdw_manager *amd_manager = snd_soc_dai_get_drvdata(dai);
 	struct sdw_amd_dai_runtime *dai_runtime;
-	struct sdw_stream_config sconfig;
+	struct sdw_stream_config sconfig = {0};
 	int ch, dir;
 	int ret;
 
