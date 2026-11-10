@@ -226,6 +226,7 @@ struct sdw_intel_ops {
 	int (*free_stream)(struct device *dev,
 			   struct sdw_intel_stream_free_data *free_data);
 	int (*trigger)(struct snd_pcm_substream *substream, int cmd, struct snd_soc_dai *dai);
+	bool (*ignore_suspend)(struct device *dev);
 };
 
 /**
