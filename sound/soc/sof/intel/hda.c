@@ -1320,8 +1320,9 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 	struct snd_soc_acpi_mach *mach;
 	struct sof_intel_hda_dev *hdev;
 	struct sdw_slave *slave;
+	unsigned long deadline;
 	int link_index, link_num;
-	unsigned long time;
+	long remaining;
 	int amp_index = 1;
 	u32 link_mask = 0;
 	int i;
@@ -1428,27 +1429,21 @@ static struct snd_soc_acpi_mach *hda_sdw_machine_select(struct snd_sof_dev *sdev
 	 * not enumerated
 	 */
 	link_mask = 0;
+	/* One timeout budget shared by all peripherals */
+	deadline = jiffies + msecs_to_jiffies(SDW_ENUM_TIMEOUT_MS);
 	/* Generate snd_soc_acpi_link_adr struct for each peripheral reported by the ACPI table */
 	for (i = 0; i < peripherals->num_peripherals; i++) {
 		slave = peripherals->array[i];
 
-		if (slave->dev_num_sticky)
-			goto skip_wait_link_enumeration;
-
-		time = wait_for_completion_timeout(&slave->enumeration_complete,
-						   msecs_to_jiffies(SDW_ENUM_TIMEOUT_MS));
-		if (!time) {
-			dev_warn(&slave->dev, "The peripheral is not present\n");
-			continue;
-		}
-
-		/* Check if the SoundWire peripheral is present */
 		if (!slave->dev_num_sticky) {
-			dev_warn(&slave->dev, "SoundWire peripheral is not present\n");
-			continue;
+			remaining = max_t(long, (long)(deadline - jiffies), 0);
+			if (!wait_for_completion_timeout(&slave->enumeration_complete,
+							 remaining) ||
+			    !slave->dev_num_sticky) {
+				dev_warn(&slave->dev, "SoundWire peripheral is not present\n");
+				continue;
+			}
 		}
-
-skip_wait_link_enumeration:
 
 		/* link_index = the number of used links below the current link */
 		link_index = hweight32(link_mask & (BIT(slave->bus->link_id) - 1));
