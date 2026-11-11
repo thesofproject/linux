@@ -1364,6 +1364,7 @@ static int sof_parse_pin_binding(struct snd_sof_widget *swidget,
 {
 	const struct sof_topology_token *pin_binding_token;
 	char *pin_binding[SOF_WIDGET_MAX_NUM_PINS];
+	u32 num_bound = 0;
 	int token_count;
 	u32 num_pins;
 	char **pb;
@@ -1387,18 +1388,35 @@ static int sof_parse_pin_binding(struct snd_sof_widget *swidget,
 	if (ret < 0)
 		goto err;
 
-	/* copy pin binding array to swidget only if it is defined in topology */
-	if (pin_binding[0]) {
-		pb = kmemdup_array(pin_binding, num_pins, sizeof(char *), GFP_KERNEL);
-		if (!pb) {
-			ret = -ENOMEM;
-			goto err;
-		}
-		if (pin_type == SOF_PIN_TYPE_INPUT)
-			swidget->input_pin_binding = pb;
-		else
-			swidget->output_pin_binding = pb;
+	for (i = 0; i < num_pins; i++) {
+		if (pin_binding[i])
+			num_bound++;
 	}
+
+	/* pin binding is optional */
+	if (!num_bound)
+		return 0;
+
+	/* if defined, the pin binding must cover all pins */
+	if (num_bound != num_pins) {
+		dev_err(swidget->scomp->dev,
+			"%s: Not all %s pins have bindings defined (%u of %u)\n",
+			swidget->widget->name,
+			pin_type == SOF_PIN_TYPE_INPUT ? "input" : "output",
+			num_bound, num_pins);
+		ret = -EINVAL;
+		goto err;
+	}
+
+	pb = kmemdup_array(pin_binding, num_pins, sizeof(char *), GFP_KERNEL);
+	if (!pb) {
+		ret = -ENOMEM;
+		goto err;
+	}
+	if (pin_type == SOF_PIN_TYPE_INPUT)
+		swidget->input_pin_binding = pb;
+	else
+		swidget->output_pin_binding = pb;
 
 	return 0;
 
