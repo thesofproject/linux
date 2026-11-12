@@ -15,6 +15,7 @@
 #include "sof-audio.h"
 #include "ipc4-fw-reg.h"
 #include "ipc4-priv.h"
+#include "ipc4-wov.h"
 #include "ipc4-topology.h"
 #include "ipc4-telemetry.h"
 #include "ops.h"
@@ -839,6 +840,9 @@ static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 		break;
 	case SOF_IPC4_NOTIFY_EXCEPTION_CAUGHT:
 		snd_sof_dsp_panic(sdev, 0, true);
+		break;
+	case SOF_IPC4_NOTIFY_PHRASE_DETECTED:
+		sof_ipc4_wov_phrase_detected(sdev, ipc4_msg);
 		break;
 	case SOF_IPC4_NOTIFY_MODULE_NOTIFICATION:
 		data_size = sizeof(struct sof_ipc4_notify_module_data);
