@@ -79,6 +79,7 @@ struct iso_pinfo {
 	bool			qos_user_set;
 	__u8			base_len;
 	__u8			base[BASE_MAX_LENGTH];
+	struct bt_codec		codec;
 	struct iso_conn		*conn;
 	struct delayed_work	timeout_work;
 };
@@ -468,6 +469,8 @@ static int iso_connect_bis(struct sock *sk)
 
 	lockdep_assert_held(&hcon->hdev->lock);
 
+	hcon->codec = iso_pi(sk)->codec;
+
 	conn = iso_conn_add(hcon);
 	if (!conn) {
 		hci_conn_drop(hcon);
@@ -580,6 +583,8 @@ static int iso_connect_cis(struct sock *sk)
 		err = -EISCONN;
 		goto unlock;
 	}
+
+	hcon->codec = iso_pi(sk)->codec;
 
 	conn = iso_conn_add(hcon);
 	if (!conn) {
@@ -990,6 +995,7 @@ static void iso_sock_init(struct sock *sk, struct sock *parent)
 	if (parent) {
 		sk->sk_type = parent->sk_type;
 		bt_sk(sk)->flags = bt_sk(parent)->flags;
+		iso_pi(sk)->codec = iso_pi(parent)->codec;
 		security_sk_clone(parent, sk);
 	}
 }
@@ -1046,6 +1052,8 @@ static struct sock *iso_sock_alloc(struct net *net, struct socket *sock,
 
 	iso_pi(sk)->qos = default_qos;
 	iso_pi(sk)->sync_handle = -1;
+	iso_pi(sk)->codec.id = BT_CODEC_TRANSPARENT;
+	iso_pi(sk)->codec.data_path = 0x00;
 
 	INIT_DELAYED_WORK(&iso_pi(sk)->timeout_work, iso_sock_timeout);
 
@@ -1391,6 +1399,8 @@ static int iso_listen_bis(struct sock *sk)
 	}
 
 	lockdep_assert_held(&hcon->hdev->lock);
+
+	hcon->codec = iso_pi(sk)->codec;
 
 	conn = iso_conn_add(hcon);
 	if (!conn) {
@@ -1960,6 +1970,9 @@ static int iso_sock_setsockopt(struct socket *sock, int level, int optname,
 	struct sock *sk = sock->sk;
 	int err = 0;
 	struct bt_iso_qos qos = default_qos;
+	struct bt_codecs *codecs;
+	struct hci_dev *hdev;
+	__u8 buffer[255];
 	u32 opt;
 
 	BT_DBG("sk %p", sk);
@@ -2035,6 +2048,56 @@ static int iso_sock_setsockopt(struct socket *sock, int level, int optname,
 
 		break;
 
+	case BT_CODEC:
+		if (sk->sk_state != BT_OPEN && sk->sk_state != BT_BOUND &&
+		    sk->sk_state != BT_LISTEN && sk->sk_state != BT_CONNECT2) {
+			err = -EINVAL;
+			break;
+		}
+
+		hdev = hci_get_route(&iso_pi(sk)->dst, &iso_pi(sk)->src,
+				     iso_pi(sk)->src_type);
+		if (!hdev) {
+			err = -EBADFD;
+			break;
+		}
+
+		if (!hci_dev_test_flag(hdev, HCI_OFFLOAD_CODECS_ENABLED) ||
+		    !hdev->get_data_path_id) {
+			hci_dev_put(hdev);
+			err = -EOPNOTSUPP;
+			break;
+		}
+
+		if (optlen < sizeof(struct bt_codecs) ||
+		    optlen > sizeof(buffer)) {
+			hci_dev_put(hdev);
+			err = -EINVAL;
+			break;
+		}
+
+		err = copy_struct_from_sockptr(buffer, sizeof(buffer), optval,
+					       optlen);
+		if (err) {
+			hci_dev_put(hdev);
+			break;
+		}
+
+		codecs = (void *)buffer;
+
+		if (codecs->num_codecs != 1 ||
+		    optlen < struct_size(codecs, codecs, codecs->num_codecs)) {
+			hci_dev_put(hdev);
+			err = -EINVAL;
+			break;
+		}
+
+		iso_pi(sk)->codec = codecs->codecs[0];
+		if (iso_pi(sk)->conn && iso_pi(sk)->conn->hcon)
+			iso_pi(sk)->conn->hcon->codec = iso_pi(sk)->codec;
+		hci_dev_put(hdev);
+		break;
+
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -2050,6 +2113,12 @@ static int iso_sock_getsockopt(struct socket *sock, int level, int optname,
 	struct sock *sk = sock->sk;
 	struct bt_iso_qos *qos;
 	int len, val, err = 0;
+	int buf_len;
+	struct codec_list *c;
+	u8 num_codecs, i;
+	struct hci_dev *hdev;
+	struct hci_codec_caps *caps;
+	struct bt_codec codec;
 	u8 base_len;
 	u8 *base;
 
@@ -2103,6 +2172,94 @@ static int iso_sock_getsockopt(struct socket *sock, int level, int optname,
 		opt->optlen = len;
 		if (copy_to_iter(base, len, &opt->iter_out) != len)
 			err = -EFAULT;
+
+		break;
+
+	case BT_CODEC:
+		num_codecs = 0;
+		buf_len = 0;
+
+		hdev = hci_get_route(&iso_pi(sk)->dst, &iso_pi(sk)->src,
+				     iso_pi(sk)->src_type);
+		if (!hdev) {
+			err = -EBADFD;
+			break;
+		}
+
+		if (!hci_dev_test_flag(hdev, HCI_OFFLOAD_CODECS_ENABLED) ||
+		    !hdev->get_data_path_id) {
+			hci_dev_put(hdev);
+			err = -EOPNOTSUPP;
+			break;
+		}
+
+		release_sock(sk);
+
+		hci_dev_lock(hdev);
+		list_for_each_entry(c, &hdev->local_codecs, list) {
+			if (c->transport != HCI_TRANSPORT_LE_CIS &&
+			    c->transport != HCI_TRANSPORT_LE_BIS)
+				continue;
+			num_codecs++;
+			for (i = 0, caps = c->caps; i < c->num_caps; i++) {
+				buf_len += 1 + caps->len;
+				caps = (void *)&caps->data[caps->len];
+			}
+			buf_len += sizeof(struct bt_codec);
+		}
+		hci_dev_unlock(hdev);
+
+		buf_len += sizeof(struct bt_codecs);
+		if (buf_len > len) {
+			hci_dev_put(hdev);
+			return -ENOBUFS;
+		}
+
+		if (copy_to_iter(&num_codecs, sizeof(num_codecs),
+				 &opt->iter_out) != sizeof(num_codecs)) {
+			hci_dev_put(hdev);
+			return -EFAULT;
+		}
+
+		hci_dev_lock(hdev);
+		list_for_each_entry(c, &hdev->local_codecs, list) {
+			if (c->transport != HCI_TRANSPORT_LE_CIS &&
+			    c->transport != HCI_TRANSPORT_LE_BIS)
+				continue;
+
+			codec.id = c->id;
+			codec.cid = c->cid;
+			codec.vid = c->vid;
+			err = hdev->get_data_path_id(hdev, &codec.data_path);
+			if (err < 0)
+				break;
+			codec.num_caps = c->num_caps;
+			if (copy_to_iter(&codec, sizeof(codec), &opt->iter_out)
+			    != sizeof(codec)) {
+				err = -EFAULT;
+				break;
+			}
+
+			len = 0;
+			for (i = 0, caps = c->caps; i < c->num_caps; i++) {
+				len += 1 + caps->len;
+				caps = (void *)&caps->data[caps->len];
+			}
+
+			if (len &&
+			    copy_to_iter(c->caps, len, &opt->iter_out) != len) {
+				err = -EFAULT;
+				break;
+			}
+		}
+
+		hci_dev_unlock(hdev);
+		hci_dev_put(hdev);
+
+		lock_sock(sk);
+
+		if (!err)
+			opt->optlen = buf_len;
 
 		break;
 

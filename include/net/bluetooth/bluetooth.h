@@ -247,6 +247,8 @@ struct bt_codecs {
 #define BT_CODEC_CVSD		0x02
 #define BT_CODEC_TRANSPARENT	0x03
 #define BT_CODEC_MSBC		0x05
+#define BT_CODEC_LC3		0x06
+#define BT_CODEC_VENDOR		0xff
 
 #define BT_ISO_BASE		20
 

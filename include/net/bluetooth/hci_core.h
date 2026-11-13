@@ -1637,6 +1637,8 @@ static inline bool hci_is_le_conn_scanning(struct hci_dev *hdev)
 }
 
 int hci_disconnect(struct hci_conn *conn, __u8 reason);
+int hci_configure_datapath(struct hci_dev *hdev, __u8 link,
+			   struct bt_codec *codec);
 bool hci_setup_sync(struct hci_conn *conn, __u16 handle);
 bool hci_accept_sync(struct hci_conn *conn);
 void hci_sco_setup(struct hci_conn *conn, __u8 status);

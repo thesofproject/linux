@@ -3512,7 +3512,10 @@ static inline __u16 hci_acl_dlen(const struct sk_buff *skb)
 #define hci_iso_data_flags(h)		((h) >> 14)
 
 /* codec transport types */
+#define HCI_TRANSPORT_ACL	0x00
 #define HCI_TRANSPORT_SCO_ESCO	0x01
+#define HCI_TRANSPORT_LE_CIS	0x02
+#define HCI_TRANSPORT_LE_BIS	0x03
 
 /* le24 support */
 static inline void hci_cpu_to_le24(__u32 val, __u8 dst[3])

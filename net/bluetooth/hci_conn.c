@@ -229,7 +229,52 @@ static bool find_next_esco_param(struct hci_conn *conn,
 	return conn->attempt <= size;
 }
 
-static int configure_datapath_sync(struct hci_dev *hdev, struct bt_codec *codec)
+int hci_configure_datapath(struct hci_dev *hdev, __u8 link,
+			   struct bt_codec *codec)
+{
+	int err;
+	__u8 vnd_len, *vnd_data = NULL;
+	struct hci_op_configure_data_path *cmd = NULL;
+
+	if (!codec->data_path || !hdev->get_codec_config_data)
+		return 0;
+
+	err = hdev->get_codec_config_data(hdev, link, codec, &vnd_len,
+					  &vnd_data);
+	if (err < 0)
+		goto error;
+
+	cmd = kzalloc(sizeof(*cmd) + vnd_len, GFP_ATOMIC);
+	if (!cmd) {
+		err = -ENOMEM;
+		goto error;
+	}
+
+	err = hdev->get_data_path_id(hdev, &cmd->data_path_id);
+	if (err < 0)
+		goto error;
+
+	cmd->vnd_len = vnd_len;
+	memcpy(cmd->vnd_data, vnd_data, vnd_len);
+
+	cmd->direction = 0x00;
+	err = hci_send_cmd(hdev, HCI_CONFIGURE_DATA_PATH,
+			   sizeof(*cmd) + vnd_len, cmd);
+	if (err < 0)
+		goto error;
+
+	cmd->direction = 0x01;
+	err = hci_send_cmd(hdev, HCI_CONFIGURE_DATA_PATH,
+			   sizeof(*cmd) + vnd_len, cmd);
+
+error:
+	kfree(cmd);
+	kfree(vnd_data);
+	return err;
+}
+
+static int configure_datapath_sync(struct hci_dev *hdev, __u8 link,
+				   struct bt_codec *codec)
 {
 	int err;
 	__u8 vnd_len, *vnd_data = NULL;
@@ -242,7 +287,7 @@ static int configure_datapath_sync(struct hci_dev *hdev, struct bt_codec *codec)
 	if (!codec->data_path || !hdev->get_codec_config_data)
 		return 0;
 
-	err = hdev->get_codec_config_data(hdev, ESCO_LINK, codec, &vnd_len,
+	err = hdev->get_codec_config_data(hdev, link, codec, &vnd_len,
 					  &vnd_data);
 	if (err < 0)
 		goto error;
@@ -288,7 +333,7 @@ static int hci_enhanced_setup_sync(struct hci_dev *hdev, void *data)
 
 	bt_dev_dbg(hdev, "hcon %p", conn);
 
-	configure_datapath_sync(hdev, &conn->codec);
+	configure_datapath_sync(hdev, ESCO_LINK, &conn->codec);
 
 	conn->state = BT_CONNECT;
 	conn->out = true;
@@ -505,7 +550,7 @@ static int hci_enhanced_accept_sync(struct hci_dev *hdev, void *data)
 
 	bt_dev_dbg(hdev, "hcon %p", conn);
 
-	configure_datapath_sync(hdev, &conn->codec);
+	configure_datapath_sync(hdev, ESCO_LINK, &conn->codec);
 
 	memset(&cp, 0x00, sizeof(cp));
 
