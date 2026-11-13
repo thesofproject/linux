@@ -3650,9 +3650,6 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 	 */
 	btintel_load_ddc_config(hdev, ddcname);
 
-	/* Read supported use cases and set callbacks to fetch datapath id */
-	btintel_configure_offload(hdev);
-
 	hci_dev_clear_flag(hdev, HCI_QUALITY_REPORT);
 
 	/* Send sar values to controller */
@@ -3672,6 +3669,12 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 	*ver = new_ver;
 
 finish:
+	/* Read supported use cases and set callbacks to fetch datapath id.
+	 * Run this in finish: so warm reboots (where ver->img_type is already
+	 * BTINTEL_IMG_OP) also register offload callbacks.
+	 */
+	btintel_configure_offload(hdev);
+
 	/* Set the event mask for Intel specific vendor events. This enables
 	 * a few extra events that are useful during general operation. It
 	 * does not enable any debugging related events.
