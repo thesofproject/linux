@@ -884,6 +884,9 @@ struct sdw_bpt_msg;
  * Bits 31:24 are reserved.
  * @get_device_num: Callback for vendor-specific device_number allocation
  * @put_device_num: Callback for vendor-specific device_number release
+ * @get_port: Reserve an available manager data port, or return a negative error.
+ * Called with bus_lock held.
+ * @put_port: Release a port reserved by get_port, with bus_lock held.
  * @new_peripheral_assigned: Callback to handle enumeration of new peripheral.
  * @bpt_send_async: reserve resources for BPT stream and send message
  * using BTP protocol
@@ -902,6 +905,8 @@ struct sdw_master_ops {
 	u32 (*read_ping_status)(struct sdw_bus *bus);
 	int (*get_device_num)(struct sdw_bus *bus, struct sdw_slave *slave);
 	void (*put_device_num)(struct sdw_bus *bus, struct sdw_slave *slave);
+	int (*get_port)(struct sdw_bus *bus);
+	void (*put_port)(struct sdw_bus *bus, unsigned int port);
 	void (*new_peripheral_assigned)(struct sdw_bus *bus,
 					struct sdw_slave *slave,
 					int dev_num);

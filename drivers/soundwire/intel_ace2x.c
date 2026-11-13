@@ -928,6 +928,8 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd, struct sn
 }
 
 static const struct snd_soc_dai_ops intel_pcm_dai_ops = {
+	.probe = intel_dai_probe,
+	.remove = intel_dai_remove,
 	.hw_params = intel_hw_params,
 	.prepare = intel_prepare,
 	.hw_free = intel_hw_free,
