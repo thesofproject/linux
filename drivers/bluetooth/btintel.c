@@ -2651,6 +2651,7 @@ static int btintel_configure_offload(struct hci_dev *hdev)
 	if (use_cases->preset[0] & 0x03) {
 		hdev->get_data_path_id = btintel_get_data_path_id;
 		hdev->get_codec_config_data = btintel_get_codec_config_data;
+		hci_dev_set_flag(hdev, HCI_OFFLOAD_CODECS_ENABLED);
 	}
 error:
 	kfree_skb(skb);
