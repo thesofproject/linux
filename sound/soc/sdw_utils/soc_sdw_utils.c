@@ -10,6 +10,8 @@
 #include <linux/module.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
+#include <sound/pcm_params.h>
+#include <sound/sdw.h>
 #include <sound/sdca_function.h>
 #include <sound/soc_sdw_utils.h>
 
@@ -370,8 +372,17 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 				.quirk = SOC_SDW_CODEC_MIC,
 				.quirk_exclude = true,
 			},
+			/* Companion amp */
+			{
+				.direction = {true, true},
+				.dai_name = "rt712-sdca-aif4",
+				.dai_type = SOC_SDW_DAI_TYPE_AMP,
+				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_AMP_IN_DAI_ID},
+				.rtd_init = asoc_sdw_rt_mf_sdca_spk_rtd_init,
+				.quirk = SOC_SDW_COMPANION_AMPS,
+			},
 		},
-		.dai_num = 3,
+		.dai_num = 4,
 	},
 	{
 		.vendor_id = 0x025d,
@@ -535,8 +546,16 @@ struct asoc_sdw_codec_info codec_info_list[] = {
 				.widgets = generic_dmic_widgets,
 				.num_widgets = ARRAY_SIZE(generic_dmic_widgets),
 			},
+			/* Companion amp */
+			{
+				.direction = {true, true},
+				.dai_name = "rt1320-aif3",
+				.dai_type = SOC_SDW_DAI_TYPE_AMP,
+				.dailink = {SOC_SDW_AMP_OUT_DAI_ID, SOC_SDW_AMP_IN_DAI_ID},
+				.quirk = SOC_SDW_COMPANION_AMPS,
+			},
 		},
-		.dai_num = 2,
+		.dai_num = 3,
 	},
 	{
 		.vendor_id = 0x025d,
@@ -2015,6 +2034,192 @@ void asoc_sdw_shutdown(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL_NS(asoc_sdw_shutdown, "SND_SOC_SDW_UTILS");
 
+int asoc_sdw_c_amp_probe(struct snd_soc_dai *dai)
+{
+	void *data = dev_get_drvdata(dai->dev);
+
+	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
+
+	snd_soc_dai_set_drvdata(dai, data);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_probe, "SND_SOC_SDW_UTILS");
+
+void *asoc_sdw_c_amp_get_sdw_stream(struct snd_soc_dai *dai, int direction)
+{
+	void *data = snd_soc_dai_get_drvdata(dai);
+
+	dev_dbg(dai->dev, "%s %s id %d direction %d", __func__, dai->name, dai->id, direction);
+
+	if (data && dai->stream[direction].dma_data)
+		return dai->stream[direction].dma_data;
+	else
+		return ERR_PTR(-EINVAL);
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_get_sdw_stream, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+{
+	struct sdw_stream_runtime *sdw_stream = NULL;
+	int ret;
+
+	dev_dbg(dai->dev, "%s substream stream %d dai %s id %d",
+		__func__, substream->stream, dai->name, dai->id);
+
+	ret = sdw_startup_stream(substream);
+	if (ret) {
+		dev_err(dai->dev, "%s startup failed: %d\n", __func__, ret);
+		return ret;
+	}
+
+	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
+	if (IS_ERR(sdw_stream)) {
+		dev_err(dai->dev, "no stream found for DAI %s\n", dai->name);
+		return PTR_ERR(sdw_stream);
+	}
+
+	sdw_stream->transport_type = SDW_TRANSPORT_PERIPHERAL_PERIPHERAL;
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_startup, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
+{
+	struct sdw_slave *slave = dev_to_sdw_dev(dai->dev);
+	struct sdw_stream_runtime *sdw_stream = NULL;
+	struct sdw_stream_config sconfig = {0};
+	struct sdw_port_config pconfig;
+	int retval;
+
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
+
+	sdw_stream = snd_soc_dai_get_dma_data(dai, substream);
+	if (!sdw_stream)
+		return -EINVAL;
+
+	snd_sdw_params_to_config(substream, params, &sconfig, &pconfig);
+
+	sconfig.type = SDW_STREAM_PCM;
+	sconfig.transport_type = SDW_TRANSPORT_PERIPHERAL_PERIPHERAL;
+	pconfig.num = 2;  /* Use port 2 as port 0 and 1 can be used for BPT */
+
+	retval = sdw_stream_add_master(slave->bus, &sconfig, &pconfig, 1, sdw_stream);
+	if (retval) {
+		dev_err(dai->dev, "%s: Unable to add master, ret=%d\n", __func__, retval);
+		return retval;
+	}
+
+	snd_soc_dai_set_stream(dai, sdw_stream, SNDRV_PCM_STREAM_PLAYBACK);
+	snd_soc_dai_set_stream(dai, sdw_stream, SNDRV_PCM_STREAM_CAPTURE);
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_hw_params, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
+{
+	struct sdw_stream_runtime *sdw_stream;
+	int ret;
+
+	/*
+	 * whether SNDRV_PCM_STREAM_PLAYBACK/SNDRV_PCM_STREAM_CAPTURE direction is used
+	 * all can enables the companion stream
+	 */
+
+	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
+
+	/* Find stream from first CPU DAI */
+
+	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
+	if (IS_ERR(sdw_stream)) {
+		dev_err(dai->dev, "%s no stream found for DAI %s id %d\n", __func__, dai->name, dai->id);
+		return PTR_ERR(sdw_stream);
+	}
+
+	ret = sdw_prepare_stream(sdw_stream);
+	if (ret) {
+		dev_err(dai->dev, "%s prepare failed: %d\n", __func__, ret);
+		return ret;
+	}
+
+	ret = sdw_enable_stream(sdw_stream);
+	if (ret)
+		dev_err(dai->dev, "%s trigger failed: %d\n", __func__, ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_prepare, "SND_SOC_SDW_UTILS");
+
+int asoc_sdw_c_amp_hw_free(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai)
+{
+	struct sdw_slave *slave = dev_to_sdw_dev(dai->dev);
+	struct sdw_stream_runtime *sdw_stream =
+		snd_soc_dai_get_dma_data(dai, substream);
+	int ret;
+
+	dev_dbg(dai->dev, "%s substream stream %d dai %s id %d",
+		__func__, substream->stream, dai->name, dai->id);
+
+	/* Find stream from first CPU DAI */
+	sdw_stream = snd_soc_dai_get_stream(dai, substream->stream);
+	if (IS_ERR(sdw_stream)) {
+		dev_err(dai->dev, "%s no stream found for DAI %s\n", __func__, dai->name);
+		return PTR_ERR(sdw_stream);
+	}
+
+	/* A failed prepare/enable leaves the stream CONFIGURED/PREPARED; still remove it from the bus */
+	if (sdw_stream->state == SDW_STREAM_ENABLED) {
+		ret = sdw_disable_stream(sdw_stream);
+		if (ret) {
+			dev_err(dai->dev, "%s trigger (disable stream) failed: %d\n", __func__, ret);
+			return ret;
+		}
+	}
+
+	if (sdw_stream->state == SDW_STREAM_PREPARED ||
+	    sdw_stream->state == SDW_STREAM_DISABLED) {
+		ret = sdw_deprepare_stream(sdw_stream);
+		if (ret) {
+			dev_err(dai->dev, "%s deprepare failed: %d\n", __func__, ret);
+			return ret;
+		}
+	}
+
+	ret = sdw_stream_remove_slave(slave, sdw_stream);
+	if (ret < 0) {
+		dev_err(dai->dev, "%s: remove slave failed: %d\n", __func__, ret);
+		return ret;
+	}
+
+	ret = sdw_stream_remove_master(slave->bus, sdw_stream);
+	if (ret < 0) {
+		dev_err(dai->dev, "remove master from stream %s failed: %d\n",
+			sdw_stream->name, ret);
+		return ret;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_hw_free, "SND_SOC_SDW_UTILS");
+
+void asoc_sdw_c_amp_shutdown(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai)
+{
+	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
+
+	sdw_shutdown_stream(substream);
+
+	snd_soc_dai_stream_dma_data_set_playback(dai, NULL);
+	snd_soc_dai_stream_dma_data_set_capture(dai, NULL);
+}
+EXPORT_SYMBOL_NS(asoc_sdw_c_amp_shutdown, "SND_SOC_SDW_UTILS");
+
 static bool asoc_sdw_is_unique_device(const struct snd_soc_acpi_link_adr *adr_link,
 				      unsigned int sdw_version,
 				      unsigned int mfg_id,
@@ -2269,12 +2474,14 @@ static int is_sdca_aux_dev_present(struct device *dev,
 }
 
 int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
-				 int *num_devs, int *num_ends, int *num_aux)
+				 int *num_devs, int *num_ends, int *num_aux, int *num_comp_amps)
 {
 	struct device *dev = card->dev;
+	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
 	struct snd_soc_acpi_mach *mach = dev_get_platdata(dev);
 	struct snd_soc_acpi_mach_params *mach_params = &mach->mach_params;
 	const struct snd_soc_acpi_link_adr *adr_link;
+	u32 companion_amp_mask = 0;
 	int i, j, ret;
 
 	for (adr_link = mach_params->links; adr_link->num_adr; adr_link++) {
@@ -2284,11 +2491,29 @@ int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
 			const struct snd_soc_acpi_adr_device *adr_dev = &adr_link->adr_d[i];
 			struct asoc_sdw_codec_info *codec_info;
 
-			*num_ends += adr_dev->num_endpoints;
-
 			codec_info = asoc_sdw_find_codec_info_part(adr_dev->adr);
 			if (!codec_info)
 				return -EINVAL;
+
+			for (j = 0; j < adr_dev->num_endpoints; j++) {
+				/* Skip companion amps */
+				if (adr_dev->endpoints[j].num >= codec_info->dai_num)
+					continue;
+				if (codec_info->dais[adr_dev->endpoints[j].num].quirk & SOC_SDW_COMPANION_AMPS) {
+					if (adr_dev->endpoints[j].group_id >=
+					    BITS_PER_TYPE(companion_amp_mask)) {
+						dev_err(dev, "invalid companion group_id %d\n",
+							adr_dev->endpoints[j].group_id);
+						return -EINVAL;
+					}
+					/* The companion amp is only present when the quirk is set */
+					if (!(ctx->mc_quirk & SOC_SDW_COMPANION_AMPS))
+						continue;
+					companion_amp_mask |= BIT(adr_dev->endpoints[j].group_id);
+					continue;
+				}
+				(*num_ends)++;
+			}
 
 			for (j = 0; j < codec_info->aux_num; j++) {
 				ret = is_sdca_aux_dev_present(dev, codec_info->auxs[j].codec_name,
@@ -2301,6 +2526,7 @@ int asoc_sdw_count_sdw_endpoints(struct snd_soc_card *card,
 		}
 	}
 
+	*num_comp_amps = hweight32(companion_amp_mask);
 	dev_dbg(dev, "Found %d devices with %d endpoints\n", *num_devs, *num_ends);
 
 	return 0;
@@ -2412,15 +2638,40 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 				 struct snd_soc_aux_dev *soc_aux,
 				 struct asoc_sdw_dailink *soc_dais,
 				 struct asoc_sdw_endpoint *soc_ends,
+				 struct asoc_sdw_companion_amp_endpoint *comp_ends,
 				 int *num_devs)
 {
 	struct snd_soc_acpi_mach *mach = dev_get_platdata(dev);
 	struct snd_soc_acpi_mach_params *mach_params = &mach->mach_params;
 	const struct snd_soc_acpi_link_adr *adr_link;
 	struct asoc_sdw_endpoint *soc_end = soc_ends;
+	u32 companion_amp_mask = 0;
 	int num_dais = 0;
 	int i, j;
 	int ret;
+
+	/* Get companion_amp_mask to calculate the companion amp group array index */
+	for (adr_link = mach_params->links; adr_link->num_adr; adr_link++) {
+		for (i = 0; i < adr_link->num_adr; i++) {
+			const struct snd_soc_acpi_adr_device *adr_dev = &adr_link->adr_d[i];
+			struct asoc_sdw_codec_info *codec_info;
+
+			codec_info = asoc_sdw_find_codec_info_part(adr_dev->adr);
+			if (!codec_info)
+				return -EINVAL;
+
+			for (j = 0; j < adr_dev->num_endpoints; j++) {
+				if (adr_dev->endpoints[j].num >= codec_info->dai_num)
+					continue;
+				if (!(codec_info->dais[adr_dev->endpoints[j].num].quirk &
+				      SOC_SDW_COMPANION_AMPS))
+					continue;
+				if (!(ctx->mc_quirk & SOC_SDW_COMPANION_AMPS))
+					continue;
+				companion_amp_mask |= BIT(adr_dev->endpoints[j].group_id);
+			}
+		}
+	}
 
 	for (adr_link = mach_params->links; adr_link->num_adr; adr_link++) {
 		int num_link_dailinks = 0;
@@ -2492,9 +2743,53 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 				int stream;
 
 				adr_end = &adr_dev->endpoints[j];
+				if (adr_end->num >= codec_info->dai_num) {
+					dev_err(dev,
+						"%d is too many endpoints for codec: 0x%x\n",
+						adr_end->num, codec_info->part_id);
+					return -EINVAL;
+				}
 				dai_info = &codec_info->dais[adr_end->num];
-				soc_dai = asoc_sdw_find_dailink(soc_dais, adr_end);
 
+				if (dai_info->quirk & SOC_SDW_COMPANION_AMPS) {
+					struct asoc_sdw_endpoint *comp_end;
+					int comp_index;
+
+					if (!(ctx->mc_quirk & SOC_SDW_COMPANION_AMPS))
+						continue;
+
+					comp_index = hweight32(companion_amp_mask &
+							       (BIT(adr_end->group_id) - 1));
+
+					codec_name = asoc_sdw_get_codec_name(dev, dai_info,
+									     adr_link, i);
+					if (IS_ERR(codec_name))
+						return PTR_ERR(codec_name);
+					if (!codec_name)
+						return -ENOMEM;
+
+					comp_end = devm_kcalloc(dev, 1, sizeof(*comp_end),
+								GFP_KERNEL);
+					if (!comp_end)
+						return -ENOMEM;
+					comp_end->name_prefix = adr_dev->name_prefix;
+
+					comp_end->link_mask = adr_link->mask;
+					comp_end->codec_name = codec_name;
+					comp_end->codec_info = codec_info;
+					comp_end->dai_info = dai_info;
+
+					/* group_position = 0 is the main amp */
+					if (!adr_end->group_position)
+						comp_ends[comp_index].main_amp = comp_end;
+					else
+						list_add_tail(&comp_end->list,
+							      &comp_ends[comp_index].comp_ends);
+
+					continue;
+				}
+
+				soc_dai = asoc_sdw_find_dailink(soc_dais, adr_end);
 				/*
 				 * quirk should have higher priority than the sdca properties
 				 * in the BIOS. We can't always check the DAI quirk because we
@@ -2537,13 +2832,6 @@ int asoc_sdw_parse_sdw_endpoints(struct device *dev,
 					dai_info->direction[SNDRV_PCM_STREAM_CAPTURE] ? 'C' : '-',
 					adr_end->aggregated ? "group" : "solo",
 					adr_end->group_id);
-
-				if (adr_end->num >= codec_info->dai_num) {
-					dev_err(dev,
-						"%d is too many endpoints for codec: 0x%x\n",
-						adr_end->num, codec_info->part_id);
-					return -EINVAL;
-				}
 
 				for_each_pcm_streams(stream) {
 					if (dai_info->direction[stream] &&

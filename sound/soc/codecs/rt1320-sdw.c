@@ -16,6 +16,7 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc-dapm.h>
+#include <sound/soc_sdw_utils.h>
 #include <sound/initval.h>
 #include <sound/tlv.h>
 #include <sound/sdw.h>
@@ -251,6 +252,7 @@ static const struct reg_sequence rt1320_vc_blind_write[] = {
 	{ 0xc06b, 0x0a },
 	{ 0xd172, 0x2a },
 	{ 0xc5d6, 0x01 },
+	{ 0xc5d0, 0x8f },  // DP6 Data Select: SRCIN OUT // for companion output setting
 	{ SDW_SDCA_CTL(FUNC_NUM_AMP, RT1320_SDCA_ENT_PDE23, RT1320_SDCA_CTL_REQ_POWER_STATE, 0), 0x03 },
 };
 
@@ -1090,7 +1092,7 @@ static int rt1320_read_prop(struct sdw_slave *slave)
 	prop->lane_control_support = true;
 
 	/* first we need to allocate memory for set bits in port lists */
-	prop->source_ports = BIT(4) | BIT(8) | BIT(10);
+	prop->source_ports = BIT(4) | BIT(6) | BIT(8) | BIT(10);
 	prop->sink_ports = BIT(1);
 
 	nval = hweight32(prop->source_ports);
@@ -3183,6 +3185,9 @@ static const struct snd_soc_dapm_widget rt1320_dapm_widgets[] = {
 	/* Audio Interface */
 	SND_SOC_DAPM_AIF_IN("DP1RX", "DP1 Playback", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("DP4TX", "DP4 Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("DP6TX", "DP6 Comp-Out", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("DP6RX", "DP6 Comp-Playback", 0, SND_SOC_NOPM, 0, 0),
+
 	SND_SOC_DAPM_AIF_OUT("DP8-10TX", "DP8-10 Capture", 0, SND_SOC_NOPM, 0, 0),
 
 	/* Digital Interface */
@@ -3221,6 +3226,9 @@ static const struct snd_soc_dapm_route rt1320_dapm_routes[] = {
 	{ "AEC Data", NULL, "AEC Gen" },
 	{ "DP4TX", NULL, "AEC Data" },
 
+	{ "DP6TX", NULL, "DP1RX" },
+	{ "DP6RX", NULL, "DP1RX" },
+
 	{"DP8-10TX", NULL, "FU"},
 	{"FU", NULL, "PDE 11"},
 	{"FU", NULL, "FU 113"},
@@ -3232,6 +3240,8 @@ static const struct snd_soc_dapm_route rt1320_dapm_routes[] = {
 static int rt1320_set_sdw_stream(struct snd_soc_dai *dai, void *sdw_stream,
 				int direction)
 {
+	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
+	dev_dbg(dai->dev, "%s direction %d", __func__, direction);
 	snd_soc_dai_dma_data_set(dai, direction, sdw_stream);
 	return 0;
 }
@@ -3239,6 +3249,9 @@ static int rt1320_set_sdw_stream(struct snd_soc_dai *dai, void *sdw_stream,
 static void rt1320_sdw_shutdown(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
+	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
+
 	snd_soc_dai_set_dma_data(dai, substream, NULL);
 }
 
@@ -3251,9 +3264,16 @@ static int rt1320_sdw_hw_params(struct snd_pcm_substream *substream,
 	struct sdw_stream_config stream_config = {0};
 	struct sdw_port_config port_config;
 	struct sdw_port_config dmic_port_config[2];
+	struct sdw_port_config companion_config = {
+		.num = 6,
+		.ch_mask = BIT(0) | BIT(1),
+	};
 	struct sdw_stream_runtime *sdw_stream;
 	int retval, num_channels;
 	unsigned int sampling_rate;
+
+	dev_err(dai->dev, "bard: %s %s id %d", __func__, dai->name, dai->id);
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
 
 	dev_dbg(dai->dev, "%s %s", __func__, dai->name);
 	sdw_stream = snd_soc_dai_get_dma_data(dai, substream);
@@ -3261,11 +3281,17 @@ static int rt1320_sdw_hw_params(struct snd_pcm_substream *substream,
 	if (!sdw_stream)
 		return -EINVAL;
 
+	printk("%s, sdw_stream 0x%p\n", __func__, sdw_stream);
+
 	if (!rt1320->sdw_slave)
 		return -EINVAL;
 
 	/* SoundWire specific configuration */
 	snd_sdw_params_to_config(substream, params, &stream_config, &port_config);
+	dev_dbg(dai->dev, "%s stream %d", __func__, substream->stream);
+
+	if (dai->id == RT1320_AIF3)
+		goto _add_slave_;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		if (dai->id == RT1320_AIF1)
@@ -3295,6 +3321,7 @@ static int rt1320_sdw_hw_params(struct snd_pcm_substream *substream,
 			return -EINVAL;
 	}
 
+_add_slave_:
 	if (dai->id == RT1320_AIF1)
 		retval = sdw_stream_add_slave(rt1320->sdw_slave, &stream_config,
 				&port_config, 1, sdw_stream);
@@ -3311,6 +3338,21 @@ static int rt1320_sdw_hw_params(struct snd_pcm_substream *substream,
 		default:
 			dev_err(dai->dev, "%s: Unknown device ID %d\n", __func__, rt1320->dev_id);
 			return -EINVAL;
+		}
+	} else if (dai->id == RT1320_AIF3) {
+		retval = asoc_sdw_c_amp_hw_params(substream, params, dai);
+		if (retval) {
+			dev_err(dai->dev, "%s: master companion stream configuration failed, ret=%d\n",
+				__func__, retval);
+			return retval;
+		}
+		stream_config.transport_type = SDW_TRANSPORT_PERIPHERAL_PERIPHERAL;
+		retval = sdw_stream_add_slave(rt1320->sdw_slave, &stream_config,
+			&companion_config, 1, sdw_stream);
+		if (retval) {
+			sdw_stream_remove_master(rt1320->sdw_slave->bus, sdw_stream);
+			dev_err(dai->dev, "%s: Unable to add slave, ret=%d\n", __func__, retval);
+			return retval;
 		}
 	} else
 		return -EINVAL;
@@ -3469,6 +3511,17 @@ static const struct snd_soc_dai_ops rt1320_aif_dai_ops = {
 	.shutdown	= rt1320_sdw_shutdown,
 };
 
+static const struct snd_soc_dai_ops rt1320_comp_dai_asoc_ops = {
+	.probe = asoc_sdw_c_amp_probe,
+	.startup = asoc_sdw_c_amp_startup,
+	.prepare = asoc_sdw_c_amp_prepare,
+	.hw_params = rt1320_sdw_hw_params,
+	.hw_free	= asoc_sdw_c_amp_hw_free,
+	.set_stream	= rt1320_set_sdw_stream,
+	.shutdown	= asoc_sdw_c_amp_shutdown,
+	.get_stream = asoc_sdw_c_amp_get_sdw_stream,
+};
+
 #define RT1320_STEREO_RATES (SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 | \
 	SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_96000 | SNDRV_PCM_RATE_192000)
 #define RT1320_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | \
@@ -3506,6 +3559,28 @@ static struct snd_soc_dai_driver rt1320_sdw_dai[] = {
 			.formats = RT1320_FORMATS,
 		},
 		.ops = &rt1320_aif_dai_ops,
+	},
+	/* Companion stream output */
+	{
+		.name = "rt1320-aif3",
+		.id = RT1320_AIF3,
+		.playback = {
+			.stream_name = "DP6 Comp-Playback",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = RT1320_STEREO_RATES,
+			.formats = RT1320_FORMATS,
+		},
+		.capture = {
+			.stream_name = "DP6 Comp-Out",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = RT1320_STEREO_RATES,
+			.formats = RT1320_FORMATS,
+		},
+		.ops = &rt1320_comp_dai_asoc_ops,
+		.symmetric_rate = 1,
+		.symmetric_channels = 1,
 	},
 };
 
@@ -3694,3 +3769,4 @@ module_sdw_driver(rt1320_sdw_driver);
 MODULE_DESCRIPTION("ASoC RT1320 driver SDCA SDW");
 MODULE_AUTHOR("Shuming Fan <shumingf@realtek.com>");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("SND_SOC_SDW_UTILS");
