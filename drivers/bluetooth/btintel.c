@@ -2589,13 +2589,13 @@ static int btintel_get_codec_config_data(struct hci_dev *hdev,
 	case ESCO_LINK:
 	case SCO_LINK:
 		switch (codec->id) {
-		case 0x02:
-			**ven_data = 0x00;
-			break;
 		case 0x00:
 		case 0x01:
-		case 0x03:
+		case 0x02:
 		case 0x04:
+		case 0x03:
+			**ven_data = 0x00;
+			break;
 		case 0x05:
 			**ven_data = 0x01;
 			break;

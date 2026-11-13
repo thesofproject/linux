@@ -402,6 +402,8 @@ static int hci_enhanced_setup_sync(struct hci_dev *hdev, void *data)
 		cp.out_transport_unit_size = 1;
 		break;
 
+	case 0x00: /* u-law */
+	case 0x01: /* A-law */
 	case BT_CODEC_CVSD:
 		if (conn->parent && lmp_esco_capable(conn->parent)) {
 			if (!find_next_esco_param(conn, esco_param_cvsd,
@@ -413,8 +415,8 @@ static int hci_enhanced_setup_sync(struct hci_dev *hdev, void *data)
 				goto unlock;
 			param = &sco_param_cvsd[conn->attempt - 1];
 		}
-		cp.tx_coding_format.id = 2;
-		cp.rx_coding_format.id = 2;
+		cp.tx_coding_format.id = conn->codec.id;
+		cp.rx_coding_format.id = conn->codec.id;
 		cp.tx_codec_frame_size = __cpu_to_le16(60);
 		cp.rx_codec_frame_size = __cpu_to_le16(60);
 		cp.in_bandwidth = __cpu_to_le32(16000);
@@ -612,10 +614,12 @@ static int hci_enhanced_accept_sync(struct hci_dev *hdev, void *data)
 		cp.retrans_effort = 0x02;
 		break;
 
+	case 0x00: /* u-law */
+	case 0x01: /* A-law */
 	case BT_CODEC_CVSD:
 	default:
-		cp.tx_coding_format.id = 2;
-		cp.rx_coding_format.id = 2;
+		cp.tx_coding_format.id = (conn->codec.id <= 0x02) ? conn->codec.id : 2;
+		cp.rx_coding_format.id = (conn->codec.id <= 0x02) ? conn->codec.id : 2;
 		cp.tx_codec_frame_size = __cpu_to_le16(60);
 		cp.rx_codec_frame_size = __cpu_to_le16(60);
 		cp.in_bandwidth = __cpu_to_le32(16000);
