@@ -2567,22 +2567,57 @@ done:
 	return err;
 }
 
+static int btintel_lc3_freq_preset(struct bt_codec *codec, __u8 *preset)
+{
+	const struct bt_codec_caps *caps;
+	const u8 *pos, *end;
+
+	if (!codec->num_caps) {
+		*preset = 0x01;
+		return 0;
+	}
+
+	caps = (const void *)&codec[1];
+	pos = caps->data;
+	end = pos + caps->len;
+
+	while (pos < end) {
+		u8 ltv_len = pos[0];
+
+		if (!ltv_len || pos + 1 + ltv_len > end)
+			return -EINVAL;
+
+		if (pos[1] == 0x01) { /* Sampling_Frequency */
+			if (ltv_len != 2)
+				return -EINVAL;
+			switch (pos[2]) {
+			case 0x03: /* 16 kHz */
+				*preset = 0x01;
+				return 0;
+			case 0x08: /* 48 kHz */
+				*preset = 0x22;
+				return 0;
+			default:
+				return -EINVAL;
+			}
+		}
+		pos += 1 + ltv_len;
+	}
+
+	return -EINVAL;
+}
+
 static int btintel_get_codec_config_data(struct hci_dev *hdev,
 					 __u8 link, struct bt_codec *codec,
 					 __u8 *ven_len, __u8 **ven_data)
 {
 	int err = 0;
 
-	if (!ven_data || !ven_len)
+	if (!ven_data || !ven_len || !codec)
 		return -EINVAL;
 
 	*ven_len = 0;
 	*ven_data = NULL;
-
-	if (link != ESCO_LINK) {
-		bt_dev_err(hdev, "Invalid link type(%u)", link);
-		return -EINVAL;
-	}
 
 	*ven_data = kmalloc(sizeof(__u8), GFP_KERNEL);
 	if (!*ven_data) {
@@ -2590,22 +2625,52 @@ static int btintel_get_codec_config_data(struct hci_dev *hdev,
 		goto error;
 	}
 
-	/* supports only CVSD and mSBC offload codecs */
-	switch (codec->id) {
-	case 0x02:
-		**ven_data = 0x00;
+	switch (link) {
+	case ESCO_LINK:
+	case SCO_LINK:
+		switch (codec->id) {
+		case 0x00:
+		case 0x01:
+		case 0x02:
+		case 0x04:
+		case 0x03:
+			**ven_data = 0x00;
+			break;
+		case 0x05:
+			**ven_data = 0x01;
+			break;
+		default:
+			err = -EINVAL;
+			bt_dev_err(hdev, "Invalid SCO codec id(%u)", codec->id);
+			goto error;
+		}
 		break;
-	case 0x05:
-		**ven_data = 0x01;
+	case ACL_LINK:
+		/* Preset 0x22 configures 48 kHz 16-bit stereo SSP offload */
+		**ven_data = 0x22;
+		break;
+	case CIS_LINK:
+	case BIS_LINK:
+		if (codec->id != BT_CODEC_LC3) {
+			**ven_data = 0x01;
+			break;
+		}
+		err = btintel_lc3_freq_preset(codec, *ven_data);
+		if (err) {
+			bt_dev_err(hdev, "Unsupported LC3 ISO offload config");
+			goto error;
+		}
 		break;
 	default:
 		err = -EINVAL;
-		bt_dev_err(hdev, "Invalid codec id(%u)", codec->id);
+		bt_dev_err(hdev, "Invalid link type(%u)", link);
 		goto error;
 	}
+
 	/* codec and its capabilities are pre-defined to ids
 	 * preset id = 0x00 represents CVSD codec with sampling rate 8K
-	 * preset id = 0x01 represents mSBC codec with sampling rate 16K
+	 * preset id = 0x01 represents mSBC/16K mono SCO codec
+	 * preset id = 0x22 represents 48K stereo A2DP / LE Audio offload
 	 */
 	*ven_len = sizeof(__u8);
 	return err;
@@ -2625,9 +2690,20 @@ static int btintel_get_data_path_id(struct hci_dev *hdev, __u8 *data_path_id)
 
 static int btintel_configure_offload(struct hci_dev *hdev)
 {
+	static const u8 ddc_offload_enable[] = {
+		/* DDC 0x0130: enable LC3, SCO, A2DP SBC/AAC, LE Audio, and delay reporting */
+		0x03, 0x30, 0x01, 0x3f,
+		/* DDC 0x0120: enable SCO (BIT(0)), LE ISO (BIT(1)), and A2DP (BIT(3)) */
+		0x0a, 0x20, 0x01, 0x0b, 0x00, 0x81, 0xf1, 0x01, 0x00, 0x00, 0x00,
+	};
 	struct sk_buff *skb;
 	int err = 0;
 	struct intel_offload_use_cases *use_cases;
+
+	skb = __hci_cmd_sync(hdev, 0xfc8b, sizeof(ddc_offload_enable),
+			     ddc_offload_enable, HCI_INIT_TIMEOUT);
+	if (!IS_ERR(skb))
+		kfree_skb(skb);
 
 	skb = __hci_cmd_sync(hdev, 0xfc86, 0, NULL, HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
@@ -2648,9 +2724,10 @@ static int btintel_configure_offload(struct hci_dev *hdev)
 		goto error;
 	}
 
-	if (use_cases->preset[0] & 0x03) {
+	if (use_cases->preset[0] & 0x0b) {
 		hdev->get_data_path_id = btintel_get_data_path_id;
 		hdev->get_codec_config_data = btintel_get_codec_config_data;
+		hci_dev_set_flag(hdev, HCI_OFFLOAD_CODECS_ENABLED);
 	}
 error:
 	kfree_skb(skb);
@@ -3650,9 +3727,6 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 	 */
 	btintel_load_ddc_config(hdev, ddcname);
 
-	/* Read supported use cases and set callbacks to fetch datapath id */
-	btintel_configure_offload(hdev);
-
 	hci_dev_clear_flag(hdev, HCI_QUALITY_REPORT);
 
 	/* Send sar values to controller */
@@ -3672,6 +3746,12 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 	*ver = new_ver;
 
 finish:
+	/* Read supported use cases and set callbacks to fetch datapath id.
+	 * Run this in finish: so warm reboots (where ver->img_type is already
+	 * BTINTEL_IMG_OP) also register offload callbacks.
+	 */
+	btintel_configure_offload(hdev);
+
 	/* Set the event mask for Intel specific vendor events. This enables
 	 * a few extra events that are useful during general operation. It
 	 * does not enable any debugging related events.

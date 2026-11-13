@@ -3459,6 +3459,9 @@ static void hci_conn_request_evt(struct hci_dev *hdev, void *data,
 
 	memcpy(conn->dev_class, ev->dev_class, 3);
 
+	if (ev->link_type == SCO_LINK || ev->link_type == ESCO_LINK)
+		sco_conn_set_codec(hdev, conn);
+
 	if (ev->link_type == ACL_LINK ||
 	    (!(flags & HCI_PROTO_DEFER) && !lmp_esco_capable(hdev))) {
 		struct hci_cp_accept_conn_req cp;
@@ -3473,20 +3476,26 @@ static void hci_conn_request_evt(struct hci_dev *hdev, void *data,
 
 		hci_send_cmd(hdev, HCI_OP_ACCEPT_CONN_REQ, sizeof(cp), &cp);
 	} else if (!(flags & HCI_PROTO_DEFER)) {
-		struct hci_cp_accept_sync_conn_req cp;
-		conn->state = BT_CONNECT;
+		if (enhanced_sync_conn_capable(hdev) && conn->codec.data_path) {
+			conn->state = BT_CONNECT;
+			hci_accept_sync(conn);
+		} else {
+			struct hci_cp_accept_sync_conn_req cp;
 
-		bacpy(&cp.bdaddr, &ev->bdaddr);
-		cp.pkt_type = cpu_to_le16(conn->pkt_type);
+			conn->state = BT_CONNECT;
 
-		cp.tx_bandwidth   = cpu_to_le32(0x00001f40);
-		cp.rx_bandwidth   = cpu_to_le32(0x00001f40);
-		cp.max_latency    = cpu_to_le16(0xffff);
-		cp.content_format = cpu_to_le16(hdev->voice_setting);
-		cp.retrans_effort = 0xff;
+			bacpy(&cp.bdaddr, &ev->bdaddr);
+			cp.pkt_type = cpu_to_le16(conn->pkt_type);
 
-		hci_send_cmd(hdev, HCI_OP_ACCEPT_SYNC_CONN_REQ, sizeof(cp),
-			     &cp);
+			cp.tx_bandwidth   = cpu_to_le32(0x00001f40);
+			cp.rx_bandwidth   = cpu_to_le32(0x00001f40);
+			cp.max_latency    = cpu_to_le16(0xffff);
+			cp.content_format = cpu_to_le16(hdev->voice_setting);
+			cp.retrans_effort = 0xff;
+
+			hci_send_cmd(hdev, HCI_OP_ACCEPT_SYNC_CONN_REQ,
+				     sizeof(cp), &cp);
+		}
 	} else {
 		conn->state = BT_CONNECT2;
 		hci_connect_cfm(conn, 0);
@@ -7267,6 +7276,7 @@ static void hci_le_cis_req_evt(struct hci_dev *hdev, void *data,
 
 	cis->iso_qos.ucast.cig = ev->cig_id;
 	cis->iso_qos.ucast.cis = ev->cis_id;
+	iso_conn_set_codec(hdev, cis, &acl->dst);
 
 	if (!(flags & HCI_PROTO_DEFER)) {
 		hci_le_accept_cis(hdev, ev->cis_handle);
@@ -7417,6 +7427,10 @@ static void hci_le_big_sync_established_evt(struct hci_dev *hdev, void *data,
 		bis->iso_qos.bcast.in.sdu = le16_to_cpu(ev->max_pdu);
 
 		if (!ev->status) {
+			bis->codec = conn->codec;
+			memcpy(bis->codec_cfg, conn->codec_cfg,
+			       sizeof(bis->codec_cfg));
+			bis->codec_cfg_len = conn->codec_cfg_len;
 			bis->state = BT_CONNECTED;
 			set_bit(HCI_CONN_BIG_SYNC, &bis->flags);
 			hci_debugfs_create_conn(bis);
