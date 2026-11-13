@@ -2579,33 +2579,48 @@ static int btintel_get_codec_config_data(struct hci_dev *hdev,
 	*ven_len = 0;
 	*ven_data = NULL;
 
-	if (link != ESCO_LINK) {
-		bt_dev_err(hdev, "Invalid link type(%u)", link);
-		return -EINVAL;
-	}
-
 	*ven_data = kmalloc(sizeof(__u8), GFP_KERNEL);
 	if (!*ven_data) {
 		err = -ENOMEM;
 		goto error;
 	}
 
-	/* supports only CVSD and mSBC offload codecs */
-	switch (codec->id) {
-	case 0x02:
-		**ven_data = 0x00;
+	switch (link) {
+	case ESCO_LINK:
+	case SCO_LINK:
+		switch (codec->id) {
+		case 0x02:
+			**ven_data = 0x00;
+			break;
+		case 0x00:
+		case 0x01:
+		case 0x03:
+		case 0x04:
+		case 0x05:
+			**ven_data = 0x01;
+			break;
+		default:
+			err = -EINVAL;
+			bt_dev_err(hdev, "Invalid SCO codec id(%u)", codec->id);
+			goto error;
+		}
 		break;
-	case 0x05:
-		**ven_data = 0x01;
+	case ACL_LINK:
+	case CIS_LINK:
+	case BIS_LINK:
+		/* Preset 0x22 configures 48 kHz 16-bit stereo SSP offload */
+		**ven_data = 0x22;
 		break;
 	default:
 		err = -EINVAL;
-		bt_dev_err(hdev, "Invalid codec id(%u)", codec->id);
+		bt_dev_err(hdev, "Invalid link type(%u)", link);
 		goto error;
 	}
+
 	/* codec and its capabilities are pre-defined to ids
 	 * preset id = 0x00 represents CVSD codec with sampling rate 8K
-	 * preset id = 0x01 represents mSBC codec with sampling rate 16K
+	 * preset id = 0x01 represents mSBC/16K mono SCO codec
+	 * preset id = 0x22 represents 48K stereo A2DP / LE Audio offload
 	 */
 	*ven_len = sizeof(__u8);
 	return err;
@@ -2625,9 +2640,20 @@ static int btintel_get_data_path_id(struct hci_dev *hdev, __u8 *data_path_id)
 
 static int btintel_configure_offload(struct hci_dev *hdev)
 {
+	static const u8 ddc_offload_enable[] = {
+		/* DDC 0x0130: enable LC3, SCO, A2DP SBC/AAC, LE Audio, and delay reporting */
+		0x03, 0x30, 0x01, 0x3f,
+		/* DDC 0x0120: enable SCO (BIT(0)), LE ISO (BIT(1)), and A2DP (BIT(3)) */
+		0x0a, 0x20, 0x01, 0x0b, 0x00, 0x81, 0xf1, 0x01, 0x00, 0x00, 0x00,
+	};
 	struct sk_buff *skb;
 	int err = 0;
 	struct intel_offload_use_cases *use_cases;
+
+	skb = __hci_cmd_sync(hdev, 0xfc8b, sizeof(ddc_offload_enable),
+			     ddc_offload_enable, HCI_INIT_TIMEOUT);
+	if (!IS_ERR(skb))
+		kfree_skb(skb);
 
 	skb = __hci_cmd_sync(hdev, 0xfc86, 0, NULL, HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
@@ -2648,7 +2674,7 @@ static int btintel_configure_offload(struct hci_dev *hdev)
 		goto error;
 	}
 
-	if (use_cases->preset[0] & 0x03) {
+	if (use_cases->preset[0] & 0x0b) {
 		hdev->get_data_path_id = btintel_get_data_path_id;
 		hdev->get_codec_config_data = btintel_get_codec_config_data;
 		hci_dev_set_flag(hdev, HCI_OFFLOAD_CODECS_ENABLED);
