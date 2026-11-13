@@ -2342,14 +2342,23 @@ bool hci_iso_setup_path(struct hci_conn *conn)
 {
 	struct hci_dev *hdev = conn->hdev;
 	struct hci_cp_le_setup_iso_path cmd;
+	__u8 path = conn->codec.data_path;
+	__u8 codec = path ? conn->codec.id : 0x03; /* Transparent Data */
+	__le16 cid = path ? cpu_to_le16(conn->codec.cid) : 0;
+	__le16 vid = path ? cpu_to_le16(conn->codec.vid) : 0;
+
+	if (path)
+		hci_configure_datapath(hdev, conn->type, &conn->codec);
 
 	memset(&cmd, 0, sizeof(cmd));
 
 	if (conn->iso_qos.ucast.out.sdu) {
 		cmd.handle = cpu_to_le16(conn->handle);
 		cmd.direction = 0x00; /* Input (Host to Controller) */
-		cmd.path = 0x00; /* HCI path if enabled */
-		cmd.codec = 0x03; /* Transparent Data */
+		cmd.path = path;
+		cmd.codec = codec;
+		cmd.codec_cid = cid;
+		cmd.codec_vid = vid;
 
 		if (hci_send_cmd(hdev, HCI_OP_LE_SETUP_ISO_PATH, sizeof(cmd),
 				 &cmd) < 0)
@@ -2359,8 +2368,10 @@ bool hci_iso_setup_path(struct hci_conn *conn)
 	if (conn->iso_qos.ucast.in.sdu) {
 		cmd.handle = cpu_to_le16(conn->handle);
 		cmd.direction = 0x01; /* Output (Controller to Host) */
-		cmd.path = 0x00; /* HCI path if enabled */
-		cmd.codec = 0x03; /* Transparent Data */
+		cmd.path = path;
+		cmd.codec = codec;
+		cmd.codec_cid = cid;
+		cmd.codec_vid = vid;
 
 		if (hci_send_cmd(hdev, HCI_OP_LE_SETUP_ISO_PATH, sizeof(cmd),
 				 &cmd) < 0)
