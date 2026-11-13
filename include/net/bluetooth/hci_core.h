@@ -884,12 +884,18 @@ int l2cap_recv_acldata(struct hci_dev *hdev, u16 handle, struct sk_buff *skb,
 
 #if IS_ENABLED(CONFIG_BT_BREDR)
 int sco_connect_ind(struct hci_dev *hdev, bdaddr_t *bdaddr, __u8 *flags);
+void sco_conn_set_codec(struct hci_dev *hdev, struct hci_conn *conn);
 int sco_recv_scodata(struct hci_dev *hdev, u16 handle, struct sk_buff *skb);
 #else
 static inline int sco_connect_ind(struct hci_dev *hdev, bdaddr_t *bdaddr,
 				  __u8 *flags)
 {
 	return 0;
+}
+
+static inline void sco_conn_set_codec(struct hci_dev *hdev,
+				      struct hci_conn *conn)
+{
 }
 
 static inline int sco_recv_scodata(struct hci_dev *hdev, u16 handle,
@@ -1632,6 +1638,7 @@ static inline bool hci_is_le_conn_scanning(struct hci_dev *hdev)
 
 int hci_disconnect(struct hci_conn *conn, __u8 reason);
 bool hci_setup_sync(struct hci_conn *conn, __u16 handle);
+bool hci_accept_sync(struct hci_conn *conn);
 void hci_sco_setup(struct hci_conn *conn, __u8 status);
 bool hci_iso_setup_path(struct hci_conn *conn);
 int hci_le_create_cis_pending(struct hci_dev *hdev);

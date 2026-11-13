@@ -495,6 +495,136 @@ bool hci_setup_sync(struct hci_conn *conn, __u16 handle)
 	return hci_setup_sync_conn(conn, handle);
 }
 
+static int hci_enhanced_accept_sync(struct hci_dev *hdev, void *data)
+{
+	struct hci_conn *conn = data;
+	struct hci_cp_enhanced_accept_sync_conn cp;
+
+	if (!hci_conn_valid(hdev, conn))
+		return -ECANCELED;
+
+	bt_dev_dbg(hdev, "hcon %p", conn);
+
+	configure_datapath_sync(hdev, &conn->codec);
+
+	memset(&cp, 0x00, sizeof(cp));
+
+	bacpy(&cp.bdaddr, &conn->dst);
+	cp.pkt_type = cpu_to_le16(conn->pkt_type);
+	cp.tx_bandwidth = cpu_to_le32(0x00001f40);
+	cp.rx_bandwidth = cpu_to_le32(0x00001f40);
+
+	switch (conn->codec.id) {
+	case BT_CODEC_MSBC:
+		cp.tx_coding_format.id = 0x05;
+		cp.rx_coding_format.id = 0x05;
+		cp.tx_codec_frame_size = __cpu_to_le16(60);
+		cp.rx_codec_frame_size = __cpu_to_le16(60);
+		cp.in_bandwidth = __cpu_to_le32(32000);
+		cp.out_bandwidth = __cpu_to_le32(32000);
+		cp.in_coding_format.id = 0x04;
+		cp.out_coding_format.id = 0x04;
+		cp.in_coded_data_size = __cpu_to_le16(16);
+		cp.out_coded_data_size = __cpu_to_le16(16);
+		cp.in_pcm_data_format = 2;
+		cp.out_pcm_data_format = 2;
+		cp.in_pcm_sample_payload_msb_pos = 0;
+		cp.out_pcm_sample_payload_msb_pos = 0;
+		cp.in_data_path = conn->codec.data_path;
+		cp.out_data_path = conn->codec.data_path;
+		cp.in_transport_unit_size = 1;
+		cp.out_transport_unit_size = 1;
+		if (conn->pkt_type & ESCO_2EV3)
+			cp.max_latency = cpu_to_le16(0x0008);
+		else
+			cp.max_latency = cpu_to_le16(0x000D);
+		cp.retrans_effort = 0x02;
+		break;
+
+	case BT_CODEC_TRANSPARENT:
+		cp.tx_coding_format.id = 0x03;
+		cp.rx_coding_format.id = 0x03;
+		cp.tx_codec_frame_size = __cpu_to_le16(60);
+		cp.rx_codec_frame_size = __cpu_to_le16(60);
+		cp.in_bandwidth = __cpu_to_le32(0x1f40);
+		cp.out_bandwidth = __cpu_to_le32(0x1f40);
+		cp.in_coding_format.id = 0x03;
+		cp.out_coding_format.id = 0x03;
+		cp.in_coded_data_size = __cpu_to_le16(16);
+		cp.out_coded_data_size = __cpu_to_le16(16);
+		cp.in_pcm_data_format = 2;
+		cp.out_pcm_data_format = 2;
+		cp.in_pcm_sample_payload_msb_pos = 0;
+		cp.out_pcm_sample_payload_msb_pos = 0;
+		cp.in_data_path = conn->codec.data_path;
+		cp.out_data_path = conn->codec.data_path;
+		cp.in_transport_unit_size = 1;
+		cp.out_transport_unit_size = 1;
+		if (conn->pkt_type & ESCO_2EV3)
+			cp.max_latency = cpu_to_le16(0x0008);
+		else
+			cp.max_latency = cpu_to_le16(0x000D);
+		cp.retrans_effort = 0x02;
+		break;
+
+	case BT_CODEC_CVSD:
+	default:
+		cp.tx_coding_format.id = 2;
+		cp.rx_coding_format.id = 2;
+		cp.tx_codec_frame_size = __cpu_to_le16(60);
+		cp.rx_codec_frame_size = __cpu_to_le16(60);
+		cp.in_bandwidth = __cpu_to_le32(16000);
+		cp.out_bandwidth = __cpu_to_le32(16000);
+		cp.in_coding_format.id = 4;
+		cp.out_coding_format.id = 4;
+		cp.in_coded_data_size = __cpu_to_le16(16);
+		cp.out_coded_data_size = __cpu_to_le16(16);
+		cp.in_pcm_data_format = 2;
+		cp.out_pcm_data_format = 2;
+		cp.in_pcm_sample_payload_msb_pos = 0;
+		cp.out_pcm_sample_payload_msb_pos = 0;
+		cp.in_data_path = conn->codec.data_path;
+		cp.out_data_path = conn->codec.data_path;
+		cp.in_transport_unit_size = 16;
+		cp.out_transport_unit_size = 16;
+		cp.max_latency = cpu_to_le16(0xffff);
+		cp.retrans_effort = 0xff;
+		break;
+	}
+
+	if (hci_send_cmd(hdev, HCI_OP_ENHANCED_ACCEPT_SYNC_CONN,
+			 sizeof(cp), &cp) < 0)
+		return -EIO;
+
+	return 0;
+}
+
+static void hci_enhanced_accept_sync_destroy(struct hci_dev *hdev, void *data,
+					     int err)
+{
+	struct hci_conn *conn = data;
+
+	hci_conn_put(conn);
+}
+
+bool hci_accept_sync(struct hci_conn *conn)
+{
+	int result;
+
+	if (!enhanced_sync_conn_capable(conn->hdev))
+		return false;
+
+	hci_conn_get(conn);
+	result = hci_cmd_sync_queue(conn->hdev, hci_enhanced_accept_sync,
+				    conn, hci_enhanced_accept_sync_destroy);
+	if (result < 0) {
+		hci_conn_put(conn);
+		return false;
+	}
+
+	return true;
+}
+
 struct le_conn_update_data {
 	struct hci_conn *conn;
 	u16	min;
