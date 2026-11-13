@@ -7276,6 +7276,7 @@ static void hci_le_cis_req_evt(struct hci_dev *hdev, void *data,
 
 	cis->iso_qos.ucast.cig = ev->cig_id;
 	cis->iso_qos.ucast.cis = ev->cis_id;
+	iso_conn_set_codec(hdev, cis, &acl->dst);
 
 	if (!(flags & HCI_PROTO_DEFER)) {
 		hci_le_accept_cis(hdev, ev->cis_handle);
@@ -7426,6 +7427,10 @@ static void hci_le_big_sync_established_evt(struct hci_dev *hdev, void *data,
 		bis->iso_qos.bcast.in.sdu = le16_to_cpu(ev->max_pdu);
 
 		if (!ev->status) {
+			bis->codec = conn->codec;
+			memcpy(bis->codec_cfg, conn->codec_cfg,
+			       sizeof(bis->codec_cfg));
+			bis->codec_cfg_len = conn->codec_cfg_len;
 			bis->state = BT_CONNECTED;
 			set_bit(HCI_CONN_BIG_SYNC, &bis->flags);
 			hci_debugfs_create_conn(bis);

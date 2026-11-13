@@ -2567,13 +2567,53 @@ done:
 	return err;
 }
 
+static int btintel_lc3_freq_preset(struct bt_codec *codec, __u8 *preset)
+{
+	const struct bt_codec_caps *caps;
+	const u8 *pos, *end;
+
+	if (!codec->num_caps) {
+		*preset = 0x01;
+		return 0;
+	}
+
+	caps = (const void *)&codec[1];
+	pos = caps->data;
+	end = pos + caps->len;
+
+	while (pos < end) {
+		u8 ltv_len = pos[0];
+
+		if (!ltv_len || pos + 1 + ltv_len > end)
+			return -EINVAL;
+
+		if (pos[1] == 0x01) { /* Sampling_Frequency */
+			if (ltv_len != 2)
+				return -EINVAL;
+			switch (pos[2]) {
+			case 0x03: /* 16 kHz */
+				*preset = 0x01;
+				return 0;
+			case 0x08: /* 48 kHz */
+				*preset = 0x22;
+				return 0;
+			default:
+				return -EINVAL;
+			}
+		}
+		pos += 1 + ltv_len;
+	}
+
+	return -EINVAL;
+}
+
 static int btintel_get_codec_config_data(struct hci_dev *hdev,
 					 __u8 link, struct bt_codec *codec,
 					 __u8 *ven_len, __u8 **ven_data)
 {
 	int err = 0;
 
-	if (!ven_data || !ven_len)
+	if (!ven_data || !ven_len || !codec)
 		return -EINVAL;
 
 	*ven_len = 0;
@@ -2606,10 +2646,20 @@ static int btintel_get_codec_config_data(struct hci_dev *hdev,
 		}
 		break;
 	case ACL_LINK:
-	case CIS_LINK:
-	case BIS_LINK:
 		/* Preset 0x22 configures 48 kHz 16-bit stereo SSP offload */
 		**ven_data = 0x22;
+		break;
+	case CIS_LINK:
+	case BIS_LINK:
+		if (codec->id != BT_CODEC_LC3) {
+			**ven_data = 0x01;
+			break;
+		}
+		err = btintel_lc3_freq_preset(codec, *ven_data);
+		if (err) {
+			bt_dev_err(hdev, "Unsupported LC3 ISO offload config");
+			goto error;
+		}
 		break;
 	default:
 		err = -EINVAL;

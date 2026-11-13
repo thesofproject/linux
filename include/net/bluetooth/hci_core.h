@@ -789,7 +789,11 @@ struct hci_conn {
 	struct hci_conn	*parent;
 	struct hci_link *link;
 
+#define HCI_MAX_CODEC_CFG_LEN	32
+
 	struct bt_codec codec;
+	__u8		codec_cfg[HCI_MAX_CODEC_CFG_LEN];
+	__u8		codec_cfg_len;
 
 	void (*connect_cfm_cb)	(struct hci_conn *conn, u8 status);
 	void (*security_cfm_cb)	(struct hci_conn *conn, u8 status);
@@ -908,6 +912,8 @@ static inline int sco_recv_scodata(struct hci_dev *hdev, u16 handle,
 
 #if IS_ENABLED(CONFIG_BT_LE)
 int iso_connect_ind(struct hci_dev *hdev, bdaddr_t *bdaddr, __u8 *flags);
+void iso_conn_set_codec(struct hci_dev *hdev, struct hci_conn *conn,
+			const bdaddr_t *dst);
 int iso_recv(struct hci_dev *hdev, u16 handle, struct sk_buff *skb,
 	     u16 flags);
 #else
@@ -915,6 +921,12 @@ static inline int iso_connect_ind(struct hci_dev *hdev, bdaddr_t *bdaddr,
 				  __u8 *flags)
 {
 	return 0;
+}
+
+static inline void iso_conn_set_codec(struct hci_dev *hdev,
+				      struct hci_conn *conn,
+				      const bdaddr_t *dst)
+{
 }
 
 static inline int iso_recv(struct hci_dev *hdev, u16 handle,

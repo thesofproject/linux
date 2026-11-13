@@ -2342,45 +2342,119 @@ struct hci_conn *hci_bind_cis(struct hci_dev *hdev, bdaddr_t *dst,
 	return cis;
 }
 
-bool hci_iso_setup_path(struct hci_conn *conn)
+static int hci_iso_build_lc3_cfg(const struct hci_conn *conn,
+				 const struct bt_iso_io_qos *io,
+				 __u8 *cfg, __u8 *cfg_len)
+{
+	__u16 sdu = io->sdu ? io->sdu : 40;
+	__u8 freq;
+
+	if (conn->codec_cfg_len > 0) {
+		if (conn->codec_cfg_len > HCI_MAX_CODEC_CFG_LEN)
+			return -EINVAL;
+		memcpy(cfg, conn->codec_cfg, conn->codec_cfg_len);
+		*cfg_len = conn->codec_cfg_len;
+		return 0;
+	}
+
+	if (io->interval == 7500)
+		freq = (sdu >= 75) ? 0x08 : 0x03;
+	else if (io->interval == 10000)
+		freq = (sdu >= 100) ? 0x08 : 0x03;
+	else
+		freq = (sdu >= 75) ? 0x08 : 0x03;
+
+	/* Sampling_Frequency (0x01): 0x03 = 16 kHz, 0x08 = 48 kHz */
+	cfg[0] = 0x02;
+	cfg[1] = 0x01;
+	cfg[2] = freq;
+	/* Frame_Duration (0x02): 0x00 = 7.5 ms, 0x01 = 10 ms */
+	cfg[3] = 0x02;
+	cfg[4] = 0x02;
+	cfg[5] = (io->interval == 7500) ? 0x00 : 0x01;
+	/* Octets_Per_Codec_Frame (0x04) */
+	cfg[6] = 0x03;
+	cfg[7] = 0x04;
+	cfg[8] = sdu & 0xff;
+	cfg[9] = (sdu >> 8) & 0xff;
+	*cfg_len = 10;
+
+	return 0;
+}
+
+static bool hci_iso_setup_dir_path(struct hci_conn *conn, __u8 direction,
+				   const struct bt_iso_io_qos *io,
+				   bool *dp_configured)
 {
 	struct hci_dev *hdev = conn->hdev;
-	struct hci_cp_le_setup_iso_path cmd;
+	struct {
+		struct hci_cp_le_setup_iso_path cp;
+		__u8 cfg[HCI_MAX_CODEC_CFG_LEN];
+	} __packed cmd;
 	__u8 path = conn->codec.data_path;
 	__u8 codec = path ? conn->codec.id : 0x03; /* Transparent Data */
 	__le16 cid = path ? cpu_to_le16(conn->codec.cid) : 0;
 	__le16 vid = path ? cpu_to_le16(conn->codec.vid) : 0;
-
-	if (path)
-		hci_configure_datapath(hdev, conn->type, &conn->codec);
+	__u8 cfg_len = 0;
 
 	memset(&cmd, 0, sizeof(cmd));
 
-	if (conn->iso_qos.ucast.out.sdu) {
-		cmd.handle = cpu_to_le16(conn->handle);
-		cmd.direction = 0x00; /* Input (Host to Controller) */
-		cmd.path = path;
-		cmd.codec = codec;
-		cmd.codec_cid = cid;
-		cmd.codec_vid = vid;
-
-		if (hci_send_cmd(hdev, HCI_OP_LE_SETUP_ISO_PATH, sizeof(cmd),
-				 &cmd) < 0)
+	if (path && codec == BT_CODEC_LC3) {
+		if (hci_iso_build_lc3_cfg(conn, io, cmd.cfg, &cfg_len) < 0)
 			return false;
+		cmd.cp.codec_cfg_len = cfg_len;
 	}
 
-	if (conn->iso_qos.ucast.in.sdu) {
-		cmd.handle = cpu_to_le16(conn->handle);
-		cmd.direction = 0x01; /* Output (Controller to Host) */
-		cmd.path = path;
-		cmd.codec = codec;
-		cmd.codec_cid = cid;
-		cmd.codec_vid = vid;
+	if (path && !*dp_configured) {
+		struct {
+			struct bt_codec codec;
+			struct bt_codec_caps caps;
+			__u8 data[HCI_MAX_CODEC_CFG_LEN];
+		} __packed cbuf;
 
-		if (hci_send_cmd(hdev, HCI_OP_LE_SETUP_ISO_PATH, sizeof(cmd),
-				 &cmd) < 0)
+		memset(&cbuf, 0, sizeof(cbuf));
+		cbuf.codec = conn->codec;
+		if (cfg_len) {
+			cbuf.codec.num_caps = 1;
+			cbuf.caps.len = cfg_len;
+			memcpy(cbuf.data, cmd.cfg, cfg_len);
+		}
+		if (hci_configure_datapath(hdev, conn->type, &cbuf.codec) < 0)
 			return false;
+		*dp_configured = true;
 	}
+
+	cmd.cp.handle = cpu_to_le16(conn->handle);
+	cmd.cp.direction = direction;
+	cmd.cp.path = path;
+	cmd.cp.codec = codec;
+	cmd.cp.codec_cid = cid;
+	cmd.cp.codec_vid = vid;
+
+	return hci_send_cmd(hdev, HCI_OP_LE_SETUP_ISO_PATH,
+			    sizeof(cmd.cp) + cfg_len, &cmd) >= 0;
+}
+
+bool hci_iso_setup_path(struct hci_conn *conn)
+{
+	const struct bt_iso_io_qos *out, *in;
+	bool dp_configured = false;
+
+	if (conn->type == BIS_LINK) {
+		out = &conn->iso_qos.bcast.out;
+		in = &conn->iso_qos.bcast.in;
+	} else {
+		out = &conn->iso_qos.ucast.out;
+		in = &conn->iso_qos.ucast.in;
+	}
+
+	if (out->sdu &&
+	    !hci_iso_setup_dir_path(conn, 0x00, out, &dp_configured))
+		return false;
+
+	if (in->sdu &&
+	    !hci_iso_setup_dir_path(conn, 0x01, in, &dp_configured))
+		return false;
 
 	return true;
 }
