@@ -271,6 +271,16 @@ config SND_SOC_SOF_DEBUG_FW_GDB
 	  socket, to which GDB can then connect.
 	  If unsure, select "N".
 
+config SND_SOC_SOF_CLIENT_CDEV
+	tristate "SOF character device client (/dev/sof-dspN)"
+	depends on SND_SOC_SOF && SND_SOC_SOF_IPC4
+	select SND_SOC_SOF_CLIENT
+	help
+	  This enables the SOF character device client driver (/dev/sof-dspN)
+	  exposing ioctls for atomic IPC transactions, SRAM memory window I/O
+	  and mmap, LLEXT module loading, Zephyr winstream shell/GDB access,
+	  and SOF probe point control.
+
 config SND_SOC_SOF_DEBUG_RETAIN_DSP_CONTEXT
 	bool "SOF retain DSP context on any FW exceptions"
 	help
