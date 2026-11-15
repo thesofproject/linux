@@ -311,24 +311,29 @@ EXPORT_SYMBOL_NS_GPL(sof_client_dev_register, "SND_SOC_SOF_CLIENT");
 
 void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 id)
 {
-	struct sof_client_dev_entry *centry;
-
-	guard(mutex)(&sdev->ipc_client_mutex);
+	struct sof_client_dev_entry *centry = NULL;
+	struct sof_client_dev_entry *pos;
 
 	/*
 	 * sof_client_auxdev_release() will be invoked to free up memory
 	 * allocations through put_device()
 	 */
-	list_for_each_entry(centry, &sdev->ipc_client_list, list) {
-		struct sof_client_dev *cdev = &centry->client_dev;
-
-		if (!strcmp(cdev->auxdev.name, name) && cdev->auxdev.id == id) {
-			list_del(&centry->list);
-			auxiliary_device_delete(&cdev->auxdev);
-			auxiliary_device_uninit(&cdev->auxdev);
-			break;
+	scoped_guard(mutex, &sdev->ipc_client_mutex) {
+		list_for_each_entry(pos, &sdev->ipc_client_list, list) {
+			if (!strcmp(pos->client_dev.auxdev.name, name) &&
+			    pos->client_dev.auxdev.id == id) {
+				list_del(&pos->list);
+				centry = pos;
+				break;
+			}
 		}
 	}
+
+	if (!centry)
+		return;
+
+	auxiliary_device_delete(&centry->client_dev.auxdev);
+	auxiliary_device_uninit(&centry->client_dev.auxdev);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_dev_unregister, "SND_SOC_SOF_CLIENT");
 
