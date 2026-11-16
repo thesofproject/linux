@@ -295,6 +295,11 @@ static int imx8_ops_init(struct snd_sof_dev *sdev)
 	sof_imx8_ops.debugfs_add_region_item =
 		snd_sof_debugfs_add_region_item_iomem;
 
+	if (IS_ENABLED(CONFIG_SND_SOC_SOF_IMX_PROBES)) {
+		sof_imx8_ops.register_ipc_clients = imx_probes_register;
+		sof_imx8_ops.unregister_ipc_clients = imx_probes_unregister;
+	}
+
 	/* ... and finally set DAI driver */
 	sof_imx8_ops.drv = get_chip_info(sdev)->drv;
 	sof_imx8_ops.num_drv = get_chip_info(sdev)->num_drv;
