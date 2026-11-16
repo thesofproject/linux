@@ -2797,14 +2797,11 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 	struct sof_ipc4_base_module_cfg *base_config;
 	struct sof_ipc4_audio_format *out_audio_fmt;
 	struct sof_ipc4_audio_format *in_audio_fmt;
+	struct sof_ipc4_audio_format prepared_output_fmt;
 	u32 out_ref_rate, out_ref_channels, out_ref_valid_bits, out_ref_type;
 	int output_fmt_index, input_fmt_index;
 	bool sink_rate_from_tplg;
 	u32 *sink_rate;
-
-	/* This cannot happen */
-	if (unlikely(swidget->prepared))
-		return 0;
 
 	if (swidget->id == snd_soc_dapm_asrc) {
 		struct sof_ipc4_asrc *asrc = swidget->private;
@@ -2820,6 +2817,15 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 		base_config = &src->data.base_config;
 		sink_rate = &src->data.sink_rate;
 		sink_rate_from_tplg = src->sink_rate_from_tplg;
+	}
+
+	if (swidget->prepared) {
+		prepared_output_fmt = base_config->audio_fmt;
+		prepared_output_fmt.sampling_frequency = *sink_rate;
+
+		return sof_ipc4_update_hw_params(sdev, pipeline_params,
+						 &prepared_output_fmt,
+						 BIT(SNDRV_PCM_HW_PARAM_RATE));
 	}
 
 	input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
