@@ -431,6 +431,18 @@ static int sof_setup_pipeline_connections(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+static void sof_unprepare_widget(struct snd_sof_widget *swidget,
+				 const struct sof_ipc_tplg_widget_ops *widget_ops)
+{
+	if (!swidget || !swidget->prepared || swidget->use_count > 0)
+		return;
+
+	if (widget_ops && widget_ops->ipc_unprepare)
+		widget_ops->ipc_unprepare(swidget);
+
+	swidget->prepared = false;
+}
+
 static void
 sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widget *widget,
 			      struct snd_soc_dapm_widget_list *list, int dir)
@@ -455,11 +467,7 @@ sof_unprepare_widgets_in_path(struct snd_sof_dev *sdev, struct snd_soc_dapm_widg
 		goto sink_unprepare;
 
 	widget_ops = tplg_ops ? tplg_ops->widget : NULL;
-	if (widget_ops && widget_ops[widget->id].ipc_unprepare)
-		/* unprepare the source widget */
-		widget_ops[widget->id].ipc_unprepare(swidget);
-
-	swidget->prepared = false;
+	sof_unprepare_widget(swidget, widget_ops ? &widget_ops[widget->id] : NULL);
 
 sink_unprepare:
 	/* unprepare all widgets in the sink paths */
@@ -530,11 +538,7 @@ sink_prepare:
 			p->walking = false;
 			if (ret < 0) {
 				/* unprepare the source widget */
-				if (widget_ops[widget->id].ipc_unprepare &&
-				    swidget && swidget->prepared && swidget->use_count == 0) {
-					widget_ops[widget->id].ipc_unprepare(swidget);
-					swidget->prepared = false;
-				}
+				sof_unprepare_widget(swidget, &widget_ops[widget->id]);
 				return ret;
 			}
 		}
