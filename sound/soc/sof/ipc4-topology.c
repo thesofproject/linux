@@ -2749,10 +2749,34 @@ static int sof_ipc4_prepare_mixer_module(struct snd_sof_widget *swidget,
 	struct sof_ipc4_audio_format *in_fmt;
 	u32 out_ref_rate, out_ref_channels, out_ref_valid_bits, out_ref_type;
 	int input_fmt_index, output_fmt_index;
+	int sample_valid_bits;
+	int sample_type;
 
-	/* Already prepared, nothing to do */
-	if (swidget->prepared)
+	if (swidget->prepared) {
+		sample_valid_bits = sof_ipc4_get_valid_bits(sdev, pipeline_params);
+		if (sample_valid_bits < 0)
+			return sample_valid_bits;
+
+		sample_type = sof_ipc4_get_sample_type(sdev, pipeline_params);
+		if (sample_type < 0)
+			return sample_type;
+
+		in_fmt = &mixer->base_config.audio_fmt;
+		if (params_rate(pipeline_params) != in_fmt->sampling_frequency ||
+		    params_channels(pipeline_params) !=
+			    SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(in_fmt->fmt_cfg) ||
+		    sample_valid_bits !=
+			    SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(in_fmt->fmt_cfg) ||
+		    sample_type != sof_ipc4_fmt_cfg_to_type(in_fmt->fmt_cfg)) {
+			dev_err(sdev->dev,
+				"%s: input format %uHz, %ubit, %u channels, type %d does not match configured mixer\n",
+				swidget->widget->name, params_rate(pipeline_params),
+				sample_valid_bits, params_channels(pipeline_params), sample_type);
+			return -EINVAL;
+		}
+
 		return 0;
+	}
 
 	input_fmt_index = sof_ipc4_init_input_audio_fmt(sdev, swidget,
 							&mixer->base_config,
