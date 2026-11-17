@@ -2890,8 +2890,6 @@ static int sof_ipc4_prepare_src_module(struct snd_sof_widget *swidget,
 
 	/* update pipeline_params for sink widgets */
 	return sof_ipc4_update_hw_params(sdev, pipeline_params, out_audio_fmt,
-					 BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
-					 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
 					 BIT(SNDRV_PCM_HW_PARAM_RATE));
 }
 
