@@ -186,6 +186,25 @@ static inline int sof_register_fw_gdb(struct snd_sof_dev *sdev)
 static inline void sof_unregister_fw_gdb(struct snd_sof_dev *sdev) {}
 #endif /* CONFIG_SND_SOC_SOF_DEBUG_FW_GDB */
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT_CDEV)
+static int sof_register_cdev(struct snd_sof_dev *sdev)
+{
+	return sof_client_dev_register(sdev, "cdev", 0, NULL, 0);
+}
+
+static void sof_unregister_cdev(struct snd_sof_dev *sdev)
+{
+	sof_client_dev_unregister(sdev, "cdev", 0);
+}
+#else
+static inline int sof_register_cdev(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline void sof_unregister_cdev(struct snd_sof_dev *sdev) {}
+#endif /* CONFIG_SND_SOC_SOF_CLIENT_CDEV */
+
 int sof_register_clients(struct snd_sof_dev *sdev)
 {
 	int ret;
@@ -218,6 +237,12 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 		goto err_fw_gdb;
 	}
 
+	ret = sof_register_cdev(sdev);
+	if (ret) {
+		dev_err(sdev->dev, "SOF char device client registration failed\n");
+		goto err_cdev;
+	}
+
 	/* Platform dependent client device registration */
 
 	if (sof_ops(sdev) && sof_ops(sdev)->register_ipc_clients)
@@ -226,10 +251,13 @@ int sof_register_clients(struct snd_sof_dev *sdev)
 	if (!ret)
 		return 0;
 
-	sof_unregister_ipc_kernel_injector(sdev);
+	sof_unregister_cdev(sdev);
+
+err_cdev:
+	sof_unregister_fw_gdb(sdev);
 
 err_fw_gdb:
-	sof_unregister_fw_gdb(sdev);
+	sof_unregister_ipc_kernel_injector(sdev);
 
 err_kernel_injector:
 	sof_unregister_ipc_msg_injector(sdev);
@@ -245,6 +273,7 @@ void sof_unregister_clients(struct snd_sof_dev *sdev)
 	if (sof_ops(sdev) && sof_ops(sdev)->unregister_ipc_clients)
 		sof_ops(sdev)->unregister_ipc_clients(sdev);
 
+	sof_unregister_cdev(sdev);
 	sof_unregister_ipc_kernel_injector(sdev);
 	sof_unregister_ipc_msg_injector(sdev);
 	sof_unregister_ipc_flood_test(sdev);
@@ -311,24 +340,29 @@ EXPORT_SYMBOL_NS_GPL(sof_client_dev_register, "SND_SOC_SOF_CLIENT");
 
 void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 id)
 {
-	struct sof_client_dev_entry *centry;
-
-	guard(mutex)(&sdev->ipc_client_mutex);
+	struct sof_client_dev_entry *centry = NULL;
+	struct sof_client_dev_entry *pos;
 
 	/*
 	 * sof_client_auxdev_release() will be invoked to free up memory
 	 * allocations through put_device()
 	 */
-	list_for_each_entry(centry, &sdev->ipc_client_list, list) {
-		struct sof_client_dev *cdev = &centry->client_dev;
-
-		if (!strcmp(cdev->auxdev.name, name) && cdev->auxdev.id == id) {
-			list_del(&centry->list);
-			auxiliary_device_delete(&cdev->auxdev);
-			auxiliary_device_uninit(&cdev->auxdev);
-			break;
+	scoped_guard(mutex, &sdev->ipc_client_mutex) {
+		list_for_each_entry(pos, &sdev->ipc_client_list, list) {
+			if (!strcmp(pos->client_dev.auxdev.name, name) &&
+			    pos->client_dev.auxdev.id == id) {
+				list_del(&pos->list);
+				centry = pos;
+				break;
+			}
 		}
 	}
+
+	if (!centry)
+		return;
+
+	auxiliary_device_delete(&centry->client_dev.auxdev);
+	auxiliary_device_uninit(&centry->client_dev.auxdev);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_dev_unregister, "SND_SOC_SOF_CLIENT");
 
@@ -426,6 +460,14 @@ ssize_t sof_client_ipc4_find_debug_slot_offset_by_type(struct sof_client_dev *cd
 	return sof_ipc4_find_debug_slot_offset_by_type(sof_client_dev_to_sof_dev(cdev), type);
 }
 EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_find_debug_slot_offset_by_type, "SND_SOC_SOF_CLIENT");
+
+int sof_client_ipc4_load_library_buf(struct sof_client_dev *cdev, u32 lib_id,
+				     const void *buf, size_t size)
+{
+	return snd_sof_ipc4_load_library_from_buf(sof_client_dev_to_sof_dev(cdev),
+						  lib_id, buf, size);
+}
+EXPORT_SYMBOL_NS_GPL(sof_client_ipc4_load_library_buf, "SND_SOC_SOF_CLIENT");
 #endif
 
 int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state)
