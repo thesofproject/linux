@@ -559,6 +559,49 @@ static int sof_ipc4_compr_get_params(struct snd_soc_component *component,
 	return 0;
 }
 
+/*
+ * On DRAIN, hand the host copier the total committed gateway byte count
+ * (crtd->total_bytes_available). The HDA compress gateway free-runs its write
+ * pointer around the ring, so the firmware cannot detect end-of-input from the
+ * gateway alone - it flags EOS once it has delivered this many bytes downstream.
+ */
+static void sof_ipc4_compr_send_drain_bytes(struct snd_sof_dev *sdev,
+					    struct snd_sof_pcm *spcm, int dir,
+					    struct snd_compr_stream *cstream)
+{
+	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct snd_compr_runtime *crtd = cstream->runtime;
+	struct sof_ipc4_fw_module *fw_module;
+	struct snd_sof_widget *host_swidget;
+	struct sof_ipc4_msg msg = {{ 0 }};
+	u64 drain_bytes;
+	int ret;
+
+	host_swidget = snd_sof_find_swidget_by_comp_id(sdev, spcm->stream[dir].comp_id);
+	if (!host_swidget || !host_swidget->module_info) {
+		spcm_err(spcm, dir, "drain: no host widget for comp_id %d\n",
+			 spcm->stream[dir].comp_id);
+		return;
+	}
+	fw_module = host_swidget->module_info;
+	drain_bytes = crtd->total_bytes_available;
+
+	msg.primary = fw_module->man4_module_entry.id;
+	msg.primary |= SOF_IPC4_MOD_INSTANCE(host_swidget->instance_id);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+	msg.extension =
+		SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_COPIER_MODULE_CFG_PARAM_DRAIN_BYTES);
+	msg.data_ptr = &drain_bytes;
+	msg.data_size = sizeof(drain_bytes);
+
+	ret = iops->set_get_data(sdev, &msg, msg.data_size, true);
+	if (ret < 0)
+		spcm_err(spcm, dir, "drain: failed to set drain_bytes: %d\n", ret);
+	else
+		spcm_dbg(spcm, dir, "drain: sent drain_bytes=%llu\n", drain_bytes);
+}
+
 static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 				  struct snd_compr_stream *cstream, int cmd)
 {
@@ -601,6 +644,7 @@ static int sof_ipc4_compr_trigger(struct snd_soc_component *component,
 		break;
 	case SND_COMPR_TRIGGER_DRAIN:
 		spcm->pending_stop[dir] = true;
+		sof_ipc4_compr_send_drain_bytes(sdev, spcm, dir, cstream);
 		break;
 	case SND_COMPR_TRIGGER_PARTIAL_DRAIN:
 	case SND_COMPR_TRIGGER_NEXT_TRACK:

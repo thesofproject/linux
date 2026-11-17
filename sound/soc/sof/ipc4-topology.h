@@ -119,6 +119,13 @@ enum sof_ipc4_copier_module_config_params {
  * is connected to Gateway
  */
 	SOF_IPC4_COPIER_MODULE_CFG_ATTENUATION,
+	/*
+	 * SOF extension (compress drain): tell the host copier the total committed
+	 * gateway byte count so it can flag end-of-stream once it has delivered
+	 * exactly that many bytes. The free-running HDA gateway write pointer never
+	 * settles, so it cannot serve as a drain boundary on its own. Payload: u64.
+	 */
+	SOF_IPC4_COPIER_MODULE_CFG_PARAM_DRAIN_BYTES = 100,
 };
 
 /* Scheduling domain, unset, Low Latency, or Data Processing */
