@@ -1304,7 +1304,7 @@ static int sof_card_dai_links_create(struct snd_soc_card *card)
 	sof_aux = devm_kcalloc(dev, num_aux, sizeof(*sof_aux), GFP_KERNEL);
 	if (!sof_aux) {
 		ret = -ENOMEM;
-		goto err_dai;
+		goto err_end;
 	}
 
 	ret = asoc_sdw_parse_sdw_endpoints(dev, ctx, sof_aux, sof_dais, sof_ends, &num_confs);
