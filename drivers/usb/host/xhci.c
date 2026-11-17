@@ -2884,61 +2884,6 @@ static int xhci_reserve_bandwidth(struct xhci_hcd *xhci,
 }
 
 /*
- * Synchronous XHCI stop endpoint helper.  Issues the stop endpoint command and
- * waits for the command completion before returning.  This does not call
- * xhci_handle_cmd_stop_ep(), which has additional handling for 'context error'
- * cases, along with transfer ring cleanup.
- *
- * xhci_stop_endpoint_sync() is intended to be utilized by clients that manage
- * their own transfer ring, such as offload situations.
- */
-int xhci_stop_endpoint_sync(struct xhci_hcd *xhci, struct xhci_virt_ep *ep, int suspend,
-			    gfp_t gfp_flags)
-{
-	struct xhci_command *command;
-	struct xhci_ep_ctx *ep_ctx;
-	unsigned long flags;
-	int ret = -ENODEV;
-
-	command = xhci_alloc_command(xhci, true, gfp_flags);
-	if (!command)
-		return -ENOMEM;
-
-	spin_lock_irqsave(&xhci->lock, flags);
-
-	/* make sure endpoint exists and is running before stopping it */
-	if (ep->ring) {
-		ep_ctx = xhci_get_ep_ctx(xhci, ep->vdev->out_ctx, ep->ep_index);
-		if (GET_EP_CTX_STATE(ep_ctx) == EP_STATE_RUNNING)
-			ret = xhci_queue_stop_endpoint(xhci, command,
-						       ep->vdev->slot_id,
-						       ep->ep_index, suspend);
-	}
-
-	if (ret < 0) {
-		spin_unlock_irqrestore(&xhci->lock, flags);
-		goto out;
-	}
-
-	xhci_ring_cmd_db(xhci);
-	spin_unlock_irqrestore(&xhci->lock, flags);
-
-	wait_for_completion(command->completion);
-
-	/* No handling for COMP_CONTEXT_STATE_ERROR done at command completion*/
-	if (command->status == COMP_COMMAND_ABORTED ||
-	    command->status == COMP_COMMAND_RING_STOPPED) {
-		xhci_warn(xhci, "Timeout while waiting for stop endpoint command\n");
-		ret = -ETIME;
-	}
-out:
-	xhci_free_command(xhci, command);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(xhci_stop_endpoint_sync);
-
-/*
  * xhci_usb_endpoint_maxp - get endpoint max packet size
  * @host_ep: USB host endpoint to be checked
  *

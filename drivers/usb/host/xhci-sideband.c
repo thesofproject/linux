@@ -91,20 +91,78 @@ sideband_to_vdev(struct xhci_sideband *sb)
 	return NULL;
 }
 
-/* Caller must hold sb->mutex */
-static void
-__xhci_sideband_remove_endpoint(struct xhci_sideband *sb, struct xhci_virt_ep *ep)
+/*
+ * Synchronous xHCI stop endpoint helper. Issues a stop endpoint command and
+ * waits for the command completion before returning. This does not call
+ * xhci_handle_cmd_stop_ep(), which has additional handling for 'context error'
+ * cases, along with transfer ring cleanup.
+ *
+ * Caller must hold sb->mutex
+ */
+static int
+sideband_stop_endpoint_sync(struct xhci_sideband *sb, unsigned int ep_index,
+			    bool remove)
 {
+	struct xhci_virt_device *vdev;
+	struct xhci_command *cmd;
+	struct xhci_virt_ep *ep;
+	struct xhci_ep_ctx *ctx;
+	unsigned long flags;
+	int ret = -ENODEV;
+
 	lockdep_assert_held(&sb->mutex);
 
-	/*
-	 * Issue a stop endpoint command when an endpoint is removed.
-	 * The stop ep cmd handler will handle the ring cleanup.
-	 */
-	xhci_stop_endpoint_sync(sb->xhci, ep, 0, GFP_KERNEL);
+	cmd = xhci_alloc_command(sb->xhci, true, GFP_KERNEL);
 
-	ep->sideband = NULL;
-	sb->eps[ep->ep_index] = NULL;
+	spin_lock_irqsave(&sb->xhci->lock, flags);
+
+	vdev = sideband_to_vdev(sb);
+	ep = sb->eps[ep_index];
+
+	/* validate that xhci didn't reallocate vdev during reset or resume */
+	if (!vdev || !ep || ep->sideband != sb)
+		goto out_unlock;
+
+	if (remove) {
+		ep->sideband = NULL;
+		/* endpoint is removed, not running is not an error */
+		ret = 0;
+	}
+
+	if (!ep->ring)
+		goto out_unlock;
+
+	/* Stop the endpoint if it's running */
+	ctx = xhci_get_ep_ctx(sb->xhci, vdev->out_ctx, ep_index);
+	if (GET_EP_CTX_STATE(ctx) == EP_STATE_RUNNING) {
+		if (!cmd) {
+			ret = -ENOMEM;
+			goto out_unlock;
+		}
+		ret = xhci_queue_stop_endpoint(sb->xhci, cmd, vdev->slot_id,
+					       ep_index, 0);
+		if (ret)
+			goto out_unlock;
+
+		xhci_ring_cmd_db(sb->xhci);
+		spin_unlock_irqrestore(&sb->xhci->lock, flags);
+		wait_for_completion(cmd->completion);
+
+		if (cmd->status == COMP_COMMAND_ABORTED ||
+		    cmd->status == COMP_COMMAND_RING_STOPPED) {
+			xhci_warn(sb->xhci, "Timeout while waiting for stop endpoint command\n");
+			ret = -ETIME;
+		}
+		xhci_free_command(sb->xhci, cmd);
+		return ret;
+	}
+
+out_unlock:
+	spin_unlock_irqrestore(&sb->xhci->lock, flags);
+	if (cmd)
+		xhci_free_command(sb->xhci, cmd);
+
+	return ret;
 }
 
 /* Caller must hold sb->mutex */
@@ -212,21 +270,17 @@ int
 xhci_sideband_remove_endpoint(struct xhci_sideband *sb,
 			      struct usb_host_endpoint *host_ep)
 {
-	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
+	int ret;
 
 	guard(mutex)(&sb->mutex);
 
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
-	ep = sb->eps[ep_index];
 
-	if (!sideband_to_vdev(sb) || !ep || ep->sideband != sb) {
-		sb->eps[ep_index] = NULL;
-		return -ENODEV;
-	}
-	__xhci_sideband_remove_endpoint(sb, ep);
+	ret = sideband_stop_endpoint_sync(sb, ep_index, true);
+	sb->eps[ep_index] = NULL;
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_remove_endpoint);
 
@@ -234,16 +288,13 @@ int
 xhci_sideband_stop_endpoint(struct xhci_sideband *sb,
 			    struct usb_host_endpoint *host_ep)
 {
-	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
 
+	guard(mutex)(&sb->mutex);
+
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
-	ep = sb->eps[ep_index];
 
-	if (!sideband_to_vdev(sb) || !ep || ep->sideband != sb)
-		return -EINVAL;
-
-	return xhci_stop_endpoint_sync(sb->xhci, ep, 0, GFP_KERNEL);
+	return sideband_stop_endpoint_sync(sb, ep_index, false);
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_stop_endpoint);
 
@@ -489,23 +540,25 @@ xhci_sideband_unregister(struct xhci_sideband *sb)
 
 	xhci = sb->xhci;
 
-	scoped_guard(mutex, &sb->mutex) {
-		vdev = sideband_to_vdev(sb);
+	mutex_lock(&sb->mutex);
 
-		for (i = 0; i < EP_CTX_PER_DEV; i++)
-			if (vdev && sb->eps[i])
-				__xhci_sideband_remove_endpoint(sb, sb->eps[i]);
-
-		__xhci_sideband_remove_interrupter(sb);
-
-		sb->udev = NULL;
+	for (i = 0; i < EP_CTX_PER_DEV; i++) {
+		if (sb->eps[i]) {
+			sideband_stop_endpoint_sync(sb, i, true);
+			sb->eps[i] = NULL;
+		}
 	}
+	__xhci_sideband_remove_interrupter(sb);
 
 	spin_lock_irq(&xhci->lock);
-	sb->xhci = NULL;
+	vdev = sideband_to_vdev(sb);
 	if (vdev)
 		vdev->sideband = NULL;
+	sb->udev = NULL;
+	sb->xhci = NULL;
 	spin_unlock_irq(&xhci->lock);
+
+	mutex_unlock(&sb->mutex);
 
 	kfree(sb);
 }
