@@ -1225,6 +1225,102 @@ static int sof_get_token_value(u32 token_id, struct snd_sof_tuple *tuples, int n
 	return -EINVAL;
 }
 
+static int sof_parse_media_codec_tokens(struct snd_soc_component *scomp,
+					struct snd_sof_widget *swidget,
+					const struct sof_topology_token *tokens,
+					int num_tokens,
+					struct snd_soc_tplg_vendor_array *array,
+					int array_size)
+{
+	struct sof_media_codec_fmt *fmts;
+	struct snd_soc_tplg_vendor_array *arr;
+	int num_fmts = 0;
+	int rem = array_size;
+	int t;
+
+	/* Count rows using the per-entry codec_id token */
+	for (arr = array; rem > 0;) {
+		int asize;
+
+		if (rem < (int)sizeof(*arr))
+			return -EINVAL;
+
+		asize = le32_to_cpu(arr->size);
+		if (asize < (int)sizeof(*arr) || asize > rem)
+			return -EINVAL;
+
+		if (le32_to_cpu(arr->type) == SND_SOC_TPLG_TUPLE_TYPE_WORD) {
+			u32 num_elems = le32_to_cpu(arr->num_elems);
+			u32 i;
+
+			if (struct_size(arr, value, num_elems) > asize)
+				return -EINVAL;
+
+			for (i = 0; i < num_elems; i++) {
+				if (le32_to_cpu(arr->value[i].token) ==
+				    SOF_TKN_MEDIA_CODEC_ID)
+					num_fmts++;
+			}
+		}
+
+		rem -= asize;
+		arr = (struct snd_soc_tplg_vendor_array *)((u8 *)arr + asize);
+	}
+
+	if (!num_fmts)
+		return 0;
+
+	fmts = kcalloc(num_fmts, sizeof(*fmts), GFP_KERNEL);
+	if (!fmts)
+		return -ENOMEM;
+
+	for (t = 0; t < num_tokens; t++) {
+		const struct sof_topology_token *tok = &tokens[t];
+		int idx = 0;
+
+		rem = array_size;
+		for (arr = array; rem > 0 && idx < num_fmts;) {
+			int asize = le32_to_cpu(arr->size);
+			u32 num_elems = le32_to_cpu(arr->num_elems);
+			u32 i;
+
+			if (tok->type == SND_SOC_TPLG_TUPLE_TYPE_UUID &&
+			    le32_to_cpu(arr->type) == SND_SOC_TPLG_TUPLE_TYPE_UUID) {
+				if (struct_size(arr, uuid, num_elems) > asize) {
+					kfree(fmts);
+					return -EINVAL;
+				}
+				for (i = 0; i < num_elems && idx < num_fmts; i++) {
+					struct snd_soc_tplg_vendor_uuid_elem *ue = &arr->uuid[i];
+
+					if (le32_to_cpu(ue->token) != tok->token)
+						continue;
+					tok->get_token(ue, &fmts[idx], tok->offset);
+					idx++;
+				}
+			} else if (tok->type == SND_SOC_TPLG_TUPLE_TYPE_WORD &&
+				   le32_to_cpu(arr->type) == SND_SOC_TPLG_TUPLE_TYPE_WORD) {
+				for (i = 0; i < num_elems && idx < num_fmts; i++) {
+					struct snd_soc_tplg_vendor_value_elem *ve = &arr->value[i];
+
+					if (le32_to_cpu(ve->token) != tok->token)
+						continue;
+					tok->get_token(ve, &fmts[idx], tok->offset);
+					idx++;
+				}
+			}
+
+			rem -= asize;
+			arr = (struct snd_soc_tplg_vendor_array *)((u8 *)arr + asize);
+		}
+	}
+
+	swidget->media_formats = fmts;
+	swidget->num_media_formats = num_fmts;
+
+	return 0;
+}
+
 static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_sof_widget *swidget,
 				   struct snd_soc_tplg_dapm_widget *tw,
 				   enum sof_tokens *object_token_list, int count)
@@ -1273,6 +1369,20 @@ static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_s
 					       token_list[object_token_list[i]].tokens,
 					       token_list[object_token_list[i]].count,
 					       private->array, le32_to_cpu(private->size));
+			if (ret < 0) {
+				dev_err(scomp->dev, "Failed parsing %s for widget %s\n",
+					token_list[object_token_list[i]].name,
+					swidget->widget->name);
+				goto err;
+			}
+
+			continue;
+		case SOF_MEDIA_CODEC_TOKENS:
+			ret = sof_parse_media_codec_tokens(scomp, swidget,
+							   token_list[object_token_list[i]].tokens,
+							   token_list[object_token_list[i]].count,
+							   private->array,
+							   le32_to_cpu(private->size));
 			if (ret < 0) {
 				dev_err(scomp->dev, "Failed parsing %s for widget %s\n",
 					token_list[object_token_list[i]].name,
@@ -1332,6 +1442,9 @@ static int sof_widget_parse_tokens(struct snd_soc_component *scomp, struct snd_s
 
 	return 0;
 err:
+	kfree(swidget->media_formats);
+	swidget->media_formats = NULL;
+	swidget->num_media_formats = 0;
 	kfree(swidget->tuples);
 	return ret;
 }
@@ -1629,6 +1742,7 @@ static int sof_widget_ready(struct snd_soc_component *scomp, int index,
 	return ret;
 free:
 	kfree(swidget->private);
+	kfree(swidget->media_formats);
 	kfree(swidget->tuples);
 widget_free:
 	kfree(swidget);
@@ -1736,6 +1850,7 @@ out:
 	sof_free_pin_binding(swidget, SOF_PIN_TYPE_INPUT);
 	sof_free_pin_binding(swidget, SOF_PIN_TYPE_OUTPUT);
 
+	kfree(swidget->media_formats);
 	kfree(swidget->tuples);
 
 	/* remove and free swidget object */

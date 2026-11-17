@@ -557,7 +557,11 @@ struct sof_ipc4_process {
 	size_t init_ext_module_size;
 };
 
+struct sof_ipc4_fw_module;
 bool sof_ipc4_copier_is_single_bitdepth(struct snd_sof_dev *sdev,
 					struct sof_ipc4_pin_format *pin_fmts,
 					u32 pin_fmts_size);
+int sof_ipc4_process_bind_module(struct snd_sof_dev *sdev,
+				 struct snd_sof_widget *swidget,
+				 struct sof_ipc4_fw_module *fw_module);
 #endif

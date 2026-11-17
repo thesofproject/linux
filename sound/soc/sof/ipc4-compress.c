@@ -28,26 +28,47 @@ struct sof_ipc4_compr_init_data {
 	u32 dir;
 } __packed __aligned(4);
 
-static struct sof_ipc4_process *
-sof_ipc4_compr_get_module(struct snd_sof_pcm *spcm, int dir)
+static struct snd_sof_widget *
+sof_ipc4_compr_get_codec_swidget(struct snd_sof_dev *sdev,
+				 struct snd_sof_pcm *spcm, int dir)
 {
 	int id = dir ? snd_soc_dapm_encoder : snd_soc_dapm_decoder;
 	struct snd_sof_pcm_stream *sps = &spcm->stream[dir];
+	struct snd_sof_widget *host_swidget;
+	struct snd_sof_widget *swidget;
 	struct snd_soc_dapm_widget *widget;
 	int i;
 
-	/* Find the (first) compr module in path */
-	for_each_dapm_widgets(sps->list, i, widget) {
-		struct snd_sof_widget *swidget = widget->dobj.private;
+	if (sps->list) {
+		/* Find the (first) compr module in active path */
+		for_each_dapm_widgets(sps->list, i, widget) {
+			swidget = widget->dobj.private;
 
-		if (!swidget)
-			continue;
+			if (swidget && swidget->widget->id == id)
+				return swidget;
+		}
+		return NULL;
+	}
 
-		if (swidget->widget->id == id)
-			return swidget->private;
+	host_swidget = snd_sof_find_swidget_by_comp_id(sdev, sps->comp_id);
+	if (!host_swidget)
+		return NULL;
+
+	list_for_each_entry(swidget, &sdev->widget_list, list) {
+		if (swidget->pipeline_id == host_swidget->pipeline_id &&
+		    swidget->id == id)
+			return swidget;
 	}
 
 	return NULL;
+}
+
+static struct sof_ipc4_process *
+sof_ipc4_compr_get_module(struct snd_sof_dev *sdev, struct snd_sof_pcm *spcm, int dir)
+{
+	struct snd_sof_widget *swidget = sof_ipc4_compr_get_codec_swidget(sdev, spcm, dir);
+
+	return swidget ? swidget->private : NULL;
 }
 
 static u32 sof_ipc4_compr_calc_min_fragment_size(struct snd_sof_pcm_stream *sps)
@@ -192,6 +213,24 @@ struct sof_ipc4_codec_info_data {
 	u32 items[];
 } __packed __aligned(4);
 
+static void sof_ipc4_compr_caps_add_codec(struct snd_sof_pcm *spcm, int dir,
+					  struct snd_compr_caps *caps, u32 id)
+{
+	int i;
+
+	for (i = 0; i < caps->num_codecs; i++) {
+		if (caps->codecs[i] == id)
+			return;
+	}
+
+	if (caps->num_codecs < ARRAY_SIZE(caps->codecs)) {
+		spcm_dbg(spcm, dir, "codec#%d: %u\n", caps->num_codecs, id);
+		caps->codecs[caps->num_codecs++] = id;
+	} else {
+		spcm_dbg(spcm, dir, "codec#%d: %u ignored\n", caps->num_codecs, id);
+	}
+}
+
 static int sof_ipc4_compr_get_caps(struct snd_soc_component *component,
 				   struct snd_compr_stream *cstream,
 				   struct snd_compr_caps *caps)
@@ -199,7 +238,7 @@ static int sof_ipc4_compr_get_caps(struct snd_soc_component *component,
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
-	struct sof_ipc4_codec_info_data *codec_info = ipc4_data->codec_info;
+	struct snd_sof_widget *codec_swidget;
 	int dir = cstream->direction;
 	u64 max_buffer_size;
 	u64 max_fragments;
@@ -210,28 +249,32 @@ static int sof_ipc4_compr_get_caps(struct snd_soc_component *component,
 	if (!spcm)
 		return -EINVAL;
 
-	/* No compress support available in booted firmware */
-	if (!codec_info || !codec_info->count) {
+	scoped_guard(mutex, &ipc4_data->codec_info_mutex) {
+		struct sof_ipc4_codec_info_data *codec_info = ipc4_data->codec_info;
+
+		if (codec_info) {
+			for (i = 0; i < codec_info->count; i++) {
+				int _dir = SOF_IPC4_CODEC_INFO_GET_DIR(codec_info->items[i]);
+
+				if (_dir == dir)
+					sof_ipc4_compr_caps_add_codec(spcm, dir, caps,
+						SOF_IPC4_CODEC_INFO_GET_ID(codec_info->items[i]));
+			}
+		}
+	}
+
+	codec_swidget = sof_ipc4_compr_get_codec_swidget(sdev, spcm, dir);
+	if (codec_swidget) {
+		for (i = 0; i < codec_swidget->num_media_formats; i++)
+			sof_ipc4_compr_caps_add_codec(spcm, dir, caps,
+						      codec_swidget->media_formats[i].codec_id);
+	}
+
+	/* No compress support available in firmware or topology */
+	if (!caps->num_codecs) {
 		spcm_err(spcm, dir,
 			 "Compress is not supported (no codecs available)\n");
 		return -EINVAL;
-	}
-
-	for (i = 0; i < codec_info->count; i++) {
-		int _dir = SOF_IPC4_CODEC_INFO_GET_DIR(codec_info->items[i]);
-
-		if (_dir == dir) {
-			int id = SOF_IPC4_CODEC_INFO_GET_ID(codec_info->items[i]);
-
-			if (caps->num_codecs < ARRAY_SIZE(caps->codecs)) {
-				spcm_dbg(spcm, dir, "codec#%d: %d\n",
-					 caps->num_codecs, id);
-				caps->codecs[caps->num_codecs++] = id;
-			} else {
-				spcm_dbg(spcm, dir, "codec#%d: %d ignored\n",
-					 caps->num_codecs, id);
-			}
-		}
 	}
 
 	caps->direction = dir;
@@ -319,8 +362,12 @@ static bool
 sof_ipc4_compr_codec_supported(struct snd_sof_dev *sdev, int codec_id, int dir)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
-	struct sof_ipc4_codec_info_data *codec_info = ipc4_data->codec_info;
+	struct sof_ipc4_codec_info_data *codec_info;
 	int i;
+
+	guard(mutex)(&ipc4_data->codec_info_mutex);
+
+	codec_info = ipc4_data->codec_info;
 
 	/* No compress support available in booted firmware */
 	if (!codec_info || !codec_info->count)
@@ -337,6 +384,112 @@ sof_ipc4_compr_codec_supported(struct snd_sof_dev *sdev, int codec_id, int dir)
 	return false;
 }
 
+static u32 sof_ipc4_compr_codec_bit_depth(const struct snd_codec *codec)
+{
+	switch (codec->id) {
+	case SND_AUDIOCODEC_PCM:
+	{
+		int width = snd_pcm_format_width((snd_pcm_format_t)codec->format);
+
+		return width > 0 ? width : 0;
+	}
+	case SND_AUDIOCODEC_VORBIS:
+		return 16;
+	case SND_AUDIOCODEC_FLAC:
+		return codec->options.flac_d.sample_size;
+	default:
+		if (codec->format) {
+			int width = snd_pcm_format_width((snd_pcm_format_t)codec->format);
+
+			if (width > 0)
+				return width;
+		}
+		return 0;
+	}
+}
+
+static bool sof_ipc4_compr_media_fmt_matches(const struct sof_media_codec_fmt *fmt,
+					     const struct snd_codec *codec,
+					     u32 bit_depth)
+{
+	if (fmt->codec_id != codec->id)
+		return false;
+
+	if (codec->sample_rate) {
+		if (fmt->min_rate && codec->sample_rate < fmt->min_rate)
+			return false;
+		if (fmt->max_rate && codec->sample_rate > fmt->max_rate)
+			return false;
+	}
+
+	if (codec->ch_out && fmt->channels && fmt->channels != codec->ch_out)
+		return false;
+
+	if (bit_depth && fmt->bit_depth && fmt->bit_depth != bit_depth)
+		return false;
+
+	return true;
+}
+
+static bool sof_ipc4_compr_has_matching_fmt(struct snd_sof_widget *codec_swidget,
+					    const struct snd_codec *codec)
+{
+	u32 bit_depth = sof_ipc4_compr_codec_bit_depth(codec);
+	int i;
+
+	for (i = 0; i < codec_swidget->num_media_formats; i++) {
+		if (sof_ipc4_compr_media_fmt_matches(&codec_swidget->media_formats[i],
+						     codec, bit_depth))
+			return true;
+	}
+
+	return false;
+}
+
+static int sof_ipc4_compr_resolve_media_module(struct snd_sof_dev *sdev,
+					       struct snd_sof_widget *codec_swidget,
+					       const struct snd_codec *codec)
+{
+	u32 bit_depth = sof_ipc4_compr_codec_bit_depth(codec);
+	struct sof_ipc4_fw_module *fw_module = NULL;
+	int i, ret;
+
+	/* Tier 1: prefer a matching module UUID already resident in DSP memory */
+	for (i = 0; i < codec_swidget->num_media_formats; i++) {
+		const struct sof_media_codec_fmt *fmt = &codec_swidget->media_formats[i];
+
+		if (!sof_ipc4_compr_media_fmt_matches(fmt, codec, bit_depth))
+			continue;
+
+		fw_module = sof_ipc4_find_loaded_module_by_uuid(sdev, &fmt->module_uuid);
+		if (fw_module)
+			break;
+	}
+
+	/* Tier 2: boot DSP if needed and demand-load (or purge+load) candidate UUIDs */
+	if (!fw_module) {
+		ret = snd_sof_boot_dsp_firmware(sdev);
+		if (ret)
+			return ret;
+
+		for (i = 0; i < codec_swidget->num_media_formats; i++) {
+			const struct sof_media_codec_fmt *fmt = &codec_swidget->media_formats[i];
+
+			if (!sof_ipc4_compr_media_fmt_matches(fmt, codec, bit_depth))
+				continue;
+
+			fw_module = sof_ipc4_find_module_by_uuid(sdev, &fmt->module_uuid);
+			if (fw_module)
+				break;
+		}
+	}
+
+	if (!fw_module)
+		return -EINVAL;
+
+	return sof_ipc4_process_bind_module(sdev, codec_swidget, fw_module);
+}
+
 static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 				     struct snd_compr_stream *cstream,
 				     struct snd_compr_params *params)
@@ -348,6 +501,7 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 	struct snd_sof_platform_stream_params *platform_params;
 	struct sof_ipc4_timestamp_info *time_info;
 	struct snd_compr_params *compr_params;
+	struct snd_sof_widget *codec_swidget;
 	struct snd_sof_widget *host_swidget;
 	struct sof_ipc4_process *process;
 	struct snd_pcm_hw_params p = {0};
@@ -368,7 +522,13 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 		return -ENODEV;
 	}
 
-	if (!sof_ipc4_compr_codec_supported(sdev, params->codec.id, dir)) {
+	codec_swidget = sof_ipc4_compr_get_codec_swidget(sdev, spcm, dir);
+	if (codec_swidget && codec_swidget->num_media_formats) {
+		if (!sof_ipc4_compr_has_matching_fmt(codec_swidget, &params->codec)) {
+			spcm_err(spcm, dir, "Unsupported codec id: %u\n", params->codec.id);
+			return -EINVAL;
+		}
+	} else if (!sof_ipc4_compr_codec_supported(sdev, params->codec.id, dir)) {
 		spcm_err(spcm, dir, "Unsupported codec id: %u\n", params->codec.id);
 		return -EINVAL;
 	}
@@ -386,6 +546,15 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 		ret = sof_ipc4_compr_stream_free(sdev, spcm, cstream);
 		if (ret)
 			return ret;
+	}
+
+	if (codec_swidget && codec_swidget->num_media_formats) {
+		ret = sof_ipc4_compr_resolve_media_module(sdev, codec_swidget, &params->codec);
+		if (ret) {
+			spcm_err(spcm, dir, "Failed to resolve module for codec id %u: %d\n",
+				 params->codec.id, ret);
+			return ret;
+		}
 	}
 
 	/* save the compress params */
@@ -468,7 +637,7 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 			goto free_pages;
 	}
 
-	process = sof_ipc4_compr_get_module(spcm, dir);
+	process = sof_ipc4_compr_get_module(sdev, spcm, dir);
 	if (!process) {
 		ret = -EINVAL;
 		goto free_list;
