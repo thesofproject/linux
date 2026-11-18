@@ -2883,12 +2883,7 @@ output_format_selected:
 			sizeof(ipc4_copier->dma_config_tlv[i].dma_config));
 	}
 
-	if (dma_config_tlv_size) {
-		ipc_size += dma_config_tlv_size;
-
-		/* we also need to increase the size at the gtw level */
-		copier_data->gtw_cfg.config_length += dma_config_tlv_size / 4;
-	}
+	ipc_size += dma_config_tlv_size;
 
 	dev_dbg(sdev->dev, "copier %s, IPC size is %d", swidget->widget->name, ipc_size);
 
@@ -2903,6 +2898,9 @@ output_format_selected:
 
 	/* update pipeline memory usage */
 	sof_ipc4_update_resource_usage(sdev, swidget, &copier_data->base_config);
+
+	/* Include DMA CONFIG TLVs in the gateway length sent to firmware. */
+	copier_data->gtw_cfg.config_length += dma_config_tlv_size / 4;
 
 	/* copy IPC data */
 	memcpy(*ipc_config_data, (void *)copier_data, sizeof(*copier_data));
