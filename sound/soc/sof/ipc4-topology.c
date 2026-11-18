@@ -2290,6 +2290,111 @@ static void sof_ipc4_host_config(struct snd_sof_dev *sdev, struct snd_sof_widget
 	copier_data->gtw_cfg.node_id |=	SOF_IPC4_NODE_INDEX(host_dma_id);
 }
 
+/*
+ * Return the first output format of @pin of a copier if all formats of the pin
+ * have the same bit depth, NULL otherwise.
+ */
+static struct sof_ipc4_audio_format *
+sof_ipc4_copier_get_pin_bitdepth_ref(struct sof_ipc4_available_audio_format *available_fmt,
+				     int pin)
+{
+	struct sof_ipc4_pin_format *pin_fmts = available_fmt->output_pin_fmts;
+	struct sof_ipc4_audio_format *ref = NULL;
+	int i;
+
+	for (i = 0; i < available_fmt->num_output_formats; i++) {
+		struct sof_ipc4_audio_format *fmt = &pin_fmts[i].audio_fmt;
+
+		if (pin_fmts[i].pin_index != pin)
+			continue;
+
+		if (!ref) {
+			ref = fmt;
+			continue;
+		}
+
+		if (SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(fmt->fmt_cfg) !=
+		    SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(ref->fmt_cfg))
+			return NULL;
+	}
+
+	return ref;
+}
+
+static bool sof_ipc4_copier_same_sample_format(const struct sof_ipc4_audio_format *a,
+					      const struct sof_ipc4_audio_format *b)
+{
+	u32 type_a = SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE(a->fmt_cfg);
+	u32 type_b = SOF_IPC4_AUDIO_FORMAT_CFG_SAMPLE_TYPE(b->fmt_cfg);
+
+	if (type_a <= SOF_IPC4_TYPE_SIGNED_INTEGER)
+		type_a = SOF_IPC4_TYPE_LSB_INTEGER;
+	if (type_b <= SOF_IPC4_TYPE_SIGNED_INTEGER)
+		type_b = SOF_IPC4_TYPE_LSB_INTEGER;
+
+	return SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(a->fmt_cfg) ==
+	       SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(b->fmt_cfg) &&
+	       sof_ipc4_fmt_to_type(a) == sof_ipc4_fmt_to_type(b) && type_a == type_b;
+}
+
+/*
+ * Select independently per pin and input rate. Use fixed channel count or
+ * sample representation when present, otherwise preserve the input value.
+ */
+static int sof_ipc4_copier_select_output_fmt(struct snd_sof_dev *sdev,
+					     struct snd_sof_widget *swidget,
+					     struct sof_ipc4_copier *copier, int pin)
+{
+	struct sof_ipc4_available_audio_format *available_fmt = &copier->available_fmt;
+	struct sof_ipc4_audio_format *in_fmt = &copier->data.base_config.audio_fmt;
+	struct sof_ipc4_pin_format *pin_fmts = available_fmt->output_pin_fmts;
+	const struct sof_ipc4_audio_format *sample_ref;
+	const struct sof_ipc4_audio_format *first = NULL;
+	bool same_channels = true, same_sample = true;
+	u32 channels;
+	int i;
+
+	for (i = 0; i < available_fmt->num_output_formats; i++) {
+		struct sof_ipc4_audio_format *fmt = &pin_fmts[i].audio_fmt;
+
+		if (pin_fmts[i].pin_index != pin ||
+		    fmt->sampling_frequency != in_fmt->sampling_frequency)
+			continue;
+		if (!first) {
+			first = fmt;
+			continue;
+		}
+		if (SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg) !=
+		    SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(first->fmt_cfg))
+			same_channels = false;
+		if (!sof_ipc4_copier_same_sample_format(fmt, first))
+			same_sample = false;
+	}
+
+	if (!first) {
+		dev_err(sdev->dev, "%s: no output format on pin %d at %uHz\n",
+			swidget->widget->name, pin, in_fmt->sampling_frequency);
+		return -EINVAL;
+	}
+
+	channels = SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(
+		same_channels ? first->fmt_cfg : in_fmt->fmt_cfg);
+	sample_ref = same_sample ? first : in_fmt;
+	for (i = 0; i < available_fmt->num_output_formats; i++) {
+		struct sof_ipc4_audio_format *fmt = &pin_fmts[i].audio_fmt;
+
+		if (pin_fmts[i].pin_index == pin &&
+		    fmt->sampling_frequency == in_fmt->sampling_frequency &&
+		    SOF_IPC4_AUDIO_FORMAT_CFG_CHANNELS_COUNT(fmt->fmt_cfg) == channels &&
+		    sof_ipc4_copier_same_sample_format(fmt, sample_ref))
+			return i;
+	}
+
+	dev_err(sdev->dev, "%s: no matching output format on pin %d at %uHz\n",
+		swidget->widget->name, pin, in_fmt->sampling_frequency);
+	return -EINVAL;
+}
+
 static int
 sof_ipc4_copier_module_update_params(struct snd_sof_widget *swidget,
 				     struct snd_pcm_hw_params *pipeline_params)
@@ -2344,6 +2449,7 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 				struct snd_pcm_hw_params *pipeline_params, int dir)
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
+	struct sof_ipc4_audio_format *bitdepth_ref_fmt;
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct sof_ipc4_copier_data *copier_data;
@@ -2515,14 +2621,25 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	if (input_fmt_index < 0)
 		return input_fmt_index;
 
-	/* set the reference params for output format selection */
-	single_output_bitdepth = sof_ipc4_copier_is_single_bitdepth(sdev,
-					available_fmt->output_pin_fmts,
-					available_fmt->num_output_formats);
+	/*
+	 * Set the reference params for output format selection. The copier is configured
+	 * with the output pin 0 format, the formats of other pins are set at bind time.
+	 */
+	if (swidget->id == snd_soc_dapm_buffer) {
+		output_fmt_index = sof_ipc4_copier_select_output_fmt(sdev, swidget,
+								    ipc4_copier, 0);
+		if (output_fmt_index < 0)
+			return output_fmt_index;
+		copier_data->base_config.obs =
+			available_fmt->output_pin_fmts[output_fmt_index].buffer_size;
+		goto output_format_selected;
+	}
+
+	bitdepth_ref_fmt = sof_ipc4_copier_get_pin_bitdepth_ref(available_fmt, 0);
+	single_output_bitdepth = !!bitdepth_ref_fmt;
 	switch (swidget->id) {
 	case snd_soc_dapm_aif_in:
 	case snd_soc_dapm_dai_out:
-	case snd_soc_dapm_buffer:
 	{
 		struct sof_ipc4_audio_format *in_fmt;
 
@@ -2560,34 +2677,25 @@ _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 	}
 
 	/*
-	 * if the output format is the same across all available output formats, choose
-	 * that as the reference.
+	 * if the output bit depth is the same across all available pin 0 output formats,
+	 * choose that as the reference.
 	 */
 	if (single_output_bitdepth) {
-		struct sof_ipc4_audio_format *out_fmt;
-
-		out_fmt = &available_fmt->output_pin_fmts[0].audio_fmt;
 		out_ref_valid_bits =
-			SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(out_fmt->fmt_cfg);
-		out_ref_type = sof_ipc4_fmt_to_type(out_fmt);
+			SOF_IPC4_AUDIO_FORMAT_CFG_V_BIT_DEPTH(bitdepth_ref_fmt->fmt_cfg);
+		out_ref_type = sof_ipc4_fmt_to_type(bitdepth_ref_fmt);
 	}
 
 	output_fmt_index = sof_ipc4_init_output_audio_fmt(sdev, swidget,
 							  &copier_data->base_config,
-							  available_fmt, SOF_OUTPUT_PIN_ANY,
-							  out_ref_rate,
+							  available_fmt, 0, out_ref_rate,
 							  out_ref_channels, out_ref_valid_bits,
 							  out_ref_type);
 	if (output_fmt_index < 0)
 		return output_fmt_index;
 
-	/*
-	 * Set the output format. Current topology defines pin 0 input and output formats in pairs.
-	 * This assumes that the pin 0 formats are defined before all other pins.
-	 * So pick the output audio format with the same index as the chosen
-	 * input format. This logic will need to be updated when the format definitions
-	 * in topology change.
-	 */
+output_format_selected:
+	/* Set the output format, which is the format of output pin 0 */
 	memcpy(&copier_data->out_format,
 	       &available_fmt->output_pin_fmts[output_fmt_index].audio_fmt,
 	       sizeof(struct sof_ipc4_audio_format));
