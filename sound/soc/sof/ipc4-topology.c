@@ -4342,19 +4342,26 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 {
 	struct sof_ipc4_copier_config_set_sink_format format;
 	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct sof_ipc4_available_audio_format *available_fmt;
 	struct sof_ipc4_base_module_cfg *src_config;
 	const struct sof_ipc4_audio_format *pin_fmt;
+	const struct sof_ipc4_audio_format *prepared_fmt;
 	struct sof_ipc4_fw_module *fw_module;
+	struct sof_ipc4_copier *src_copier;
 	struct sof_ipc4_msg msg = {{ 0 }};
+	bool pin_has_fmts = false;
+	int i;
 
 	if (WIDGET_IS_DAI(src_widget->id)) {
 		struct snd_sof_dai *dai = src_widget->private;
 
-		src_config = dai->private;
+		src_copier = dai->private;
 	} else {
-		src_config = src_widget->private;
+		src_copier = src_widget->private;
 	}
 
+	src_config = &src_copier->data.base_config;
+	available_fmt = &src_copier->available_fmt;
 	fw_module = src_widget->module_info;
 
 	format.sink_id = sroute->src_queue_id;
@@ -4367,6 +4374,52 @@ static int sof_ipc4_set_copier_sink_format(struct snd_sof_dev *sdev,
 			sink_widget->widget->name, sroute->dst_queue_id,
 			src_widget->widget->name, sroute->src_queue_id);
 		return -EINVAL;
+	}
+
+	/*
+	 * If topology lists formats for the copier output pin, the input format of the
+	 * sink must be one of them.
+	 */
+	for (i = 0; i < available_fmt->num_output_formats; i++) {
+		struct sof_ipc4_pin_format *out_pin_fmt = &available_fmt->output_pin_fmts[i];
+		struct sof_ipc4_audio_format *fmt = &out_pin_fmt->audio_fmt;
+
+		if (out_pin_fmt->pin_index != sroute->src_queue_id)
+			continue;
+
+		pin_has_fmts = true;
+		if (sof_ipc4_is_same_fmt(fmt, pin_fmt) &&
+		    sof_ipc4_copier_same_sample_format(fmt, pin_fmt))
+			break;
+	}
+
+	if (pin_has_fmts && i == available_fmt->num_output_formats) {
+		dev_err(sdev->dev,
+			"Input format of %s:%d is not supported by output pin %d of %s\n",
+			sink_widget->widget->name, sroute->dst_queue_id,
+			sroute->src_queue_id, src_widget->widget->name);
+		return -EINVAL;
+	}
+
+	/* Only explicitly bound output pins were identified during prepare. */
+	if (src_widget->output_pin_binding) {
+		prepared_fmt = &src_copier->data.out_format;
+		if (pin_has_fmts) {
+			i = sof_ipc4_copier_select_output_fmt(sdev, src_widget, src_copier,
+							      sroute->src_queue_id);
+			if (i < 0)
+				return i;
+			prepared_fmt = &available_fmt->output_pin_fmts[i].audio_fmt;
+		}
+
+		if (!sof_ipc4_is_same_fmt(prepared_fmt, pin_fmt) ||
+		    !sof_ipc4_copier_same_sample_format(prepared_fmt, pin_fmt)) {
+			dev_err(sdev->dev,
+				"Input format of %s:%d does not match prepared output of %s:%d\n",
+				sink_widget->widget->name, sroute->dst_queue_id,
+				src_widget->widget->name, sroute->src_queue_id);
+			return -EINVAL;
+		}
 	}
 
 	memcpy(&format.sink_fmt, pin_fmt, sizeof(format.sink_fmt));
