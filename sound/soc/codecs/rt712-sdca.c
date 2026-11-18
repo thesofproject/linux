@@ -1197,6 +1197,7 @@ static const struct snd_soc_dapm_route rt712_sdca_audio_map[] = {
 
 static const struct snd_soc_dapm_widget rt712_sdca_spk_dapm_widgets[] = {
 	SND_SOC_DAPM_AIF_IN("DP3RX", "DP3 Playback", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("DP3RX-Comp", "DP3 Comp-In", 0, SND_SOC_NOPM, 0, 0),
 
 	/* Digital Interface */
 	SND_SOC_DAPM_PGA("FU06", SND_SOC_NOPM, 0, 0, NULL, 0),
@@ -1214,6 +1215,7 @@ static const struct snd_soc_dapm_widget rt712_sdca_spk_dapm_widgets[] = {
 
 static const struct snd_soc_dapm_route rt712_sdca_spk_dapm_routes[] = {
 	{ "FU06", NULL, "DP3RX" },
+	{ "FU06", NULL, "DP3RX-Comp" },
 	{ "FU06", NULL, "PDE 23" },
 	{ "OT23 L", "Switch", "FU06" },
 	{ "OT23 R", "Switch", "FU06" },
@@ -1671,9 +1673,25 @@ static int rt712_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	struct sdw_stream_runtime *sdw_stream;
 	int retval, port;
 	unsigned int sampling_rate;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai;
 
 	dev_dbg(dai->dev, "%s %s id %d", __func__, dai->name, dai->id);
-	sdw_stream = snd_soc_dai_get_dma_data(dai, substream);
+	dev_dbg(dai->dev, "%s substream stream %d", __func__, substream->stream);
+
+	if (dai->id == RT712_AIF4) {
+		cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+		dev_dbg(dai->dev, "%s cpu_dai %s id %d", __func__, cpu_dai->name, cpu_dai->id);
+
+		sdw_stream = snd_soc_dai_get_stream(cpu_dai, 1);
+		if (IS_ERR(sdw_stream)) {
+			dev_err(rtd->dev, "%s no stream found for DAI %s id %d\n",
+				__func__, cpu_dai->name, cpu_dai->id);
+			return PTR_ERR(sdw_stream);
+		}
+	} else {
+		sdw_stream = snd_soc_dai_get_dma_data(dai, substream);
+	}
 
 	if (!sdw_stream)
 		return -EINVAL;
@@ -1689,7 +1707,7 @@ static int rt712_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		if (dai->id == RT712_AIF1)
 			port = 1;
-		else if (dai->id == RT712_AIF2)
+		else if (dai->id == RT712_AIF2 || dai->id == RT712_AIF4)
 			port = 3;
 		else
 			return -EINVAL;
@@ -1704,6 +1722,9 @@ static int rt712_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 
 	/* SoundWire specific configuration */
 	snd_sdw_params_to_config(substream, params, &stream_config, &port_config);
+
+	if (dai->id == RT712_AIF4)
+		stream_config.transport_type = SDW_TRANSPORT_PERIPHERAL_PERIPHERAL;
 	port_config.num = port;
 
 	retval = sdw_stream_add_slave(rt712->slave, &stream_config,
@@ -1750,6 +1771,7 @@ static int rt712_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 			sampling_rate);
 		break;
 	case RT712_AIF2:
+	case RT712_AIF4:
 		regmap_write(rt712->regmap,
 			SDW_SDCA_CTL(FUNC_NUM_AMP, RT712_SDCA_ENT_CS31, RT712_SDCA_CTL_SAMPLE_FREQ_INDEX, 0),
 			sampling_rate);
@@ -1823,6 +1845,18 @@ static struct snd_soc_dai_driver rt712_sdca_dai[] = {
 		.playback = {
 			.stream_name = "DP3 Playback",
 			.channels_min = 1,
+			.channels_max = 2,
+			.rates = RT712_STEREO_RATES,
+			.formats = RT712_FORMATS,
+		},
+		.ops = &rt712_sdca_ops,
+	},
+	{
+		.name = "rt712-sdca-aif4",
+		.id = RT712_AIF4,
+		.playback = {
+			.stream_name = "DP3 Comp-In",
+			.channels_min = 2,
 			.channels_max = 2,
 			.rates = RT712_STEREO_RATES,
 			.formats = RT712_FORMATS,
