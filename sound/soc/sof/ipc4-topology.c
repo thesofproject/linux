@@ -2395,13 +2395,55 @@ static int sof_ipc4_copier_select_output_fmt(struct snd_sof_dev *sdev,
 	return -EINVAL;
 }
 
+/*
+ * Modify the params for the next widget with the format of the copier output pin
+ * feeding the path. Output pin 0 uses the format the copier is configured with.
+ * The format of other pins is set at bind time, select it from the formats of the
+ * pin in topology with the copier input format as reference, like for pin 0. Pins
+ * without formats in topology fall back to the pin 0 format.
+ *
+ * Without output pin bindings the pin is allocated at bind time, the pin 0 format
+ * is propagated and the format of the bound pin is set from the sink's input format
+ * when the copier is bound.
+ */
+static int sof_ipc4_copier_set_output_params(struct snd_sof_dev *sdev,
+					     struct snd_sof_widget *swidget,
+					     struct sof_ipc4_copier *ipc4_copier,
+					     struct snd_pcm_hw_params *pipeline_params,
+					     int out_pin)
+{
+	struct sof_ipc4_available_audio_format *available_fmt = &ipc4_copier->available_fmt;
+	struct sof_ipc4_copier_data *copier_data = &ipc4_copier->data;
+	struct sof_ipc4_audio_format *out_fmt = &copier_data->out_format;
+
+	if (out_pin == SOF_OUTPUT_PIN_NONE)
+		return 0;
+
+	if (out_pin > 0 &&
+	    sof_ipc4_get_first_pin_fmt(available_fmt->output_pin_fmts,
+				       available_fmt->num_output_formats, out_pin) >= 0) {
+		int i;
+
+		i = sof_ipc4_copier_select_output_fmt(sdev, swidget, ipc4_copier, out_pin);
+		if (i < 0)
+			return i;
+
+		out_fmt = &available_fmt->output_pin_fmts[i].audio_fmt;
+	}
+
+	return sof_ipc4_update_hw_params(sdev, pipeline_params, out_fmt,
+					 BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
+					 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
+					 BIT(SNDRV_PCM_HW_PARAM_RATE));
+}
+
 static int
 sof_ipc4_copier_module_update_params(struct snd_sof_widget *swidget,
-				     struct snd_pcm_hw_params *pipeline_params)
+				     struct snd_pcm_hw_params *pipeline_params,
+				     int out_pin)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-	struct sof_ipc4_copier_data *copier_data;
 	struct sof_ipc4_copier *ipc4_copier;
 
 	switch (swidget->id) {
@@ -2409,7 +2451,6 @@ sof_ipc4_copier_module_update_params(struct snd_sof_widget *swidget,
 	case snd_soc_dapm_aif_out:
 	case snd_soc_dapm_buffer:
 		ipc4_copier = swidget->private;
-		copier_data = &ipc4_copier->data;
 		break;
 	case snd_soc_dapm_dai_in:
 	case snd_soc_dapm_dai_out:
@@ -2424,7 +2465,6 @@ sof_ipc4_copier_module_update_params(struct snd_sof_widget *swidget,
 		dai = swidget->private;
 
 		ipc4_copier = (struct sof_ipc4_copier *)dai->private;
-		copier_data = &ipc4_copier->data;
 
 		break;
 	}
@@ -2435,18 +2475,16 @@ sof_ipc4_copier_module_update_params(struct snd_sof_widget *swidget,
 	}
 
 	/* modify the input params for the next widget */
-	return sof_ipc4_update_hw_params(sdev, pipeline_params,
-					 &copier_data->out_format,
-					 BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
-					 BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
-					 BIT(SNDRV_PCM_HW_PARAM_RATE));
+	return sof_ipc4_copier_set_output_params(sdev, swidget, ipc4_copier,
+						 pipeline_params, out_pin);
 }
 
 static int
 _sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 				struct snd_pcm_hw_params *fe_params,
 				struct snd_sof_platform_stream_params *platform_params,
-				struct snd_pcm_hw_params *pipeline_params, int dir)
+				struct snd_pcm_hw_params *pipeline_params, int dir,
+				int out_pin)
 {
 	struct sof_ipc4_available_audio_format *available_fmt;
 	struct sof_ipc4_audio_format *bitdepth_ref_fmt;
@@ -2799,30 +2837,13 @@ output_format_selected:
 
 				i++;
 			}
-			if (blob->alh_cfg.device_count > 1) {
-				int group_id;
-
-				group_id = ida_alloc_max(&alh_group_ida, ALH_MULTI_GTW_COUNT - 1,
-							 GFP_KERNEL);
-
-				if (group_id < 0)
-					return group_id;
-
-				/* add multi-gateway base */
-				group_id += ALH_MULTI_GTW_BASE;
-				copier_data->gtw_cfg.node_id &= ~SOF_IPC4_NODE_INDEX_MASK;
-				copier_data->gtw_cfg.node_id |= SOF_IPC4_NODE_INDEX(group_id);
-			}
 		}
 	}
 	}
 
 	/* modify the input params for the next widget */
-	ret = sof_ipc4_update_hw_params(sdev, pipeline_params,
-					&copier_data->out_format,
-					BIT(SNDRV_PCM_HW_PARAM_FORMAT) |
-					BIT(SNDRV_PCM_HW_PARAM_CHANNELS) |
-					BIT(SNDRV_PCM_HW_PARAM_RATE));
+	ret = sof_ipc4_copier_set_output_params(sdev, swidget, ipc4_copier,
+						pipeline_params, out_pin);
 	if (ret)
 		return ret;
 
@@ -2891,6 +2912,26 @@ output_format_selected:
 	if (!*ipc_config_data)
 		return -ENOMEM;
 
+	if (WIDGET_IS_DAI(swidget->id) && ipc4_copier->dai_type == SOF_DAI_INTEL_ALH) {
+		struct sof_ipc4_alh_configuration_blob *blob;
+		int group_id;
+
+		blob = (struct sof_ipc4_alh_configuration_blob *)ipc4_copier->copier_config;
+		if (blob->alh_cfg.device_count > 1) {
+			group_id = ida_alloc_max(&alh_group_ida, ALH_MULTI_GTW_COUNT - 1,
+						 GFP_KERNEL);
+			if (group_id < 0) {
+				kfree(*ipc_config_data);
+				*ipc_config_data = NULL;
+				return group_id;
+			}
+
+			group_id += ALH_MULTI_GTW_BASE;
+			copier_data->gtw_cfg.node_id &= ~SOF_IPC4_NODE_INDEX_MASK;
+			copier_data->gtw_cfg.node_id |= SOF_IPC4_NODE_INDEX(group_id);
+		}
+	}
+
 	*ipc_config_size = ipc_size;
 
 	sof_ipc4_dbg_module_audio_format(sdev->dev, swidget, available_fmt,
@@ -2932,11 +2973,12 @@ sof_ipc4_prepare_copier_module(struct snd_sof_widget *swidget,
 {
 	if (swidget->prepared)
 		return sof_ipc4_copier_module_update_params(swidget,
-							    pipeline_params);
+							    pipeline_params,
+							    out_pin);
 
 	return _sof_ipc4_prepare_copier_module(swidget, fe_params,
 					       platform_params, pipeline_params,
-					       dir);
+					       dir, out_pin);
 }
 
 static int sof_ipc4_prepare_gain_module(struct snd_sof_widget *swidget,
