@@ -1641,12 +1641,15 @@ static const struct snd_soc_dapm_widget rt721_sdca_dapm_widgets[] = {
 	SND_SOC_DAPM_AIF_OUT("DP2TX", "DP2 Headset Capture", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("DP3RX", "DP3 Speaker Playback", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_OUT("DP6TX", "DP6 DMic Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("DP3RX-Comp", "DP3 Comp-In", 0, SND_SOC_NOPM, 0, 0),
 };
 
 static const struct snd_soc_dapm_route rt721_sdca_audio_map[] = {
 	{"FU 42", NULL, "DP1RX"},
 	{"FU 21", NULL, "DP3RX"},
 	{"FU 23", NULL, "DP3RX"},
+	{"FU 21", NULL, "DP3RX-Comp" },
+	{"FU 23", NULL, "DP3RX-Comp" },
 
 	{"ADC 09 Mux", "MIC2", "MIC2"},
 	{"ADC 09 Mux", "LINE1", "LINE1"},
@@ -1755,14 +1758,29 @@ static int rt721_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_component *component = dai->component;
 	struct rt721_sdca_priv *rt721 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct sdw_stream_config stream_config = {0};
 	struct sdw_port_config port_config;
 	struct sdw_stream_runtime *sdw_stream;
+	struct snd_soc_dai *cpu_dai;
 	int retval, port;
 	unsigned int sampling_rate;
 
 	dev_dbg(dai->dev, "%s %s", __func__, dai->name);
-	sdw_stream = snd_soc_dai_get_dma_data(dai, substream);
+
+	if (dai->id == RT721_AIF4) {
+		cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+		dev_dbg(dai->dev, "%s cpu_dai %s id %d", __func__, cpu_dai->name, cpu_dai->id);
+
+		sdw_stream = snd_soc_dai_get_stream(cpu_dai, 1);
+		if (IS_ERR(sdw_stream)) {
+			dev_err(rtd->dev, "%s no stream found for DAI %s id %d\n",
+				__func__, cpu_dai->name, cpu_dai->id);
+			return PTR_ERR(sdw_stream);
+		}
+	} else {
+		sdw_stream = snd_soc_dai_get_dma_data(dai, substream);
+	}
 
 	if (!sdw_stream)
 		return -EINVAL;
@@ -1779,7 +1797,7 @@ static int rt721_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		if (dai->id == RT721_AIF1)
 			port = 1;
-		else if (dai->id == RT721_AIF2)
+		else if (dai->id == RT721_AIF2 || dai->id == RT721_AIF4)
 			port = 3;
 		else
 			return -EINVAL;
@@ -1795,6 +1813,8 @@ static int rt721_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 	/* SoundWire specific configuration */
 	snd_sdw_params_to_config(substream, params, &stream_config, &port_config);
 	port_config.num = port;
+	if (dai->id == RT721_AIF4)
+		stream_config.transport_type = SDW_TRANSPORT_PERIPHERAL_PERIPHERAL;
 
 	retval = sdw_stream_add_slave(rt721->slave, &stream_config,
 					&port_config, 1, sdw_stream);
@@ -1857,7 +1877,7 @@ static int rt721_sdca_pcm_hw_params(struct snd_pcm_substream *substream,
 				RT721_SDCA_CTL_SAMPLE_FREQ_INDEX, 0), sampling_rate);
 	}
 
-	if (dai->id == RT721_AIF2)
+	if (dai->id == RT721_AIF2 || dai->id == RT721_AIF4)
 		regmap_write(rt721->regmap,
 			SDW_SDCA_CTL(FUNC_NUM_AMP, RT721_SDCA_ENT_CS31,
 				RT721_SDCA_CTL_SAMPLE_FREQ_INDEX, 0), sampling_rate);
@@ -1940,7 +1960,19 @@ static struct snd_soc_dai_driver rt721_sdca_dai[] = {
 			.formats = RT721_FORMATS,
 		},
 		.ops = &rt721_sdca_ops,
-	}
+	},
+	{
+		.name = "rt721-sdca-aif4",
+		.id = RT721_AIF4,
+		.playback = {
+			.stream_name = "DP3 Comp-In",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = RT721_STEREO_RATES,
+			.formats = RT721_FORMATS,
+		},
+		.ops = &rt721_sdca_ops,
+ 	}
 };
 
 int rt721_sdca_init(struct device *dev, struct regmap *regmap,
