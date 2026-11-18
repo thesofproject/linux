@@ -243,6 +243,15 @@ static int sof_suspend(struct device *dev, bool runtime_suspend)
 	if (runtime_suspend && !sof_ops(sdev)->runtime_suspend)
 		return 0;
 
+	/* A retained stream must be stopped while its pipelines still exist. */
+	if (!runtime_suspend && old_state == SOF_DSP_PM_D0 && target_state != SOF_DSP_PM_D0) {
+		ret = snd_sof_dsp_release_retained_streams(sdev);
+		if (ret < 0) {
+			dev_err(sdev->dev, "error: releasing retained streams %d\n", ret);
+			return ret;
+		}
+	}
+
 	/* we need to tear down pipelines only if the DSP hardware is
 	 * active, which happens for PCI devices. if the device is
 	 * suspended, it is brought back to full power and then

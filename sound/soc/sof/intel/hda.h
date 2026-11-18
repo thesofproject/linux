@@ -956,6 +956,7 @@ int hda_data_stream_cleanup(struct device *dev, struct snd_dma_buffer *dmab,
 /* common dai driver */
 extern struct snd_soc_dai_driver skl_dai[];
 int hda_dsp_dais_suspend(struct snd_sof_dev *sdev);
+int hda_dsp_release_retained_streams(struct snd_sof_dev *sdev);
 
 /*
  * Platform Specific HW abstraction Ops.
