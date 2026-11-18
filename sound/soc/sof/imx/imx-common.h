@@ -166,4 +166,7 @@ void imx8_dump(struct snd_sof_dev *sdev, u32 flags);
 
 extern const struct snd_sof_dsp_ops sof_imx_ops;
 
+int imx_probes_register(struct snd_sof_dev *sdev);
+void imx_probes_unregister(struct snd_sof_dev *sdev);
+
 #endif

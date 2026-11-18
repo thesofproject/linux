@@ -61,6 +61,8 @@ extern const struct sof_probes_ipc_ops ipc4_probe_ops;
 struct sof_probes_priv {
 	struct dentry *dfs_points;
 	struct dentry *dfs_points_remove;
+	/* serializes probe point changes from debugfs with stream shutdown */
+	struct mutex lock;
 	u32 extractor_stream_tag;
 	struct snd_soc_card card;
 	void *ipc_priv;

@@ -22,11 +22,20 @@ config SND_SOC_SOF_IMX_COMMON
 	  This option is not user-selectable but automagically handled by
 	  'select' statements at a higher level.
 
+config SND_SOC_SOF_IMX_PROBES
+	tristate
+	select SND_SOC_SOF_DEBUG_PROBES
+	help
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level. It pulls in the generic SOF
+	  probes client (snd-sof-probes) for i.MX platforms.
+
 config SND_SOC_SOF_IMX8
 	tristate "SOF support for i.MX8"
 	depends on IMX_SCU
 	depends on IMX_DSP
 	select SND_SOC_SOF_IMX_COMMON
+	select SND_SOC_SOF_IMX_PROBES
 	help
 	  This adds support for Sound Open Firmware for NXP i.MX8 platforms.
 	  Say Y if you have such a device.
