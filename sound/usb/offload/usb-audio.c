@@ -44,6 +44,7 @@
 #include "../endpoint.h"
 #include "../pcm.h"
 #include "../power.h"
+#include "../quirks.h"
 
 #include "offload.h"
 
@@ -353,6 +354,21 @@ static int usb_offload_ua_start_stream(struct usb_offload_dev *dev,
 		ret = snd_usb_endpoint_prepare(chip, subs->data_endpoint);
 		if (ret < 0)
 			goto err_release_eps;
+		/* the device's own format setup, as snd_usb_pcm_prepare() runs it */
+		if (ret > 0)
+			snd_usb_set_format_quirk(subs, subs->cur_audiofmt);
+	}
+
+	/*
+	 * A quirk can leave the host skipping bytes at the start of the stream
+	 * or of each packet to get the samples aligned, which only the URB path
+	 * does. The DSP would get them misaligned.
+	 */
+	if (subs->stream_offset_adj || subs->pkt_offset_adj) {
+		dev_dbg(&dev->udev->dev,
+			"USB offload: format needs the host to align the data, not offloaded\n");
+		ret = -EOPNOTSUPP;
+		goto err_release_eps;
 	}
 
 	return 0;
