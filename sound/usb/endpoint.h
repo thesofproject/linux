@@ -18,6 +18,10 @@ snd_usb_endpoint_open(struct snd_usb_audio *chip,
 		      bool fixed_rate);
 void snd_usb_endpoint_close(struct snd_usb_audio *chip,
 			    struct snd_usb_endpoint *ep);
+int snd_usb_endpoint_claim_offload(struct snd_usb_audio *chip,
+				   struct snd_usb_endpoint *ep);
+void snd_usb_endpoint_release_offload(struct snd_usb_audio *chip,
+				      struct snd_usb_endpoint *ep);
 int snd_usb_endpoint_set_params(struct snd_usb_audio *chip,
 				struct snd_usb_endpoint *ep);
 int snd_usb_endpoint_prepare(struct snd_usb_audio *chip,

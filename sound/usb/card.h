@@ -67,6 +67,7 @@ struct snd_usb_endpoint {
 	struct snd_usb_clock_ref *clock_ref;
 
 	int opened;		/* open refcount; protect with chip->mutex */
+	bool offloaded;		/* driven by an offload engine; protect with chip->mutex */
 	atomic_t running;	/* running status */
 	int ep_num;		/* the referenced endpoint number */
 	int type;		/* SND_USB_ENDPOINT_TYPE_* */

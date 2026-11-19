@@ -485,6 +485,7 @@ int snd_usb_hw_params(struct snd_usb_substream *subs,
 	struct snd_usb_audio *chip = subs->stream->chip;
 	const struct audioformat *fmt;
 	const struct audioformat *sync_fmt;
+	struct snd_usb_endpoint *ep;
 	bool fixed_rate, sync_fixed_rate;
 	int ret;
 
@@ -540,21 +541,21 @@ int snd_usb_hw_params(struct snd_usb_substream *subs,
 		close_endpoints(chip, subs);
 	}
 
-	subs->data_endpoint = snd_usb_endpoint_open(chip, fmt, hw_params, false, fixed_rate);
-	if (!subs->data_endpoint) {
-		ret = -EINVAL;
+	ep = snd_usb_endpoint_open(chip, fmt, hw_params, false, fixed_rate);
+	if (IS_ERR(ep)) {
+		ret = PTR_ERR(ep);
 		goto unlock;
 	}
+	subs->data_endpoint = ep;
 
 	if (fmt->sync_ep) {
-		subs->sync_endpoint = snd_usb_endpoint_open(chip, sync_fmt,
-							    hw_params,
-							    fmt == sync_fmt,
-							    sync_fixed_rate);
-		if (!subs->sync_endpoint) {
-			ret = -EINVAL;
+		ep = snd_usb_endpoint_open(chip, sync_fmt, hw_params,
+					   fmt == sync_fmt, sync_fixed_rate);
+		if (IS_ERR(ep)) {
+			ret = PTR_ERR(ep);
 			goto unlock;
 		}
+		subs->sync_endpoint = ep;
 
 		snd_usb_endpoint_set_sync(chip, subs->data_endpoint,
 					  subs->sync_endpoint);
