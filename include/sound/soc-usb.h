@@ -113,9 +113,10 @@ static inline int snd_soc_usb_setup_offload_jack(struct snd_soc_component *compo
 	return 0;
 }
 
-static int snd_soc_usb_update_offload_route(struct device *dev, int card, int pcm,
-					    int direction, enum snd_soc_usb_kctl path,
-					    long *route)
+static inline int
+snd_soc_usb_update_offload_route(struct device *dev, int card, int pcm,
+				 int direction, enum snd_soc_usb_kctl path,
+				 long *route)
 {
 	return -ENODEV;
 }
