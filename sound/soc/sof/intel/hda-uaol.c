@@ -978,6 +978,9 @@ static int uaol_dai_setup_feedback(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
+				 struct hda_uaol_stream *stream);
+
 /*
  * Take the device away from the host and finish the gateway configuration
  * with what the acquire reports. The two belong together: the sideband
@@ -1045,6 +1048,19 @@ static int uaol_dai_start_stream(struct snd_pcm_substream *substream,
 	stream->udev = udev;
 	stream->pcm_index = hw.pcm_index;
 	stream->be = substream;
+
+	/*
+	 * The route control refuses a change once the stream is set here, and
+	 * it decides that under the lock the selection is read back with: a
+	 * change which went through while the device was being acquired is
+	 * seen now, a later one finds the route busy. Back out of the former,
+	 * the stream would play to a device the route no longer selects.
+	 */
+	if (hda_uaol_selected(hdev, direction, stream->route, &pcm_index) != udev ||
+	    pcm_index != hw.pcm_index) {
+		uaol_dai_stop_stream(substream, stream);
+		return -EBUSY;
+	}
 
 	return 0;
 
