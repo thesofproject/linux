@@ -112,6 +112,9 @@ xhci_sideband_remove_endpoint(struct xhci_sideband *sb,
 int
 xhci_sideband_stop_endpoint(struct xhci_sideband *sb,
 			    struct usb_host_endpoint *host_ep);
+int
+xhci_sideband_start_endpoint(struct xhci_sideband *sb,
+			     struct usb_host_endpoint *host_ep);
 struct sg_table *
 xhci_sideband_get_endpoint_buffer(struct xhci_sideband *sb,
 				  struct usb_host_endpoint *host_ep);
