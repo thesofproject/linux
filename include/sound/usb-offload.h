@@ -189,6 +189,10 @@ struct usb_offload_stream_hw {
  * connected device's data endpoint so that the caller can program its DSP.
  * The USB PCM is taken away from the host for as long as it is held; the
  * other PCMs of the device are not affected and can be acquired alongside.
+ * So are the endpoints the DSP drives: one which another stream holds, like
+ * the capture endpoint a playback stream with implicit feedback syncs to,
+ * fails the acquisition with -EBUSY, and the host cannot open one while the
+ * stream is held.
  * release_stream() reverses it. quiesce_stream() only stops the endpoints on
  * the controller, for the caller to run once its own side of the link has
  * stopped, before it is torn down; release_stream() still has to follow, or

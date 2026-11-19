@@ -258,6 +258,48 @@ static void usb_offload_fill_ep(struct usb_offload_ep_info *desc,
 }
 
 /*
+ * Whether the stream has an explicit clock feedback endpoint for the DSP to
+ * drive. usb-audio flags the data endpoint of a stream which syncs to an
+ * implicit feedback source, not the capture endpoint it syncs to.
+ */
+static bool usb_offload_ua_explicit_fb(struct snd_usb_substream *subs)
+{
+	return subs->sync_endpoint && !subs->data_endpoint->implicit_fb_sync;
+}
+
+/*
+ * The endpoints the DSP drives are kept away from the host for as long as the
+ * stream is offloaded. One which another stream has open already, like the
+ * capture endpoint a host playback stream with implicit feedback syncs to,
+ * cannot be taken.
+ */
+static int usb_offload_ua_claim_eps(struct snd_usb_audio *chip,
+				    struct snd_usb_substream *subs)
+{
+	int ret;
+
+	ret = snd_usb_endpoint_claim_offload(chip, subs->data_endpoint);
+	if (ret)
+		return ret;
+
+	if (usb_offload_ua_explicit_fb(subs)) {
+		ret = snd_usb_endpoint_claim_offload(chip, subs->sync_endpoint);
+		if (ret)
+			snd_usb_endpoint_release_offload(chip, subs->data_endpoint);
+	}
+
+	return ret;
+}
+
+static void usb_offload_ua_release_eps(struct snd_usb_audio *chip,
+				       struct snd_usb_substream *subs)
+{
+	if (usb_offload_ua_explicit_fb(subs))
+		snd_usb_endpoint_release_offload(chip, subs->sync_endpoint);
+	snd_usb_endpoint_release_offload(chip, subs->data_endpoint);
+}
+
+/*
  * Start the device streaming so that its endpoints, and with them their
  * xHCI transfer rings, exist. This is what snd_usb_pcm_prepare() does for
  * a host driven stream. Caller holds usb_offload_ua_lock.
@@ -281,9 +323,17 @@ static int usb_offload_ua_start_stream(struct usb_offload_dev *dev,
 	if (ret < 0)
 		goto err_suspend;
 
+	/* before anything is set up on an endpoint another stream may run */
+	ret = usb_offload_ua_claim_eps(chip, subs);
+	if (ret) {
+		dev_dbg(&dev->udev->dev,
+			"USB offload: endpoint in use by another stream\n");
+		goto err_hw_free;
+	}
+
 	if (atomic_read(&chip->shutdown)) {
 		ret = -ENODEV;
-		goto err_hw_free;
+		goto err_release_eps;
 	}
 
 	{
@@ -291,22 +341,24 @@ static int usb_offload_ua_start_stream(struct usb_offload_dev *dev,
 
 		if (pm.err < 0) {
 			ret = pm.err;
-			goto err_hw_free;
+			goto err_release_eps;
 		}
 
 		if (subs->sync_endpoint) {
 			ret = snd_usb_endpoint_prepare(chip, subs->sync_endpoint);
 			if (ret < 0)
-				goto err_hw_free;
+				goto err_release_eps;
 		}
 
 		ret = snd_usb_endpoint_prepare(chip, subs->data_endpoint);
 		if (ret < 0)
-			goto err_hw_free;
+			goto err_release_eps;
 	}
 
 	return 0;
 
+err_release_eps:
+	usb_offload_ua_release_eps(chip, subs);
 err_hw_free:
 	snd_usb_hw_free(subs);
 err_suspend:
@@ -321,6 +373,7 @@ err_release:
 static void usb_offload_ua_stop_stream(struct usb_offload_dev *dev,
 				       struct snd_usb_substream *subs)
 {
+	usb_offload_ua_release_eps(dev->chip, subs);
 	snd_usb_hw_free(subs);
 	snd_usb_autosuspend(dev->chip);
 	snd_usb_offload_release_substream(subs);
@@ -584,7 +637,7 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	 * endpoint such a stream would sync to carries audio samples, not a
 	 * feedback value the DSP can interpret.
 	 */
-	if (subs->sync_endpoint && !subs->data_endpoint->implicit_fb_sync) {
+	if (usb_offload_ua_explicit_fb(subs)) {
 		fb_host_ep = usb_pipe_endpoint(udev, subs->sync_endpoint->pipe);
 		if (!fb_host_ep) {
 			ret = -ENXIO;
