@@ -82,6 +82,11 @@ static bool usb_offload_playback_kept(const struct usb_offload_ctx *ctx,
  * that playback's clock. Giving it to the DSP would leave a playback stream
  * which the host keeps without one, so the host keeps such a capture format
  * as well.
+ *
+ * A capture format with implicit feedback of its own, which a quirk gives to
+ * a device that only captures while its playback endpoint streams, stays on
+ * the host too: the DSP only gets the capture endpoint and nothing would
+ * stream the playback one.
  */
 static bool usb_offload_fmt_offloadable(const struct usb_offload_ctx *ctx,
 					struct snd_usb_audio *chip,
@@ -92,6 +97,9 @@ static bool usb_offload_fmt_offloadable(const struct usb_offload_ctx *ctx,
 
 	if (direction == SNDRV_PCM_STREAM_PLAYBACK)
 		return !usb_offload_playback_kept(ctx, fp);
+
+	if (fp->implicit_fb)
+		return false;
 
 	list_for_each_entry(as, &chip->pcm_list, list) {
 		/* the list of a direction a stream does not have is not set up */
@@ -1152,7 +1160,7 @@ static void usb_offload_ua_build_id(const struct usb_offload_ctx *ctx,
 		if (subs->num_formats && !usb_offload_subs_offloadable(ctx, subs)) {
 			if (log)
 				dev_dbg(&chip->dev->dev,
-					"USB offload: PCM %u capture clocks playback the host keeps, not offloaded\n",
+					"USB offload: PCM %u capture is tied to the playback, not offloaded\n",
 					as->pcm->device);
 		} else if (subs->num_formats &&
 			   id->num_capture < USB_OFFLOAD_MAX_PCM) {
