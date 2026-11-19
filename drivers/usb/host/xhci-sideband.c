@@ -586,6 +586,37 @@ xhci_sideband_stop_endpoint(struct xhci_sideband *sb,
 EXPORT_SYMBOL_GPL(xhci_sideband_stop_endpoint);
 
 /**
+ * xhci_sideband_start_endpoint - restart a sideband endpoint
+ * @sb: sideband instance for this usb device
+ * @host_ep: usb host endpoint
+ *
+ * Rings the doorbell of an endpoint stopped with xhci_sideband_stop_endpoint(),
+ * which is what moves a stopped endpoint back to the running state. Ringing
+ * the doorbell of a running endpoint does nothing.
+ *
+ * Return: 0 on success, negative error otherwise.
+ */
+int
+xhci_sideband_start_endpoint(struct xhci_sideband *sb,
+			     struct usb_host_endpoint *host_ep)
+{
+	struct xhci_virt_ep *ep;
+	unsigned int ep_index;
+
+	ep_index = xhci_get_endpoint_index(&host_ep->desc);
+	ep = sb->eps[ep_index];
+
+	if (!sideband_to_vdev(sb) || !ep || ep->sideband != sb)
+		return -EINVAL;
+
+	guard(spinlock_irqsave)(&sb->xhci->lock);
+	xhci_ring_ep_doorbell(sb->xhci, sb->udev->slot_id, ep_index, 0);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(xhci_sideband_start_endpoint);
+
+/**
  * xhci_sideband_get_endpoint_buffer - gets the endpoint transfer buffer address
  * @sb: sideband instance for this usb device
  * @host_ep: usb host endpoint
