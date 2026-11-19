@@ -109,10 +109,12 @@ struct usb_offload_ops {
  *		     feedback) on the host: their PCMs are not reported in the
  *		     device identity when no other format can be offloaded, the
  *		     formats are skipped when refining and resolving hw_params,
- *		     and usb_offload_acquire_stream() refuses them. Set this
- *		     when the DSP applies the feedback in a way that degrades
- *		     the audio. The allow_feedback module parameter of the
- *		     library overrides it for testing.
+ *		     and usb_offload_acquire_stream() refuses them. So is the
+ *		     capture of the endpoint a kept playback format with
+ *		     implicit feedback syncs to, which is that playback's clock.
+ *		     Set this when the DSP applies the feedback in a way that
+ *		     degrades the audio. The allow_feedback module parameter of
+ *		     the library overrides it for testing.
  */
 struct usb_offload_res {
 	struct device			*dev;
