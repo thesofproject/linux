@@ -5,13 +5,18 @@
 // Common helpers for the audio DSP on i.MX8
 
 #include <linux/firmware/imx/dsp.h>
+#include <linux/firmware.h>
 #include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/pm_domain.h>
+#include <sound/sof/ipc4/header.h>
 #include <sound/sof/xtensa.h>
 
 #include "../ops.h"
+#include "../sof-priv.h"
+#include "../ipc4-priv.h"
+#include "../ipc4-fw-reg.h"
 
 #include "imx-common.h"
 
@@ -84,9 +89,43 @@ static void imx_handle_reply(struct imx_dsp_ipc *ipc)
 {
 	struct snd_sof_dev *sdev = imx_dsp_get_data(ipc);
 
+	/* IPC4 replies arrive through the request doorbell */
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4)
+		return;
+
 	guard(spinlock_irqsave)(&sdev->ipc_lock);
 	snd_sof_ipc_process_reply(sdev, 0);
 }
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_IPC4)
+static void imx_handle_ipc4_msg(struct snd_sof_dev *sdev)
+{
+	struct sof_ipc4_msg *ipc4_msg;
+	u64 header;
+
+	/* the 8-byte header precedes the DSP -> host box payload */
+	sof_mailbox_read(sdev, sdev->dsp_box.offset - IMX_IPC4_HDR_SIZE,
+			 &header, sizeof(header));
+
+	if (lower_32_bits(header) & SOF_IPC4_MSG_DIR_MASK) {
+		guard(spinlock_irqsave)(&sdev->ipc_lock);
+
+		if (sdev->msg) {
+			ipc4_msg = sdev->msg->reply_data;
+			ipc4_msg->header_u64 = header;
+		}
+
+		snd_sof_ipc_process_reply(sdev, 0);
+	} else {
+		struct sof_ipc4_msg notification_data = {{ 0 }};
+
+		notification_data.header_u64 = header;
+		sdev->ipc->msg.rx_data = &notification_data;
+		snd_sof_ipc_msgs_rx(sdev);
+		sdev->ipc->msg.rx_data = NULL;
+	}
+}
+#endif
 
 static void imx_handle_request(struct imx_dsp_ipc *ipc)
 {
@@ -106,6 +145,13 @@ static void imx_handle_request(struct imx_dsp_ipc *ipc)
 		}
 	}
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_IPC4)
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
+		imx_handle_ipc4_msg(sdev);
+		return;
+	}
+#endif
+
 	snd_sof_ipc_msgs_rx(sdev);
 }
 
@@ -118,7 +164,24 @@ static int imx_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 {
 	struct imx_common_data *common = sdev->pdata->hw_pdata;
 
-	sof_mailbox_write(sdev, sdev->host_box.offset, msg->msg_data, msg->msg_size);
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
+		struct sof_ipc4_msg *msg_data = msg->msg_data;
+
+		/* the 8-byte header precedes the host -> DSP box payload */
+		sof_mailbox_write(sdev,
+				  sdev->host_box.offset - IMX_IPC4_HDR_SIZE,
+				  &msg_data->header_u64,
+				  sizeof(msg_data->header_u64));
+
+		if (msg_data->data_size)
+			sof_mailbox_write(sdev, sdev->host_box.offset,
+					  msg_data->data_ptr,
+					  msg_data->data_size);
+	} else {
+		sof_mailbox_write(sdev, sdev->host_box.offset,
+				  msg->msg_data, msg->msg_size);
+	}
+
 	imx_dsp_ring_doorbell(common->ipc_handle, 0x0);
 
 	return 0;
@@ -128,7 +191,11 @@ static int imx_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 {
 	switch (type) {
 	case SOF_FW_BLK_TYPE_IRAM:
+	case SOF_FW_BLK_TYPE_DRAM:
 	case SOF_FW_BLK_TYPE_SRAM:
+		/* i.MX95 maps IRAM/DRAM/SRAM through a single window */
+		if (!sdev->bar[type])
+			return sdev->mailbox_bar;
 		return type;
 	default:
 		return -EINVAL;
@@ -137,11 +204,30 @@ static int imx_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 
 static int imx_get_mailbox_offset(struct snd_sof_dev *sdev)
 {
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4)
+		return get_chip_info(sdev)->ipc_info.ipc4_inbox_offset;
+
 	return get_chip_info(sdev)->ipc_info.boot_mbox_offset;
 }
 
 static int imx_get_window_offset(struct snd_sof_dev *sdev, u32 id)
 {
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
+		const struct imx_ipc_info *ipc_info = &get_chip_info(sdev)->ipc_info;
+
+		switch (id) {
+		case SOF_IPC4_INBOX_WINDOW_IDX:
+			/* fw_info_box lives in the SW register window */
+			return ipc_info->ipc4_fw_regs_offset;
+		case SOF_IPC4_OUTBOX_WINDOW_IDX:
+			return ipc_info->ipc4_outbox_offset;
+		case SOF_IPC4_DEBUG_WINDOW_IDX:
+			return ipc_info->ipc4_debug_offset;
+		default:
+			return -EINVAL;
+		}
+	}
+
 	return get_chip_info(sdev)->ipc_info.window_offset;
 }
 
@@ -412,7 +498,10 @@ static int imx_probe(struct snd_sof_dev *sdev)
 
 	sdev->num_cores = 1;
 	sdev->mailbox_bar = SOF_FW_BLK_TYPE_SRAM;
-	sdev->dsp_box.offset = get_chip_info(sdev)->ipc_info.boot_mbox_offset;
+
+	/* IPC4 box offsets are set by sof_ipc4_init() */
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_3)
+		sdev->dsp_box.offset = get_chip_info(sdev)->ipc_info.boot_mbox_offset;
 
 	return imx_chip_probe(sdev);
 }
@@ -433,10 +522,204 @@ static void imx_remove(struct snd_sof_dev *sdev)
 	}
 }
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_IPC4)
+/* copy the Reef payload that follows the extended manifest and $AM1 header */
+static int imx_ipc4_load_fw_to_dsp(struct snd_sof_dev *sdev)
+{
+	u32 payload_offset = sdev->basefw.payload_offset;
+	const struct firmware *fw = sdev->basefw.fw;
+	const struct sof_man4_fw_binary_header *man4_hdr;
+	const struct snd_sof_fw_header *header;
+	const struct snd_sof_mod_hdr *module;
+	size_t remaining;
+	u32 man4_hdr_offset;
+	int count, ret;
+
+	if (!fw)
+		return -EINVAL;
+
+	man4_hdr_offset = payload_offset + IMX_MAN4_FW_HDR_OFFSET;
+	if (fw->size < man4_hdr_offset + sizeof(*man4_hdr)) {
+		dev_err(sdev->dev, "firmware too small for $AM1 header (size %zu)\n",
+			fw->size);
+		return -EINVAL;
+	}
+
+	man4_hdr = (const struct sof_man4_fw_binary_header *)
+		   (fw->data + man4_hdr_offset);
+
+	payload_offset = man4_hdr_offset + man4_hdr->len +
+			 man4_hdr->num_module_entries * sizeof(struct sof_man4_module);
+
+	if (fw->size < payload_offset + sizeof(*header)) {
+		dev_err(sdev->dev, "firmware too small for payload header\n");
+		return -EINVAL;
+	}
+
+	header = (const struct snd_sof_fw_header *)(fw->data + payload_offset);
+
+	if (memcmp(header->sig, SND_SOF_FW_SIG, SND_SOF_FW_SIG_SIZE)) {
+		dev_err(sdev->dev, "invalid firmware payload signature\n");
+		return -EINVAL;
+	}
+
+	module = (const struct snd_sof_mod_hdr *)(fw->data + payload_offset +
+						  sizeof(*header));
+	remaining = fw->size - sizeof(*header) - payload_offset;
+
+	for (count = 0; count < header->num_modules; count++) {
+		const struct snd_sof_blk_hdr *block;
+		int blk;
+
+		if (remaining < sizeof(*module)) {
+			dev_err(sdev->dev, "not enough data for a module\n");
+			return -EINVAL;
+		}
+
+		block = (const struct snd_sof_blk_hdr *)((const u8 *)module +
+							 sizeof(*module));
+		remaining -= sizeof(*module);
+
+		for (blk = 0; blk < module->num_blocks; blk++) {
+			u32 offset;
+
+			if (remaining < sizeof(*block)) {
+				dev_err(sdev->dev, "not enough data for block\n");
+				return -EINVAL;
+			}
+			remaining -= sizeof(*block);
+
+			switch (block->type) {
+			case SOF_FW_BLK_TYPE_IRAM:
+			case SOF_FW_BLK_TYPE_DRAM:
+			case SOF_FW_BLK_TYPE_SRAM:
+				offset = block->offset;
+				break;
+			default:
+				/* skip anything the memcpy loader can't handle */
+				if (remaining < block->size)
+					return -EINVAL;
+				remaining -= block->size;
+				block = (const struct snd_sof_blk_hdr *)
+					((const u8 *)block + sizeof(*block) +
+					 block->size);
+				continue;
+			}
+
+			if (block->size % sizeof(u32)) {
+				dev_err(sdev->dev, "unaligned block size %#x\n",
+					block->size);
+				return -EINVAL;
+			}
+
+			ret = snd_sof_dsp_block_write(sdev, block->type, offset,
+						      (void *)(block + 1),
+						      block->size);
+			if (ret < 0) {
+				dev_err(sdev->dev,
+					"failed to write block type %#x\n",
+					block->type);
+				return ret;
+			}
+
+			if (remaining < block->size)
+				return -EINVAL;
+			remaining -= block->size;
+
+			block = (const struct snd_sof_blk_hdr *)
+				((const u8 *)block + sizeof(*block) + block->size);
+		}
+
+		module = (const struct snd_sof_mod_hdr *)block;
+	}
+
+	return 0;
+}
+
+/* The generic IPC4 loader has no load_fw_to_dsp(), so copy before run */
+static int imx_pre_fw_run(struct snd_sof_dev *sdev)
+{
+	if (sdev->pdata->ipc_type != SOF_IPC_TYPE_4)
+		return 0;
+
+	return imx_ipc4_load_fw_to_dsp(sdev);
+}
+
+int imx_ipc4_init_data(struct snd_sof_dev *sdev)
+{
+	struct sof_ipc4_fw_data *ipc4_data;
+
+	if (sdev->pdata->ipc_type != SOF_IPC_TYPE_4)
+		return 0;
+
+	ipc4_data = devm_kzalloc(sdev->dev, sizeof(*ipc4_data), GFP_KERNEL);
+	if (!ipc4_data)
+		return -ENOMEM;
+
+	ipc4_data->manifest_fw_hdr_offset = IMX_MAN4_FW_HDR_OFFSET;
+	ipc4_data->mtrace_type = SOF_IPC4_MTRACE_NOT_AVAILABLE;
+	ipc4_data->max_libs_count = 1;
+
+	sdev->private = ipc4_data;
+
+	return 0;
+}
+EXPORT_SYMBOL(imx_ipc4_init_data);
+#else
+int imx_ipc4_init_data(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+EXPORT_SYMBOL(imx_ipc4_init_data);
+
+static int imx_pre_fw_run(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+#endif /* CONFIG_SND_SOC_SOF_IPC4 */
+
+/* no hardware stream tags: derive the host gateway id from device and direction */
+static int imx_pcm_hw_params(struct snd_sof_dev *sdev,
+			     struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct snd_sof_platform_stream_params *platform_params)
+{
+	if (sdev->pdata->ipc_type == SOF_IPC_TYPE_4) {
+		platform_params->stream_tag = substream->pcm->device * 2 + substream->stream + 1;
+
+		platform_params->use_phy_address = true;
+		platform_params->phy_addr = substream->runtime->dma_addr;
+	}
+
+	return 0;
+}
+
+/* The firmware publishes a byte counter per host gateway in fw_registers */
+static u64 imx_get_host_byte_counter(struct snd_sof_dev *sdev,
+				     struct snd_soc_component *component,
+				     struct snd_pcm_substream *substream)
+{
+	unsigned int host_dma_id = substream->pcm->device * 2 + substream->stream;
+	u64 counter = 0;
+	u32 offset;
+
+	if (host_dma_id >= SOF_IPC4_MAX_HOST_BYTE_CNT_SLOTS)
+		return 0;
+
+	offset = sdev->fw_info_box.offset +
+		 offsetof(struct sof_ipc4_fw_registers, host_byte_cnt) +
+		 host_dma_id * sizeof(u64);
+
+	sof_mailbox_read(sdev, offset, &counter, sizeof(counter));
+
+	return counter;
+}
+
 const struct snd_sof_dsp_ops sof_imx_ops = {
 	.probe = imx_probe,
 	.remove = imx_remove,
 
+	.pre_fw_run = imx_pre_fw_run,
 	.run = imx_chip_core_kick,
 	.reset = imx_chip_core_reset,
 
@@ -460,6 +743,9 @@ const struct snd_sof_dsp_ops sof_imx_ops = {
 
 	.pcm_open = sof_stream_pcm_open,
 	.pcm_close = sof_stream_pcm_close,
+	.pcm_hw_params = imx_pcm_hw_params,
+	.get_host_byte_counter = imx_get_host_byte_counter,
+	.pcm_contiguous_buffer = true,
 
 	.runtime_suspend = imx_runtime_suspend,
 	.runtime_resume = imx_runtime_resume,

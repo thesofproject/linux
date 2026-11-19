@@ -13,6 +13,12 @@
 #define EXCEPT_MAX_HDR_SIZE	0x400
 #define IMX8_STACK_DUMP_SIZE 32
 
+/* IPC4 header slot preceding each mailbox payload, matches the firmware */
+#define IMX_IPC4_HDR_SIZE	8
+
+/* gap between the extended manifest and the $AM1 header, reserved by rimage */
+#define IMX_MAN4_FW_HDR_OFFSET	48
+
 /* chip_info refers to the data stored in struct sof_dev_desc's chip_info */
 #define get_chip_info(sdev)\
 	((const struct imx_chip_info *)((sdev)->pdata->desc->chip_info))
@@ -42,6 +48,30 @@ static struct sof_dev_desc sof_of_##mach_name##_desc = {		\
 	},								\
 	.default_fw_filename = {					\
 		[SOF_IPC_TYPE_3] = "sof-" #mach_name ".ri",		\
+	},								\
+	.ops = mach_ops,						\
+	.ops_init = mach_ops_init,					\
+}
+
+/* as IMX_SOF_DEV_DESC() but also advertising IPC4; IPC3 stays the default */
+#define IMX_SOF_DEV_DESC_IPC4(mach_name, of_machs,			\
+			      mach_chip_info, mach_ops, mach_ops_init)	\
+static struct sof_dev_desc sof_of_##mach_name##_desc = {		\
+	.of_machines = of_machs,					\
+	.chip_info = mach_chip_info,					\
+	.ipc_supported_mask = BIT(SOF_IPC_TYPE_3) | BIT(SOF_IPC_TYPE_4),	\
+	.ipc_default = SOF_IPC_TYPE_3,					\
+	.default_fw_path = {						\
+		[SOF_IPC_TYPE_3] = "imx/sof",				\
+		[SOF_IPC_TYPE_4] = "imx/sof-ipc4",			\
+	},								\
+	.default_tplg_path = {						\
+		[SOF_IPC_TYPE_3] = "imx/sof-tplg",			\
+		[SOF_IPC_TYPE_4] = "imx/sof-ipc4-tplg",			\
+	},								\
+	.default_fw_filename = {					\
+		[SOF_IPC_TYPE_3] = "sof-" #mach_name ".ri",		\
+		[SOF_IPC_TYPE_4] = "sof-" #mach_name ".ri",		\
 	},								\
 	.ops = mach_ops,						\
 	.ops_init = mach_ops_init,					\
@@ -77,6 +107,11 @@ struct imx_ipc_info {
 	int boot_mbox_offset;
 	/* offset to region at which the mailboxes start */
 	int window_offset;
+	/* IPC4 only: window offsets relative to the SRAM bar */
+	int ipc4_inbox_offset;		/* DSP -> host message box */
+	int ipc4_outbox_offset;		/* host -> DSP message box */
+	int ipc4_debug_offset;
+	int ipc4_fw_regs_offset;	/* struct sof_ipc4_fw_registers */
 };
 
 struct imx_chip_ops {
@@ -165,5 +200,7 @@ void imx8_get_registers(struct snd_sof_dev *sdev,
 void imx8_dump(struct snd_sof_dev *sdev, u32 flags);
 
 extern const struct snd_sof_dsp_ops sof_imx_ops;
+
+int imx_ipc4_init_data(struct snd_sof_dev *sdev);
 
 #endif

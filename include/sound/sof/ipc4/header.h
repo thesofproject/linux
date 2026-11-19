@@ -545,6 +545,9 @@ enum sof_ipc4_notification_type {
 	SOF_IPC4_NOTIFY_ASYNC_MSG_SRVC_MESSAGE,
 
 	SOF_IPC4_NOTIFY_TYPE_LAST,
+
+	/* no host DMA: period elapsed notification */
+	SOF_IPC4_NOTIFY_HOST_PERIOD_ELAPSED = 200,
 };
 
 enum sof_ipc4_resource_type {

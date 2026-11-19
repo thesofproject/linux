@@ -100,6 +100,9 @@ struct sof_ipc4_llp_reading_slot {
 /* Number of GPDMA LLP Reading slots in FW Regs. */
 #define SOF_IPC4_MAX_LLP_GPDMA_READING_SLOTS	24
 
+/* Number of host byte counter slots in FW Regs, indexed by host gateway id */
+#define SOF_IPC4_MAX_HOST_BYTE_CNT_SLOTS	2
+
 /* Number of Aggregated SNDW Reading slots in FW Regs. */
 #define SOF_IPC4_MAX_LLP_SNDW_READING_SLOTS	15
 
@@ -135,7 +138,10 @@ struct sof_ipc4_fw_registers {
 	u32 rom_info;
 	u32 abi_ver;
 	u8 slave_core_sts[SOF_IPC4_MAX_SUPPORTED_ADSP_CORES];
-	u32 rsvd2[6];
+	u32 rsvd2[2];
+
+	/* host byte counter per host gateway, carved out of rsvd2 */
+	u64 host_byte_cnt[SOF_IPC4_MAX_HOST_BYTE_CNT_SLOTS];
 
 	struct sof_ipc4_pipeline_registers
 		pipeline_regs[SOF_IPC4_MAX_PIPELINE_REG_SLOTS];

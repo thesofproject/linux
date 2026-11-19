@@ -800,6 +800,26 @@ static void sof_ipc4_module_notification_handler(struct snd_sof_dev *sdev,
 	}
 }
 
+/* no host DMA interrupt on this platform: the DSP notifies once per host period */
+static void sof_ipc4_host_period_elapsed(struct snd_sof_dev *sdev, u32 gtw_id)
+{
+	struct snd_sof_pcm_stream *stream;
+	unsigned int device = gtw_id >> 1;
+	unsigned int direction = gtw_id & 1;
+	struct snd_sof_pcm *spcm;
+
+	list_for_each_entry(spcm, &sdev->pcm_list, list) {
+		if (le32_to_cpu(spcm->pcm.pcm_id) != device)
+			continue;
+
+		stream = &spcm->stream[direction];
+		if (stream->substream && stream->substream->runtime &&
+		    !stream->substream->runtime->no_period_wakeup)
+			snd_sof_pcm_period_elapsed(stream->substream);
+		return;
+	}
+}
+
 static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_msg *ipc4_msg = sdev->ipc->msg.rx_data;
@@ -839,6 +859,9 @@ static void sof_ipc4_rx_msg(struct snd_sof_dev *sdev)
 		break;
 	case SOF_IPC4_NOTIFY_EXCEPTION_CAUGHT:
 		snd_sof_dsp_panic(sdev, 0, true);
+		break;
+	case SOF_IPC4_NOTIFY_HOST_PERIOD_ELAPSED:
+		sof_ipc4_host_period_elapsed(sdev, ipc4_msg->extension);
 		break;
 	case SOF_IPC4_NOTIFY_MODULE_NOTIFICATION:
 		data_size = sizeof(struct sof_ipc4_notify_module_data);

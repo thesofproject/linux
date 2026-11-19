@@ -10,6 +10,7 @@
 #define __INCLUDE_SOUND_SOF_IPC4_TOPOLOGY_H__
 
 #include <sound/sof/ipc4/header.h>
+#include <sound/sof/dai.h>
 
 #define SOF_IPC4_FW_PAGE_SIZE BIT(12)
 #define SOF_IPC4_FW_PAGE(x) ((((x) + BIT(12) - 1) & ~(BIT(12) - 1)) >> 12)
@@ -253,6 +254,18 @@ struct sof_ipc4_gtw_attributes {
 	uint32_t rsvd : 30;
 };
 
+/* host copier TLV describing the host PCM buffer, for platforms without host DMA */
+#define SOF_IPC4_GTW_IMX_HOST_CONFIG_ID 0x2001
+
+struct sof_ipc4_imx_host_config_blob {
+	struct sof_ipc4_gtw_attributes gw_attr;
+	u32 tlv_type;
+	u32 tlv_length;
+	u32 phy_addr;
+	u32 dma_buffer_size;
+	u32 host_period_bytes;
+} __packed;
+
 /**
  * struct sof_ipc4_dma_device_stream_ch_map: abstract representation of
  * channel mapping to DMAs
@@ -315,6 +328,16 @@ struct sof_ipc4_dma_config_tlv {
 	uint32_t type;
 	uint32_t length;
 	struct sof_ipc4_dma_config dma_config;
+} __packed;
+
+/* i.MX DAI copier TLV carrying the DAI config */
+#define SOF_IPC4_GTW_IMX_DAI_CONFIG_ID 0x2000
+
+struct sof_ipc4_imx_dai_config_blob {
+	struct sof_ipc4_gtw_attributes gw_attr;
+	u32 tlv_type;
+	u32 tlv_length;
+	struct sof_ipc_dai_config dai_config;
 } __packed;
 
 /** struct sof_ipc4_alh_configuration_blob: ALH blob
