@@ -688,6 +688,24 @@ int usb_offload_release_stream(struct usb_offload_ctx *ctx,
 EXPORT_SYMBOL_NS_GPL(usb_offload_release_stream, "USB_AUDIO_OFFLOAD");
 
 /*
+ * The acquired stream of @udev, named by its direction and USB PCM, NULL if
+ * there is none. Caller holds usb_offload_ua_lock.
+ */
+static struct usb_offload_ua_stream *
+usb_offload_ua_get_stream(struct usb_offload_ctx *ctx, struct usb_device *udev,
+			  int direction, int pcm_index, struct usb_offload_dev **dev)
+{
+	if (usb_offload_ua_ctx != ctx)
+		return NULL;
+
+	*dev = usb_offload_ua_find_udev(udev);
+	if (!*dev)
+		return NULL;
+
+	return usb_offload_ua_find_stream(*dev, direction, pcm_index);
+}
+
+/*
  * Stop the offloaded endpoints on the xHCI once the DSP has stopped its side
  * of the link, before the link goes down: an isochronous IN endpoint that the
  * controller still services then has nowhere to deliver its packets, which
@@ -712,14 +730,7 @@ int usb_offload_quiesce_stream(struct usb_offload_ctx *ctx,
 
 	guard(mutex)(&usb_offload_ua_lock);
 
-	if (usb_offload_ua_ctx != ctx)
-		return -ENODEV;
-
-	dev = usb_offload_ua_find_udev(udev);
-	if (!dev)
-		return -ENODEV;
-
-	stream = usb_offload_ua_find_stream(dev, direction, pcm_index);
+	stream = usb_offload_ua_get_stream(ctx, udev, direction, pcm_index, &dev);
 	if (!stream)
 		return -ENODEV;
 
@@ -742,6 +753,52 @@ int usb_offload_quiesce_stream(struct usb_offload_ctx *ctx,
 	return ret;
 }
 EXPORT_SYMBOL_NS_GPL(usb_offload_quiesce_stream, "USB_AUDIO_OFFLOAD");
+
+/*
+ * Restart the endpoints usb_offload_quiesce_stream() stopped, for a stream
+ * which is started again without having been released in between, as when
+ * it recovers from an xrun. A stopped endpoint stays stopped until it is
+ * restarted, the DSP starting its side of the link does not do it. The
+ * feedback endpoint, which the quiesce stops first, comes back last.
+ */
+int usb_offload_restart_stream(struct usb_offload_ctx *ctx,
+			       struct usb_device *udev, int direction, int pcm_index)
+{
+	struct usb_offload_ua_stream *stream;
+	struct usb_offload_dev *dev;
+	int ret;
+
+	if (!ctx || !udev)
+		return -EINVAL;
+
+	if (direction < 0 || direction > SNDRV_PCM_STREAM_LAST)
+		return -EINVAL;
+
+	guard(mutex)(&usb_offload_ua_lock);
+
+	stream = usb_offload_ua_get_stream(ctx, udev, direction, pcm_index, &dev);
+	if (!stream)
+		return -ENODEV;
+
+	if (stream->data_host_ep) {
+		ret = xhci_sideband_start_endpoint(dev->sb, stream->data_host_ep);
+		if (ret) {
+			dev_dbg(&udev->dev, "USB offload: start ep: %d\n", ret);
+			return ret;
+		}
+	}
+
+	if (stream->feedback_host_ep) {
+		ret = xhci_sideband_start_endpoint(dev->sb, stream->feedback_host_ep);
+		if (ret) {
+			dev_dbg(&udev->dev, "USB offload: start feedback ep: %d\n", ret);
+			return ret;
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(usb_offload_restart_stream, "USB_AUDIO_OFFLOAD");
 
 static u64 usb_offload_add_s24_le(struct usb_offload_ctx *ctx, u64 formats)
 {
