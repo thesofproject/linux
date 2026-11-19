@@ -1985,44 +1985,10 @@ static int tac5xx2_sdw_read_prop(struct sdw_slave *peripheral)
 	return 0;
 }
 
-static int tac_port_prep(struct sdw_slave *slave, struct sdw_prepare_ch *prep_ch,
-			 enum sdw_port_prep_ops pre_ops)
-{
-	struct device *dev = &slave->dev;
-	struct tac5xx2_prv *tac_dev = dev_get_drvdata(dev);
-	unsigned int val;
-	int ret;
-
-	if (pre_ops != SDW_OPS_PORT_POST_PREP)
-		return 0;
-
-	if (!tac_dev->fw_dl_success)
-		return 0;
-
-	ret = regmap_read(tac_dev->regmap, TAC_DSP_ALGO_STATUS, &val);
-	if (ret) {
-		dev_err(dev, "Failed to read algo status: %d\n", ret);
-		return ret;
-	}
-
-	if (val != TAC_DSP_ALGO_STATUS_RUNNING) {
-		dev_dbg(dev, "Algo not running (0x%02x), re-enabling\n", val);
-		ret = regmap_write(tac_dev->regmap, TAC_DSP_ALGO_STATUS,
-				   TAC_DSP_ALGO_STATUS_RUNNING);
-		if (ret) {
-			dev_err(dev, "Failed to re-enable algo: %d\n", ret);
-			return ret;
-		}
-	}
-
-	return 0;
-}
-
 static const struct sdw_slave_ops tac_sdw_ops = {
 	.read_prop = tac5xx2_sdw_read_prop,
 	.update_status = tac_update_status,
 	.interrupt_callback = tac_interrupt_callback,
-	.port_prep = tac_port_prep,
 };
 
 static s32 tac_sdw_probe(struct sdw_slave *peripheral,
