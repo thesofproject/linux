@@ -58,24 +58,66 @@ MODULE_PARM_DESC(allow_feedback,
 		 "Offload asynchronous playback streams also when the host keeps them (default: 0)");
 
 /*
+ * An OUT endpoint with implicit feedback is clocked by a capture data endpoint
+ * the DSP cannot use, and the hardware has no way to follow it: that stream
+ * would run blind. It always stays on the host. A quirk can give an endpoint
+ * which is not declared asynchronous implicit feedback, so that is checked
+ * for on its own.
+ *
  * An asynchronous OUT endpoint runs off the device's own clock and needs a
  * feedback source for the sender to follow it. A host whose DSP applies that
  * feedback in a way which degrades the audio keeps such streams to itself
- * (usb_offload_res.async_playback_on_host), unless allowed for testing. This
- * also covers implicit feedback, whose sync source is a capture data endpoint
- * the DSP cannot use: that stream would run blind. A quirk can give an
- * endpoint which is not declared asynchronous implicit feedback, so that is
- * checked for on its own.
+ * (usb_offload_res.async_playback_on_host), unless allowed for testing.
  */
-static bool usb_offload_fmt_offloadable(const struct usb_offload_ctx *ctx,
-					const struct audioformat *fp, int direction)
+static bool usb_offload_playback_kept(const struct usb_offload_ctx *ctx,
+				      const struct audioformat *fp)
 {
-	if (!ctx->async_playback_on_host || allow_feedback ||
-	    direction != SNDRV_PCM_STREAM_PLAYBACK)
+	if (fp->implicit_fb)
 		return true;
 
-	return !fp->implicit_fb &&
-	       (fp->ep_attr & USB_ENDPOINT_SYNCTYPE) != USB_ENDPOINT_SYNC_ASYNC;
+	if (!ctx->async_playback_on_host || allow_feedback)
+		return false;
+
+	return (fp->ep_attr & USB_ENDPOINT_SYNCTYPE) == USB_ENDPOINT_SYNC_ASYNC;
+}
+
+/*
+ * The capture endpoint a playback format with implicit feedback syncs to is
+ * that playback's clock. Giving it to the DSP would leave a playback stream
+ * which the host keeps without one, so the host keeps such a capture format
+ * as well.
+ *
+ * A capture format with implicit feedback of its own, which a quirk gives to
+ * a device that only captures while its playback endpoint streams, stays on
+ * the host too: the DSP only gets the capture endpoint and nothing would
+ * stream the playback one.
+ */
+static bool usb_offload_fmt_offloadable(const struct usb_offload_ctx *ctx,
+					struct snd_usb_audio *chip,
+					const struct audioformat *fp, int direction)
+{
+	const struct audioformat *pfp;
+	struct snd_usb_stream *as;
+
+	if (direction == SNDRV_PCM_STREAM_PLAYBACK)
+		return !usb_offload_playback_kept(ctx, fp);
+
+	if (fp->implicit_fb)
+		return false;
+
+	list_for_each_entry(as, &chip->pcm_list, list) {
+		/* the list of a direction a stream does not have is not set up */
+		if (!as->substream[SNDRV_PCM_STREAM_PLAYBACK].num_formats)
+			continue;
+
+		list_for_each_entry(pfp, &as->substream[SNDRV_PCM_STREAM_PLAYBACK].fmt_list, list) {
+			if (pfp->implicit_fb && pfp->sync_ep == fp->endpoint &&
+			    usb_offload_playback_kept(ctx, pfp))
+				return false;
+		}
+	}
+
+	return true;
 }
 
 static bool usb_offload_subs_offloadable(const struct usb_offload_ctx *ctx,
@@ -84,7 +126,8 @@ static bool usb_offload_subs_offloadable(const struct usb_offload_ctx *ctx,
 	const struct audioformat *fp;
 
 	list_for_each_entry(fp, &subs->fmt_list, list)
-		if (usb_offload_fmt_offloadable(ctx, fp, subs->direction))
+		if (usb_offload_fmt_offloadable(ctx, subs->stream->chip, fp,
+						subs->direction))
 			return true;
 
 	return false;
@@ -412,8 +455,8 @@ static bool usb_offload_s24_container(const struct usb_offload_ctx *ctx,
 
 /*
  * The substream of @dev which can run @params and the host lets the DSP
- * have. @needs_feedback is set when one could, but needs clock feedback the
- * host keeps. Caller holds usb_offload_ua_lock.
+ * have. @kept is set when one could, but the host keeps it. Caller holds
+ * usb_offload_ua_lock.
  *
  * snd_usb_find_suppported_substream() would do this, but it takes the
  * usb-audio register_mutex to turn a card index into the chip. The chip is
@@ -423,7 +466,7 @@ static bool usb_offload_s24_container(const struct usb_offload_ctx *ctx,
 static struct snd_usb_substream *
 usb_offload_find_subs(const struct usb_offload_ctx *ctx, struct usb_offload_dev *dev,
 		      int direction, int pcm_index, struct snd_pcm_hw_params *params,
-		      int *pcm_device, bool *needs_feedback)
+		      int *pcm_device, bool *kept)
 {
 	const struct audioformat *format;
 	struct snd_usb_stream *as;
@@ -438,8 +481,8 @@ usb_offload_find_subs(const struct usb_offload_ctx *ctx, struct usb_offload_dev 
 		if (!format)
 			continue;
 		/* find_format() already prefers a non-async altsetting if one matches */
-		if (!usb_offload_fmt_offloadable(ctx, format, direction)) {
-			*needs_feedback = true;
+		if (!usb_offload_fmt_offloadable(ctx, dev->chip, format, direction)) {
+			*kept = true;
 			continue;
 		}
 
@@ -464,7 +507,7 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	struct usb_offload_dev *dev;
 	struct xhci_sideband_ep_properties ep_prop;
 	struct xhci_sideband_ep_properties fb_ep_prop;
-	bool needs_feedback = false;
+	bool kept = false;
 	int pcm_device;
 	int fb_res_id = 0;
 	u8 interval;
@@ -489,14 +532,15 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 	/* the container the device has, not necessarily the one the host asked for */
 	dev_params = *params;
 	subs = usb_offload_find_subs(ctx, dev, direction, pcm_index, &dev_params,
-				     &pcm_device, &needs_feedback);
+				     &pcm_device, &kept);
 	if (!subs && usb_offload_s24_container(ctx, &dev_params))
 		subs = usb_offload_find_subs(ctx, dev, direction, pcm_index, &dev_params,
-					     &pcm_device, &needs_feedback);
-	if (!subs && needs_feedback) {
+					     &pcm_device, &kept);
+	if (!subs && kept) {
 		dev_dbg(&udev->dev,
-			"USB offload: %uch %uHz playback needs clock feedback, not offloaded\n",
-			params_channels(params), params_rate(params));
+			"USB offload: %uch %uHz %s stays with the host, not offloaded\n",
+			params_channels(params), params_rate(params),
+			direction == SNDRV_PCM_STREAM_PLAYBACK ? "playback" : "capture");
 		return -EOPNOTSUPP;
 	}
 	if (!subs) {
@@ -534,11 +578,11 @@ int usb_offload_acquire_stream(struct usb_offload_ctx *ctx,
 		goto err_stop;
 
 	/*
-	 * Implicit feedback reuses another interface's capture data endpoint
-	 * as a sync source; it carries audio samples, not a feedback value
-	 * the DSP can interpret, so only an explicit sync endpoint is claimed.
-	 * usb-audio flags the data endpoint, which syncs with the implicit
-	 * feedback, not the capture endpoint it syncs to.
+	 * Playback with implicit feedback is never offloaded, see
+	 * usb_offload_playback_kept(), so the sync endpoint a stream has here
+	 * is an explicit feedback one. The flag is checked nonetheless: the
+	 * endpoint such a stream would sync to carries audio samples, not a
+	 * feedback value the DSP can interpret.
 	 */
 	if (subs->sync_endpoint && !subs->data_endpoint->implicit_fb_sync) {
 		fb_host_ep = usb_pipe_endpoint(udev, subs->sync_endpoint->pipe);
@@ -771,7 +815,7 @@ int usb_offload_refine_hw_params(struct usb_offload_ctx *ctx,
 			continue;
 
 		list_for_each_entry(fp, &subs->fmt_list, list) {
-			if (!usb_offload_fmt_offloadable(ctx, fp, direction))
+			if (!usb_offload_fmt_offloadable(ctx, dev->chip, fp, direction))
 				continue;
 
 			/*
@@ -900,7 +944,13 @@ static void usb_offload_ua_build_id(const struct usb_offload_ctx *ctx,
 		}
 
 		subs = &as->substream[SNDRV_PCM_STREAM_CAPTURE];
-		if (subs->num_formats && id->num_capture < USB_OFFLOAD_MAX_PCM) {
+		if (subs->num_formats && !usb_offload_subs_offloadable(ctx, subs)) {
+			if (log)
+				dev_dbg(&chip->dev->dev,
+					"USB offload: PCM %u capture is tied to the playback, not offloaded\n",
+					as->pcm->device);
+		} else if (subs->num_formats &&
+			   id->num_capture < USB_OFFLOAD_MAX_PCM) {
 			index = id->num_capture++;
 			id->cpcm_idx[index] = as->pcm->device;
 			snprintf(id->cpcm_names[index], USB_OFFLOAD_PCM_NAME_LEN,
@@ -956,6 +1006,13 @@ static void usb_offload_ua_connect_cb(struct snd_usb_audio *chip)
 		return;
 	}
 
+	/* a device whose PCMs all stay with the host has nothing to offload */
+	usb_offload_ua_build_id(ctx, chip, id, true);
+	if (!id->num_playback && !id->num_capture) {
+		dev_dbg(&udev->dev, "USB offload: no PCM can be offloaded\n");
+		goto unlock;
+	}
+
 	dev = kzalloc_obj(*dev);
 	if (!dev)
 		goto unlock;
@@ -990,7 +1047,6 @@ static void usb_offload_ua_connect_cb(struct snd_usb_audio *chip)
 	mutex_unlock(&usb_offload_ua_lock);
 
 	/* Inform the DSP and the ASoC USB framework. */
-	usb_offload_ua_build_id(ctx, chip, id, true);
 	ret = usb_offload_connect(ctx, udev, id);
 
 	mutex_lock(&usb_offload_ua_lock);
