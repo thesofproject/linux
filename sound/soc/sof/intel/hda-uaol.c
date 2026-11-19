@@ -1076,9 +1076,7 @@ static void uaol_dai_stop_stream(struct snd_pcm_substream *substream,
 	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct usb_device *udev = stream->udev;
 
-	/* a stream closed while suspended has nothing left to reacquire */
-	stream->suspended = false;
-	/* nor one closed after a stop anything to restart */
+	/* a stream given up after a stop has nothing to restart */
 	stream->quiesced = false;
 
 	/* also after an unplug, which takes only the USB side away */
@@ -1169,6 +1167,8 @@ static int uaol_dai_hw_free(struct snd_pcm_substream *substream,
 		/* the next frontend to open the backend decides the parameters */
 		smp_store_release(&stream->params_valid, false);
 		uaol_dai_stop_stream(substream, stream);
+		/* a stream closed while suspended has nothing left to reacquire */
+		stream->suspended = false;
 	}
 
 	return ret;
@@ -1197,13 +1197,20 @@ static int uaol_dai_prepare(struct snd_pcm_substream *substream,
 
 	params = &rtd->dpcm[direction].hw_params;
 
+	/* left set until the stream is back, for a failed prepare to retry */
 	if (stream->suspended) {
 		uaol_dai_stop_stream(substream, stream);
 
 		ret = uaol_dai_start_stream(substream, params, stream);
 		if (ret)
 			return ret;
+
+		stream->suspended = false;
 	}
+
+	/* the device is gone, the gateway would run on a released resource */
+	if (!stream->udev)
+		return -ENODEV;
 
 	/*
 	 * The common prepare programs the link DMA again after a stop, from
@@ -1211,12 +1218,10 @@ static int uaol_dai_prepare(struct snd_pcm_substream *substream,
 	 * frontend negotiated. Resolve it to the container the stream was
 	 * acquired with, as it was for hw_params.
 	 */
-	if (stream->udev) {
-		ret = usb_offload_resolve_format(hdev->uaol, stream->udev, direction,
-						 stream->pcm_index, params);
-		if (ret < 0)
-			return ret;
-	}
+	ret = usb_offload_resolve_format(hdev->uaol, stream->udev, direction,
+					 stream->pcm_index, params);
+	if (ret < 0)
+		return ret;
 
 	return non_hda_dai_prepare(substream, cpu_dai);
 }
