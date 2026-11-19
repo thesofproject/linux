@@ -792,6 +792,9 @@ bool snd_usb_endpoint_compatible(struct snd_usb_audio *chip,
  * Note that this function doesn't configure the endpoint.  The substream
  * needs to set it up later via snd_usb_endpoint_set_params() and
  * snd_usb_endpoint_prepare().
+ *
+ * Returns the endpoint, or an ERR_PTR(): -EBUSY if an offload engine drives
+ * the endpoint, see snd_usb_endpoint_claim_offload(), -EINVAL otherwise.
  */
 struct snd_usb_endpoint *
 snd_usb_endpoint_open(struct snd_usb_audio *chip,
@@ -807,7 +810,7 @@ snd_usb_endpoint_open(struct snd_usb_audio *chip,
 	ep = snd_usb_get_endpoint(chip, ep_num);
 	if (!ep) {
 		usb_audio_err(chip, "Cannot find EP 0x%x to open\n", ep_num);
-		return NULL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	if (!ep->opened) {
@@ -825,12 +828,12 @@ snd_usb_endpoint_open(struct snd_usb_audio *chip,
 
 		ep->iface_ref = iface_ref_find(chip, ep->iface);
 		if (!ep->iface_ref)
-			return NULL;
+			return ERR_PTR(-EINVAL);
 
 		if (fp->protocol != UAC_VERSION_1) {
 			ep->clock_ref = clock_ref_find(chip, fp->clock);
 			if (!ep->clock_ref)
-				return NULL;
+				return ERR_PTR(-EINVAL);
 			ep->clock_ref->opened++;
 		}
 
@@ -860,12 +863,18 @@ snd_usb_endpoint_open(struct snd_usb_audio *chip,
 
 	} else {
 		if (WARN_ON(!ep->iface_ref))
-			return NULL;
+			return ERR_PTR(-EINVAL);
+
+		/* the host must not submit URBs on an endpoint a DSP drives */
+		if (ep->offloaded) {
+			usb_audio_dbg(chip, "EP 0x%x is offloaded\n", ep_num);
+			return ERR_PTR(-EBUSY);
+		}
 
 		if (!endpoint_compatible(ep, fp, params)) {
 			usb_audio_err(chip, "Incompatible EP setup for 0x%x\n",
 				      ep_num);
-			return NULL;
+			return ERR_PTR(-EINVAL);
 		}
 
 		usb_audio_dbg(chip, "Reopened EP 0x%x (count %d)\n",
@@ -977,9 +986,48 @@ void snd_usb_endpoint_close(struct snd_usb_audio *chip,
 		ep->cur_rate = 0;
 		ep->iface_ref = NULL;
 		ep->clock_ref = NULL;
+		ep->offloaded = false;
 		usb_audio_dbg(chip, "EP 0x%x closed\n", ep->ep_num);
 	}
 }
+
+/**
+ * snd_usb_endpoint_claim_offload - hand an open endpoint over to an offload engine
+ * @chip: the USB audio chip
+ * @ep: the endpoint, opened for the substream which is offloaded
+ *
+ * A DSP drives the endpoint from now on, snd_usb_endpoint_open() refuses to
+ * share it with another stream, as no host stream must submit URBs on it. An
+ * endpoint which another stream has open as well, like the capture endpoint a
+ * playback stream with implicit feedback syncs to, cannot be claimed.
+ *
+ * Return: 0 on success, -EBUSY if @ep is in use elsewhere.
+ */
+int snd_usb_endpoint_claim_offload(struct snd_usb_audio *chip,
+				   struct snd_usb_endpoint *ep)
+{
+	guard(mutex)(&chip->mutex);
+	if (ep->opened > 1 || ep->offloaded)
+		return -EBUSY;
+
+	ep->offloaded = true;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_usb_endpoint_claim_offload);
+
+/**
+ * snd_usb_endpoint_release_offload - give a claimed endpoint back to the host
+ * @chip: the USB audio chip
+ * @ep: the endpoint snd_usb_endpoint_claim_offload() claimed
+ */
+void snd_usb_endpoint_release_offload(struct snd_usb_audio *chip,
+				      struct snd_usb_endpoint *ep)
+{
+	guard(mutex)(&chip->mutex);
+	ep->offloaded = false;
+}
+EXPORT_SYMBOL_GPL(snd_usb_endpoint_release_offload);
 
 /* Prepare for suspening EP, called from the main suspend handler */
 void snd_usb_endpoint_suspend(struct snd_usb_endpoint *ep)
