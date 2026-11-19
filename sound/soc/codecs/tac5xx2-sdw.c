@@ -438,6 +438,18 @@ static const struct reg_sequence tac_spk_seq[] = {
 			      TAC_SDCA_CHANNEL_VOLUME, TAC_CHANNEL_RIGHT), 0),
 };
 
+static const struct reg_sequence tac_dmic_seq[] = {
+	REG_SEQ0(TAC_VOLUME_REG(SM, FU113, LEFT), 0),
+	REG_SEQ0(TAC_VOLUME_REG(SM, FU113, RIGHT), 0),
+};
+
+static const struct reg_sequence tac_uaj_seq[] = {
+	REG_SEQ0(TAC_VOLUME_REG(UAJ, FU41, LEFT), 0),
+	REG_SEQ0(TAC_VOLUME_REG(UAJ, FU41, RIGHT), 0),
+	REG_SEQ0(SDW_SDCA_CTL(TAC_FUNCTION_ID_UAJ, TAC_SDCA_ENT_FU36,
+			      TAC_SDCA_CHANNEL_VOLUME, TAC_JACK_MONO_CS), 0),
+};
+
 static bool tac_volatile_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
@@ -1855,6 +1867,15 @@ static int tac_io_init(struct device *dev, struct sdw_slave *slave, bool first)
 			goto io_init_err;
 		}
 		dev_dbg(dev, "smartmic init done\n");
+
+		if (first) {
+			ret = regmap_multi_reg_write(tac_dev->regmap, tac_dmic_seq,
+						     ARRAY_SIZE(tac_dmic_seq));
+			if (ret) {
+				dev_err(dev, "dmic vol init failed, err=%d\n", ret);
+				goto io_init_err;
+			}
+		}
 	}
 
 	if (tac_dev->uaj_func_data) {
@@ -1867,6 +1888,13 @@ static int tac_io_init(struct device *dev, struct sdw_slave *slave, bool first)
 		dev_dbg(dev, "uaj init done\n");
 
 		if (first) {
+			ret = regmap_multi_reg_write(tac_dev->regmap, tac_uaj_seq,
+						     ARRAY_SIZE(tac_uaj_seq));
+			if (ret) {
+				dev_err(dev, "uaj vol init failed, err=%d\n", ret);
+				goto io_init_err;
+			}
+
 			if (tac_dev->hs_jack) {
 				ret = tac5xx2_jack_init(tac_dev);
 				if (ret) {
