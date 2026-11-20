@@ -24,6 +24,7 @@
 #include <sound/sdca_interrupts.h>
 #include <sound/sdca_jack.h>
 #include <sound/sdca_ump.h>
+#include <sound/sdca_wov.h>
 #include <sound/soc-component.h>
 #include <sound/soc.h>
 
@@ -181,6 +182,19 @@ static irqreturn_t detected_mode_handler(int irq, void *data)
 error:
 	pm_runtime_put(dev);
 	return irqret;
+}
+
+static irqreturn_t wov_trigger_handler(int irq, void *data)
+{
+	struct sdca_interrupt *interrupt = data;
+	struct device *dev = interrupt->dev;
+	int ret;
+
+	ret = sdca_wov_process_voice_trigger(interrupt);
+	if (ret)
+		dev_err_ratelimited(dev, "failed to process wake trigger: %d\n", ret);
+
+	return IRQ_HANDLED;
 }
 
 static irqreturn_t hid_handler(int irq, void *data)
@@ -465,6 +479,19 @@ int sdca_irq_populate_early(struct device *dev, struct regmap *regmap,
 				ret = sdca_jack_alloc_state(interrupt);
 				if (ret)
 					return ret;
+				break;
+			case SDCA_CTL_TYPE_S(SMPU, TRIGGER_STATUS):
+				ret = sdca_wov_alloc_state(interrupt);
+				switch (ret) {
+				case 0:
+					interrupt->handler = wov_trigger_handler;
+					break;
+				case -ENODEV:
+					interrupt->handler = base_handler;
+					break;
+				default:
+					return ret;
+				}
 				break;
 			case SDCA_CTL_TYPE_S(XU, FDL_CURRENTOWNER):
 				interrupt->handler = fdl_owner_handler;

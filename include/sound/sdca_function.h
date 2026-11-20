@@ -9,6 +9,7 @@
 #ifndef __SDCA_FUNCTION_H__
 #define __SDCA_FUNCTION_H__
 
+#include <linux/bitmap.h>
 #include <linux/bits.h>
 #include <linux/types.h>
 #include <linux/hid.h>
@@ -47,6 +48,22 @@ struct sdca_function_desc;
  * Sanity check on size of affected controls data, can be expanded if needed.
  */
 #define SDCA_MAX_AFFECTED_COUNT 2048
+
+/*
+ * Sanity limits for the DisCo Behavior Set library, can be expanded if
+ * needed.
+ */
+#define SDCA_MAX_BEHAVIOR_SET_COUNT 256
+#define SDCA_MAX_BEHAVIOR_COUNT 256
+
+/* BitIndex controls use up to 64 Control Number bytes (SDCA 1.0 sec. 7.3.9). */
+#define SDCA_MAX_CONTROL_NUMBERS	64
+#define SDCA_MAX_BMT_BITS		(SDCA_MAX_CONTROL_NUMBERS * BITS_PER_BYTE)
+
+/* Generic BitIndex Mapping Table layout (SDCA 1.0 sec. 7.3.9.2, Fig. 114). */
+#define SDCA_BMT_COLS		3
+#define SDCA_BMT_BIT		0
+#define SDCA_BMT_BEHAVIOR_SET	1
 
 /**
  * enum sdca_function_type - SDCA Function Type codes
@@ -788,6 +805,68 @@ struct sdca_control_range {
 };
 
 /**
+ * struct sdca_bmt_bits - selected BitIndex bits and their Control Numbers
+ * @bits: Bitmap of selected bit positions in a BitIndex Mapping Table.
+ * @control_numbers: Bitmap of Control Numbers containing selected bits.
+ *
+ * A BitIndex control is a set of byte controls, with one or more used bits
+ * in each control. Each group of 8 bits in @bits corresponds to one byte
+ * control. A bit is set in @bits if that control register bit is part of
+ * the BMT.
+ * (SDCA 1.0 Table 178, note 6: each Control Number holds eight BitIndex bits.)
+ *
+ * There is one bit in @control_numbers for each control. A bit is set in
+ * @control_numbers if any of its bits is selected in @bits. This allows
+ * quick iteration over only the Control Numbers.
+ */
+struct sdca_bmt_bits {
+	DECLARE_BITMAP(bits, SDCA_MAX_BMT_BITS);
+	DECLARE_BITMAP(control_numbers, SDCA_MAX_CONTROL_NUMBERS);
+};
+
+/**
+ * sdca_for_each_bmt_control - iterate over Control Numbers selected in a BMT
+ * @number: Loop variable containing the Control Number.
+ * @bmt: Pointer to the BMT bitmaps.
+ */
+#define sdca_for_each_bmt_control(number, bmt) \
+	for_each_set_bit(number, (bmt)->control_numbers, SDCA_MAX_CONTROL_NUMBERS)
+
+/**
+ * sdca_bmt_control_mask - get the selected bits for one Control Number
+ * @bmt: BMT bitmaps containing the selected bits.
+ * @number: Control Number.
+ *
+ * Return: An eight-bit mask of the selected bits in the control byte.
+ */
+static inline u8 sdca_bmt_control_mask(const struct sdca_bmt_bits *bmt, unsigned int number)
+{
+	return bitmap_get_value8(bmt->bits, number * BITS_PER_BYTE);
+}
+
+/**
+ * struct sdca_cbns - a list of Class Behavior Numbers
+ * @cbns: Array of Class Behavior Numbers.
+ * @num_cbns: Number of entries in @cbns.
+ */
+struct sdca_cbns {
+	const u32 *cbns;
+	int num_cbns;
+};
+
+/**
+ * struct sdca_behavior_set - one entry in the DisCo Behavior Set library
+ * @id: Behavior Set identifier.
+ * @cbns: Class Behavior Numbers in this set.
+ * @num_cbns: Number of entries in @cbns.
+ */
+struct sdca_behavior_set {
+	u32 id;
+	u32 *cbns;
+	int num_cbns;
+};
+
+/**
  * struct sdca_control - information for one SDCA Control
  * @label: Name for the Control, from SDCA Specification v1.0, section 7.1.7.
  * @sel: Identifier used for addressing.
@@ -1161,6 +1240,15 @@ struct sdca_entity_xu {
 };
 
 /**
+ * struct sdca_entity_smpu - information specific to SMPU Entities
+ * @trigger_ready_max_delay: Host Trigger_Ready polling timeout in microseconds,
+ * clamped to at least 10 if described, or 0 if not described.
+ */
+struct sdca_entity_smpu {
+	unsigned int trigger_ready_max_delay;
+};
+
+/**
  * struct sdca_entity - information for one SDCA Entity
  * @label: String such as "OT 12".
  * @id: Identifier used for addressing.
@@ -1177,6 +1265,7 @@ struct sdca_entity_xu {
  * @ge: Group Entity specific Entity properties.
  * @hide: HIDE Entity specific Entity properties.
  * @xu: XU Entity specific Entity properties.
+ * @smpu: SMPU Entity specific Entity properties.
  */
 struct sdca_entity {
 	const char *label;
@@ -1195,6 +1284,7 @@ struct sdca_entity {
 		struct sdca_entity_ge ge;
 		struct sdca_entity_hide hide;
 		struct sdca_entity_xu xu;
+		struct sdca_entity_smpu smpu;
 	};
 };
 
@@ -1413,9 +1503,11 @@ struct sdca_function_hid {
  * @init_table: Pointer to a table of initialization writes.
  * @entities: Dynamically allocated array of Entities.
  * @clusters: Dynamically allocated array of Channel Clusters.
+ * @behavior_sets: Dynamically allocated array of Behavior Sets.
  * @num_init_table: Number of initialization writes.
  * @num_entities: Number of Entities reported in this Function.
  * @num_clusters: Number of Channel Clusters reported in this Function.
+ * @num_behavior_sets: Number of Behavior Sets reported in this Function.
  * @busy_max_delay: Maximum Function busy delay in microseconds, before an
  * error should be reported.
  * @reset_max_delay: Maximum Function reset delay in microseconds, before an
@@ -1429,9 +1521,11 @@ struct sdca_function_data {
 	struct sdca_init_write *init_table;
 	struct sdca_entity *entities;
 	struct sdca_cluster *clusters;
+	struct sdca_behavior_set *behavior_sets;
 	int num_init_table;
 	int num_entities;
 	int num_clusters;
+	int num_behavior_sets;
 
 	unsigned int busy_max_delay;
 	unsigned int reset_max_delay;
@@ -1443,7 +1537,7 @@ struct sdca_function_data {
 	};
 };
 
-static inline u32 sdca_range(struct sdca_control_range *range,
+static inline u32 sdca_range(const struct sdca_control_range *range,
 			     unsigned int col, unsigned int row)
 {
 	return range->data[(row * range->cols) + col];
@@ -1467,10 +1561,10 @@ int sdca_parse_function(struct device *dev, struct sdca_function_data *function)
 const char *sdca_find_terminal_name(enum sdca_terminal_type type);
 
 struct sdca_control *sdca_selector_find_control(struct device *dev,
-						struct sdca_entity *entity,
+						const struct sdca_entity *entity,
 						const int sel);
 struct sdca_control_range *sdca_control_find_range(struct device *dev,
-						   struct sdca_entity *entity,
+						   const struct sdca_entity *entity,
 						   struct sdca_control *control,
 						   int cols, int rows);
 struct sdca_control_range *sdca_selector_find_range(struct device *dev,
@@ -1479,7 +1573,14 @@ struct sdca_control_range *sdca_selector_find_range(struct device *dev,
 struct sdca_cluster *sdca_id_find_cluster(struct device *dev,
 					  struct sdca_function_data *function,
 					  const int id);
-struct sdca_entity *sdca_find_entity_by_label(struct sdca_function_data *function,
-						     const char *entity_label);
+struct sdca_entity *sdca_find_entity_by_label(const struct sdca_function_data *function,
+					      const char *entity_label);
+struct sdca_behavior_set *sdca_find_behavior_set(const struct sdca_function_data *function,
+						 unsigned int id);
+bool sdca_behavior_set_contains_cbn(const struct sdca_behavior_set *set,
+				    const struct sdca_cbns *cbns);
+int sdca_lookup_bmt_bits(struct device *dev, const struct sdca_function_data *function,
+			 const struct sdca_entity *entity, struct sdca_control *control,
+			 const struct sdca_cbns *cbns, struct sdca_bmt_bits *bmt);
 
 #endif

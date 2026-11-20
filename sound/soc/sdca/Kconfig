@@ -23,6 +23,7 @@ config SND_SOC_SDCA_IRQ
 	bool "SDCA IRQ support"
 	select REGMAP
 	select REGMAP_IRQ
+	select SND_SOC_COMPRESS
 	depends on SND_SOC_SDCA
 	default y
 	help

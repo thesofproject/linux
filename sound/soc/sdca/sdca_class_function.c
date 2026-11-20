@@ -324,6 +324,13 @@ static int class_function_boot(struct class_function_drv *drv)
 	return 0;
 }
 
+static void class_function_irq_cleanup_late(void *data)
+{
+	struct class_function_drv *drv = data;
+
+	sdca_irq_cleanup_late(drv->dev, drv->function, drv->core->irq_info);
+}
+
 static int class_function_probe(struct auxiliary_device *auxdev,
 				const struct auxiliary_device_id *aux_dev_id)
 {
@@ -415,7 +422,7 @@ static int class_function_probe(struct auxiliary_device *auxdev,
 		break;
 	}
 
-	ret = sdca_asoc_populate_component(dev, drv->function, cmp_drv,
+	ret = sdca_asoc_populate_component(dev, drv->function, core->irq_info, cmp_drv,
 					   &dais, &num_dais,
 					   &class_function_sdw_ops);
 	if (ret)
@@ -431,6 +438,14 @@ static int class_function_probe(struct auxiliary_device *auxdev,
 	ret = devm_pm_runtime_enable(dev);
 	if (ret)
 		goto err_pm;
+
+	/*
+	 * Register this before the component: devres will remove its ALSA
+	 * interfaces before freeing the interrupt state referenced by them.
+	 */
+	ret = devm_add_action_or_reset(dev, class_function_irq_cleanup_late, drv);
+	if (ret)
+		return ret;
 
 	ret = class_function_boot(drv);
 	if (ret)
@@ -451,13 +466,6 @@ err_pm:
 	pm_runtime_put_sync(dev);
 
 	return ret;
-}
-
-static void class_function_remove(struct auxiliary_device *auxdev)
-{
-	struct class_function_drv *drv = auxiliary_get_drvdata(auxdev);
-
-	sdca_irq_cleanup_late(drv->dev, drv->function, drv->core->irq_info);
 }
 
 static int class_function_runtime_suspend(struct device *dev)
@@ -616,7 +624,6 @@ static struct auxiliary_driver class_function_drv = {
 	},
 
 	.probe		= class_function_probe,
-	.remove		= class_function_remove,
 	.id_table	= class_function_id_table
 };
 module_auxiliary_driver(class_function_drv);

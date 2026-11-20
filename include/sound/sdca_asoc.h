@@ -13,6 +13,7 @@
 struct device;
 struct regmap;
 struct sdca_function_data;
+struct sdca_interrupt_info;
 struct sdca_pde_delay;
 struct snd_ctl_elem_value;
 struct snd_kcontrol;
@@ -80,6 +81,7 @@ int sdca_asoc_populate_dais(struct device *dev, struct sdca_function_data *funct
 
 int sdca_asoc_populate_component(struct device *dev,
 				 struct sdca_function_data *function,
+				 struct sdca_interrupt_info *irq_info,
 				 struct snd_soc_component_driver *component_drv,
 				 struct snd_soc_dai_driver **dai_drv, int *num_dai_drv,
 				 const struct snd_soc_dai_ops *ops);

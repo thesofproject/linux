@@ -8,6 +8,7 @@
 
 #include <linux/acpi.h>
 #include <linux/array_size.h>
+#include <linux/bitmap.h>
 #include <linux/byteorder/generic.h>
 #include <linux/cleanup.h>
 #include <linux/device.h>
@@ -24,6 +25,8 @@
  * Should be long enough to encompass all the MIPI DisCo properties.
  */
 #define SDCA_PROPERTY_LENGTH 64
+
+#define SDCA_SMPU_TRIGGER_READY_MIN_DELAY_US 10
 
 #if IS_ENABLED(CONFIG_ACPI)
 static int patch_sdca_function_type(u32 interface_revision, u32 *function_type)
@@ -804,6 +807,7 @@ static bool find_sdca_control_volatile(const struct sdca_entity *entity,
 	}
 
 	switch (SDCA_CTL_TYPE(entity->type, control->sel)) {
+	case SDCA_CTL_TYPE_S(SMPU, TRIGGER_ENABLE):
 	case SDCA_CTL_TYPE_S(XU, FDL_CURRENTOWNER):
 	case SDCA_CTL_TYPE_S(XU, FDL_MESSAGEOFFSET):
 	case SDCA_CTL_TYPE_S(XU, FDL_MESSAGELENGTH):
@@ -1460,6 +1464,29 @@ static int find_sdca_entity_xu(struct device *dev,
 	return 0;
 }
 
+static int find_sdca_entity_smpu(struct device *dev,
+				 struct fwnode_handle *entity_node,
+				 struct sdca_entity *entity)
+{
+	struct sdca_entity_smpu *smpu = &entity->smpu;
+	u32 delay;
+	int ret;
+
+	ret = fwnode_property_read_u32(entity_node,
+				       "mipi-sdca-smpu-trigger-ready-max-delay",
+				       &delay);
+	if (!ret)
+		smpu->trigger_ready_max_delay =
+			max(delay, SDCA_SMPU_TRIGGER_READY_MIN_DELAY_US);
+	else if (ret != -EINVAL) {
+		dev_err(dev, "%pfwP: failed to read trigger ready delay: %d\n",
+			entity_node, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
 static int find_sdca_entity(struct device *dev, struct sdca_function_data *function,
 			    struct fwnode_handle *function_node,
 			    struct fwnode_handle *entity_node,
@@ -1513,6 +1540,9 @@ static int find_sdca_entity(struct device *dev, struct sdca_function_data *funct
 		break;
 	case SDCA_ENTITY_TYPE_HIDE:
 		ret = find_sdca_entity_hide(dev, entity_node, entity);
+		break;
+	case SDCA_ENTITY_TYPE_SMPU:
+		ret = find_sdca_entity_smpu(dev, entity_node, entity);
 		break;
 	default:
 		break;
@@ -1601,8 +1631,202 @@ static int find_sdca_entities(struct device *dev, struct fwnode_handle *function
 	return 0;
 }
 
-struct sdca_entity *sdca_find_entity_by_label(struct sdca_function_data *function,
-						     const char *entity_label)
+struct sdca_behavior_set *sdca_find_behavior_set(const struct sdca_function_data *function,
+						 unsigned int id)
+{
+	int i;
+
+	for (i = 0; i < function->num_behavior_sets; i++) {
+		if (function->behavior_sets[i].id == id)
+			return &function->behavior_sets[i];
+	}
+
+	return NULL;
+}
+EXPORT_SYMBOL_NS_GPL(sdca_find_behavior_set, "SND_SOC_SDCA");
+
+/**
+ * sdca_behavior_set_contains_cbn - test whether a behavior set contains any requested CBN
+ * @set: Behavior set to search.
+ * @cbns: Class Behavior Numbers to match, with their entry count.
+ *
+ * Return: True if any CBN in @set matches an entry in @cbns, otherwise false.
+ */
+bool sdca_behavior_set_contains_cbn(const struct sdca_behavior_set *set,
+				    const struct sdca_cbns *cbns)
+{
+	int i, j;
+
+	for (i = 0; i < set->num_cbns; i++) {
+		for (j = 0; j < cbns->num_cbns; j++) {
+			if (set->cbns[i] == cbns->cbns[j])
+				return true;
+		}
+	}
+
+	return false;
+}
+EXPORT_SYMBOL_NS_GPL(sdca_behavior_set_contains_cbn, "SND_SOC_SDCA");
+
+/**
+ * sdca_lookup_bmt_bits - find BitIndex bits matching Class Behavior Numbers
+ * @dev: pointer to struct device.
+ * @function: Function containing the DisCo Behavior Set library.
+ * @entity: Entity containing @control.
+ * @control: Control whose range contains the BitIndex Mapping Table.
+ * @cbns: Class Behavior Numbers to match, with their entry count.
+ * @bmt: Matching BitIndex bits and their Control Numbers.
+ *
+ * Matches are added to @bmt's bitmaps, which the caller must initialize.
+ * The bitmaps may be partially updated on error.
+ *
+ * Return: Zero on success, or -EINVAL if the BMT or its behavior sets are invalid.
+ */
+int sdca_lookup_bmt_bits(struct device *dev, const struct sdca_function_data *function,
+			 const struct sdca_entity *entity, struct sdca_control *control,
+			 const struct sdca_cbns *cbns, struct sdca_bmt_bits *bmt)
+{
+	const struct sdca_control_range *range;
+	int i;
+
+	range = sdca_control_find_range(dev, entity, control, SDCA_BMT_COLS, 0);
+	if (!range || !range->rows) {
+		dev_err(dev, "%s: invalid BMT for control %#x\n", entity->label, control->sel);
+		return -EINVAL;
+	}
+
+	/* SDCA 1.0 sec. 7.3.9.2, Fig. 114: BMT rows map bit numbers to behavior sets. */
+	for (i = 0; i < range->rows; i++) {
+		const struct sdca_behavior_set *set;
+		unsigned int bit, set_id;
+
+		bit = sdca_range(range, SDCA_BMT_BIT, i);
+		set_id = sdca_range(range, SDCA_BMT_BEHAVIOR_SET, i);
+		dev_dbg(dev, "%s: BMT row %d bit %u set %#x\n", entity->label, i, bit, set_id);
+		if (bit >= SDCA_MAX_BMT_BITS)
+			return -EINVAL;
+
+		set = sdca_find_behavior_set(function, set_id);
+		if (!set || !set->cbns || set->num_cbns <= 0) {
+			dev_err(dev, "%s: invalid BMT behavior set %#x\n", entity->label, set_id);
+			return -EINVAL;
+		}
+
+		if (sdca_behavior_set_contains_cbn(set, cbns)) {
+			__set_bit(bit, bmt->bits);
+			__set_bit(bit / BITS_PER_BYTE, bmt->control_numbers);
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_NS_GPL(sdca_lookup_bmt_bits, "SND_SOC_SDCA");
+
+static int find_sdca_behavior_numbers(struct device *dev,
+				      struct fwnode_handle *behavior_node,
+				      const char *property, u32 **numbers)
+{
+	int count;
+	int ret;
+
+	count = fwnode_property_count_u32(behavior_node, property);
+	if (count < 0)
+		return count;
+	if (count > SDCA_MAX_BEHAVIOR_COUNT)
+		return -EINVAL;
+	if (!count)
+		return 0;
+
+	*numbers = devm_kcalloc(dev, count, sizeof(**numbers), GFP_KERNEL);
+	if (!*numbers)
+		return -ENOMEM;
+
+	ret = fwnode_property_read_u32_array(behavior_node, property,
+					     *numbers, count);
+	if (ret)
+		return ret;
+
+	return count;
+}
+
+static int find_sdca_behavior_sets(struct device *dev,
+				   struct fwnode_handle *function_node,
+				   struct sdca_function_data *function)
+{
+	const char *id_list = "mipi-sdca-behavior-set-id-list";
+	const char *cbn_list = "mipi-sdca-behavior-set-cbn-list";
+	struct sdca_behavior_set *sets;
+	int count;
+	int i;
+	int ret;
+
+	count = fwnode_property_count_u32(function_node, id_list);
+	if (count == -EINVAL || !count)
+		return 0;
+	if (count < 0)
+		return count;
+	if (count > SDCA_MAX_BEHAVIOR_SET_COUNT)
+		return -EINVAL;
+
+	u32 *ids __free(kfree) = kcalloc(count, sizeof(*ids), GFP_KERNEL);
+	if (!ids)
+		return -ENOMEM;
+
+	ret = fwnode_property_read_u32_array(function_node, id_list, ids, count);
+	if (ret)
+		return ret;
+
+	sets = devm_kcalloc(dev, count, sizeof(*sets), GFP_KERNEL);
+	if (!sets)
+		return -ENOMEM;
+
+	for (i = 0; i < count; i++) {
+		struct fwnode_handle *behavior_node;
+		char property[SDCA_PROPERTY_LENGTH];
+		int j;
+
+		for (j = 0; j < i; j++) {
+			if (ids[j] != ids[i])
+				continue;
+
+			dev_err(dev, "%pfwP: duplicate behavior set ID %#x\n",
+				function_node, ids[i]);
+			return -EINVAL;
+		}
+
+		sets[i].id = ids[i];
+		snprintf(property, sizeof(property),
+			 "mipi-sdca-behavior-set-id-0x%X-subproperties", ids[i]);
+
+		behavior_node = fwnode_get_named_child_node(function_node, property);
+		if (!behavior_node) {
+			dev_err(dev, "%pfwP: behavior set node %s not found\n",
+				function_node, property);
+			return -EINVAL;
+		}
+
+		ret = find_sdca_behavior_numbers(dev, behavior_node, cbn_list,
+						 &sets[i].cbns);
+		if (ret < 0) {
+			dev_err(dev, "%pfwP: invalid CBN list: %d\n",
+				behavior_node, ret);
+		} else {
+			sets[i].num_cbns = ret;
+		}
+
+		fwnode_handle_put(behavior_node);
+		if (ret < 0)
+			return ret;
+	}
+
+	function->behavior_sets = sets;
+	function->num_behavior_sets = count;
+
+	return 0;
+}
+
+struct sdca_entity *sdca_find_entity_by_label(const struct sdca_function_data *function,
+					      const char *entity_label)
 {
 	struct sdca_entity *entity = NULL;
 	char tmp[64];
@@ -2240,6 +2464,10 @@ int sdca_parse_function(struct device *dev, struct sdca_function_data *function)
 	if (ret)
 		return ret;
 
+	ret = find_sdca_behavior_sets(dev, node, function);
+	if (ret)
+		return ret;
+
 	ret = find_sdca_connections(dev, node, function);
 	if (ret)
 		return ret;
@@ -2312,7 +2540,7 @@ const char *sdca_find_terminal_name(enum sdca_terminal_type type)
 EXPORT_SYMBOL_NS(sdca_find_terminal_name, "SND_SOC_SDCA");
 
 struct sdca_control *sdca_selector_find_control(struct device *dev,
-						struct sdca_entity *entity,
+						const struct sdca_entity *entity,
 						const int sel)
 {
 	int i;
@@ -2330,7 +2558,7 @@ struct sdca_control *sdca_selector_find_control(struct device *dev,
 EXPORT_SYMBOL_NS(sdca_selector_find_control, "SND_SOC_SDCA");
 
 struct sdca_control_range *sdca_control_find_range(struct device *dev,
-						   struct sdca_entity *entity,
+						   const struct sdca_entity *entity,
 						   struct sdca_control *control,
 						   int cols, int rows)
 {
