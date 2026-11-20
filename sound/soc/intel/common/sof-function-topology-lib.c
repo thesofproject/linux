@@ -24,6 +24,7 @@ enum tplg_device_id {
 	TPLG_DEVICE_SSP_BT,
 	TPLG_DEVICE_SSP_HDMI_IN,
 	TPLG_DEVICE_LOOPBACK_VIRTUAL,
+	TPLG_DEVICE_UAOL,
 	TPLG_DEVICE_MAX
 };
 
@@ -213,6 +214,9 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 			if (get_ssp_tplg_dev(card->dev, dai_link, &hdmi_in_mask,
 					     &tplg_dev, &tplg_dev_name) < 0)
 				continue;
+		} else if (strstr(dai_link->name, "UAOL")) {
+			tplg_dev = TPLG_DEVICE_UAOL;
+			tplg_dev_name = "uaol";
 		} else if (strstr(dai_link->name, "Loopback_Virtual")) {
 			tplg_dev = TPLG_DEVICE_LOOPBACK_VIRTUAL;
 			/*
@@ -243,7 +247,8 @@ int sof_sdw_get_tplg_files(struct snd_soc_card *card, const struct snd_soc_acpi_
 		/* Check presence of sub-topologies */
 		if (!tplg_files_exist(card->dev, tplg_file)) {
 			devm_kfree(card->dev, tplg_file);
-			if (best_effort)
+			/* without its fragment a UAOL link only offers no USB offload */
+			if (best_effort || tplg_dev == TPLG_DEVICE_UAOL)
 				continue;
 
 			return 0;

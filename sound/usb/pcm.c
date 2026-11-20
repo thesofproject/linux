@@ -485,6 +485,7 @@ int snd_usb_hw_params(struct snd_usb_substream *subs,
 	struct snd_usb_audio *chip = subs->stream->chip;
 	const struct audioformat *fmt;
 	const struct audioformat *sync_fmt;
+	struct snd_usb_endpoint *ep;
 	bool fixed_rate, sync_fixed_rate;
 	int ret;
 
@@ -540,21 +541,21 @@ int snd_usb_hw_params(struct snd_usb_substream *subs,
 		close_endpoints(chip, subs);
 	}
 
-	subs->data_endpoint = snd_usb_endpoint_open(chip, fmt, hw_params, false, fixed_rate);
-	if (!subs->data_endpoint) {
-		ret = -EINVAL;
+	ep = snd_usb_endpoint_open(chip, fmt, hw_params, false, fixed_rate);
+	if (IS_ERR(ep)) {
+		ret = PTR_ERR(ep);
 		goto unlock;
 	}
+	subs->data_endpoint = ep;
 
 	if (fmt->sync_ep) {
-		subs->sync_endpoint = snd_usb_endpoint_open(chip, sync_fmt,
-							    hw_params,
-							    fmt == sync_fmt,
-							    sync_fixed_rate);
-		if (!subs->sync_endpoint) {
-			ret = -EINVAL;
+		ep = snd_usb_endpoint_open(chip, sync_fmt, hw_params,
+					   fmt == sync_fmt, sync_fixed_rate);
+		if (IS_ERR(ep)) {
+			ret = PTR_ERR(ep);
 			goto unlock;
 		}
+		subs->sync_endpoint = ep;
 
 		snd_usb_endpoint_set_sync(chip, subs->data_endpoint,
 					  subs->sync_endpoint);
@@ -1310,6 +1311,43 @@ static int snd_usb_pcm_close(struct snd_pcm_substream *substream)
 
 	return 0;
 }
+
+/**
+ * snd_usb_offload_claim_substream - take a substream over for offloaded use
+ * @subs: the substream to claim
+ *
+ * Claims @subs on behalf of a DSP that drives the endpoints itself. It takes
+ * the same reference snd_usb_pcm_open() takes, so the two exclude each other:
+ * a claimed substream cannot be opened from user space, and a substream that
+ * user space already opened cannot be claimed.
+ *
+ * Return: 0 on success, -EBUSY if the substream is already in use.
+ */
+int snd_usb_offload_claim_substream(struct snd_usb_substream *subs)
+{
+	struct snd_usb_audio *chip = subs->stream->chip;
+
+	guard(mutex)(&chip->mutex);
+	if (subs->opened)
+		return -EBUSY;
+	subs->opened = 1;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(snd_usb_offload_claim_substream);
+
+/**
+ * snd_usb_offload_release_substream - give a claimed substream back
+ * @subs: the substream to release
+ */
+void snd_usb_offload_release_substream(struct snd_usb_substream *subs)
+{
+	struct snd_usb_audio *chip = subs->stream->chip;
+
+	guard(mutex)(&chip->mutex);
+	subs->opened = 0;
+}
+EXPORT_SYMBOL_GPL(snd_usb_offload_release_substream);
 
 /* Since a URB can handle only a single linear buffer, we must use double
  * buffering when the data to be transferred overflows the buffer boundary.

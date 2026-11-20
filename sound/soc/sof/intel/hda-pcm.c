@@ -71,6 +71,8 @@ u32 hda_dsp_get_mult_div(struct snd_sof_dev *sdev, int rate)
 		return SDnFMT_BASE(1) | SDnFMT_MULT(4);
 	case 192000:
 		return SDnFMT_MULT(4);
+	case 384000:
+		return SDnFMT_MULT(8);
 	default:
 		dev_warn(sdev->dev, "can't find div rate %d using 48kHz\n",
 			 rate);
@@ -346,6 +348,14 @@ int hda_dsp_pcm_open(struct snd_sof_dev *sdev,
 	    (hda_force_pause_support == -1 &&
 	     !spcm->stream[substream->stream].pause_supported))
 		runtime->hw.info &= ~SNDRV_PCM_INFO_PAUSE;
+
+	/*
+	 * The backends this frontend can reach are resolved before it is opened,
+	 * and everything the core does to runtime->hw afterwards only narrows
+	 * it, so this is the place to bring in a capability which is only known
+	 * at runtime, like what a UAOL backend can carry.
+	 */
+	hda_apply_constraint_from_be(sdev, substream);
 
 	if (hda_always_enable_dmi_l1 ||
 	    direction == SNDRV_PCM_STREAM_PLAYBACK ||

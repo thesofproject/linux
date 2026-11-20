@@ -406,6 +406,22 @@ config SND_SOC_SOF_INTEL_SOUNDWIRE
 	  Say Y if you want to enable SoundWire links with SOF.
 	  If unsure select "N".
 
+config SND_SOC_SOF_INTEL_USB_OFFLOAD
+	bool "SOF support for USB audio offload"
+	depends on SND_SOC_SOF_HDA_GENERIC
+	depends on SND_SOC_SOF_HDA_LINK
+	depends on SND_USB_OFFLOAD
+	depends on SND_SOC_USB
+	depends on !(SND_USB_OFFLOAD=m && SND_SOC_SOF_HDA_COMMON=y)
+	depends on !(SND_SOC_USB=m && SND_SOC_SOF_HDA_COMMON=y)
+	help
+	  This adds support for USB audio offload with Sound Open Firmware
+	  for Intel(R) platforms. The DSP reaches the xHCI controller over a
+	  USB Audio Offload Link (UAOL) and drives the endpoint itself, so
+	  audio keeps playing while the host stays idle.
+	  Say Y if you want to enable USB audio offload with SOF.
+	  If unsure select "N".
+
 endif ## SND_SOC_SOF_PCI
 
 endif ## SND_SOC_SOF_INTEL_TOPLEVEL

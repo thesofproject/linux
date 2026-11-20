@@ -5263,6 +5263,121 @@ static int xhci_disable_usb3_lpm_timeout(struct usb_hcd *hcd,
 }
 #endif	/* CONFIG_PM */
 
+int xhci_get_ext_property(struct xhci_hcd *xhci, u32 slot_id, u32 ep_index,
+			  u32 property, u32 subtype, void *buf, size_t buf_len)
+{
+	struct device *dev = xhci_to_hcd(xhci)->self.sysdev;
+	struct xhci_container_ctx *ctx;
+	struct xhci_command *cmd;
+	unsigned long flags;
+	int ret;
+
+	cmd = xhci_alloc_command(xhci, true, GFP_KERNEL);
+	if (!cmd)
+		return -ENOMEM;
+
+	/* For PROP_ECI_ALL xHC does not write to buf, data is in event TRB */
+	if (property == PROP_ECI_ALL) {
+		if (!buf || buf_len < sizeof(u16) || slot_id || subtype || ep_index) {
+			xhci_warn(xhci, "Invalid params while checking ext property support\n");
+			ret = -EINVAL;
+			goto out;
+		}
+	} else if (slot_id && !xhci->devs[slot_id]) {
+		xhci_warn(xhci, "Invalid device for get ext property command\n");
+		ret = -ENODEV;
+		goto out;
+	} else if (buf) {
+		ctx = kzalloc_node(sizeof(*ctx), GFP_KERNEL, dev_to_node(dev));
+		if (!ctx) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		ctx->bytes = buf;
+		ctx->size = buf_len;
+		ctx->dma = dma_map_single(dev, buf, buf_len, DMA_FROM_DEVICE);
+		if (dma_mapping_error(dev, ctx->dma)) {
+			kfree(ctx);
+			ret = -ENOMEM;
+			goto out;
+		}
+		cmd->in_ctx = ctx;
+	}
+
+	spin_lock_irqsave(&xhci->lock, flags);
+
+	ret = xhci_queue_get_ext_property(xhci, cmd, property, subtype, slot_id, ep_index);
+
+	if (ret) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		goto out;
+	}
+
+	xhci_ring_cmd_db(xhci);
+	spin_unlock_irqrestore(&xhci->lock, flags);
+
+	wait_for_completion(cmd->completion);
+
+	if (cmd->status != COMP_SUCCESS) {
+		xhci_dbg(xhci, "Get ext property command failed %d\n", cmd->status);
+		ret = -EINVAL;
+	} else if (property == PROP_ECI_ALL) {
+		/* cmd->comp_param is u32, PROP_ECI_ALL only uses bits 15:0 */
+		*(u16 *)buf = cmd->comp_param;
+	}
+out:
+	if (cmd->in_ctx) {
+		dma_unmap_single(dev, ctx->dma, ctx->size, DMA_FROM_DEVICE);
+		kfree(ctx);
+	}
+	kfree(cmd->completion);
+	kfree(cmd);
+
+	return ret;
+}
+
+int xhci_set_ext_property(struct xhci_hcd *xhci, u32 slot_id, u32 ep_index,
+			  u32 property, u32 subtype, u32 param)
+{
+	struct xhci_command *cmd;
+	unsigned long flags;
+	int ret;
+
+	cmd = xhci_alloc_command(xhci, true, GFP_KERNEL);
+	if (!cmd)
+		return -ENOMEM;
+
+	spin_lock_irqsave(&xhci->lock, flags);
+
+	if (!slot_id || !xhci->devs[slot_id]) {
+		xhci_err(xhci, "Invalid device for set ext property command\n");
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		ret = -ENODEV;
+		goto out;
+	}
+
+	ret = xhci_queue_set_ext_property(xhci, cmd, param, property, subtype,
+					  slot_id, ep_index);
+
+	if (ret) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		goto out;
+	}
+
+	xhci_ring_cmd_db(xhci);
+	spin_unlock_irqrestore(&xhci->lock, flags);
+
+	wait_for_completion(cmd->completion);
+
+	if (cmd->status != COMP_SUCCESS) {
+		xhci_dbg(xhci, "set ext property command failed %d\n", cmd->status);
+		ret = -EINVAL;
+	}
+out:
+	xhci_free_command(xhci, cmd);
+	return ret;
+}
+
 /*-------------------------------------------------------------------------*/
 
 /* Once a hub descriptor is fetched for a device, we need to update the xHC's

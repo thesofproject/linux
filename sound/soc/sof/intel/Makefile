@@ -15,6 +15,7 @@ snd-sof-intel-hda-mlink-y := hda-mlink.o
 snd-sof-intel-hda-sdw-bpt-objs := hda-sdw-bpt.o
 
 snd-sof-intel-hda-common-$(CONFIG_SND_SOC_SOF_HDA_PROBES) += hda-probes.o
+snd-sof-intel-hda-common-$(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD) += hda-uaol.o
 
 snd-sof-intel-hda-y := hda-codec.o
 

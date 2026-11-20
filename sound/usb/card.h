@@ -67,6 +67,7 @@ struct snd_usb_endpoint {
 	struct snd_usb_clock_ref *clock_ref;
 
 	int opened;		/* open refcount; protect with chip->mutex */
+	bool offloaded;		/* driven by an offload engine; protect with chip->mutex */
 	atomic_t running;	/* running status */
 	int ep_num;		/* the referenced endpoint number */
 	int type;		/* SND_USB_ENDPOINT_TYPE_* */
@@ -167,7 +168,7 @@ struct snd_usb_substream {
 	unsigned int pkt_offset_adj;	/* Bytes to drop from beginning of packets (for non-compliant devices) */
 	unsigned int stream_offset_adj;	/* Bytes to drop from beginning of stream (for non-compliant devices) */
 
-	unsigned int opened:1;		/* pcm device opened */
+	unsigned int opened:1;		/* pcm device opened or claimed for offload */
 	unsigned int running: 1;	/* running status */
 	unsigned int period_elapsed_pending;	/* delay period handling */
 
@@ -224,6 +225,7 @@ snd_usb_find_suppported_substream(int card_idx, struct snd_pcm_hw_params *params
 
 int snd_usb_register_platform_ops(struct snd_usb_platform_ops *ops);
 int snd_usb_unregister_platform_ops(void);
+void snd_usb_release_platform_ops(void);
 
 void snd_usb_rediscover_devices(void);
 #endif /* __USBAUDIO_CARD_H */

@@ -196,6 +196,31 @@ void snd_usb_rediscover_devices(void)
 EXPORT_SYMBOL_GPL(snd_usb_rediscover_devices);
 
 /*
+ * The counterpart of snd_usb_rediscover_devices(): run the disconnect
+ * callback for every connected USB SND device, then unregister the platform
+ * operations. A platform which keeps state for the devices it was told of
+ * lets go of all of them this way. Unregistering alone leaves it to clean up
+ * after a device which could be freed under it, as one disconnected in the
+ * meantime would not be reported anymore.
+ */
+void snd_usb_release_platform_ops(void)
+{
+	int i;
+
+	guard(mutex)(&register_mutex);
+
+	if (platform_ops && platform_ops->disconnect_cb) {
+		for (i = 0; i < SNDRV_CARDS; i++) {
+			if (usb_chip[i])
+				platform_ops->disconnect_cb(usb_chip[i]);
+		}
+	}
+
+	platform_ops = NULL;
+}
+EXPORT_SYMBOL_GPL(snd_usb_release_platform_ops);
+
+/*
  * Checks to see if requested audio profile, i.e sample rate, # of
  * channels, etc... is supported by the substream associated to the
  * USB audio device.

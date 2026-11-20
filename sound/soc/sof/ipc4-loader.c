@@ -5,6 +5,7 @@
 //
 // Copyright(c) 2022 Intel Corporation
 
+#include <linux/bitfield.h>
 #include <linux/firmware.h>
 #include <sound/sof/ext_manifest4.h>
 #include <sound/sof/ipc4/header.h>
@@ -449,6 +450,47 @@ static int sof_ipc4_query_sof_info(struct snd_sof_dev *sdev,
 	return 0;
 }
 
+static int sof_ipc4_query_uaol_caps(struct snd_sof_dev *sdev, void *caps_data,
+				    size_t caps_size)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct sof_ipc4_intel_uaol_caps *caps = caps_data;
+	size_t expected_size;
+	u32 i;
+
+	if (caps_size < sizeof(*caps)) {
+		dev_err(sdev->dev, "Invalid UAOL capabilities size %zu\n", caps_size);
+		return -EINVAL;
+	}
+
+	expected_size = struct_size(caps, link_caps, caps->link_count);
+	if (expected_size > caps_size) {
+		dev_err(sdev->dev, "Invalid UAOL link count %u for size %zu\n",
+			caps->link_count, caps_size);
+		return -EINVAL;
+	}
+
+	ipc4_data->uaol_caps = devm_kmemdup(sdev->dev, caps, expected_size, GFP_KERNEL);
+	if (!ipc4_data->uaol_caps)
+		return -ENOMEM;
+
+	dev_dbg(sdev->dev, "UAOL links reported by firmware: %u\n", caps->link_count);
+
+	for (i = 0; i < caps->link_count; i++) {
+		struct sof_ipc4_intel_uaol_link_caps *link = &caps->link_caps[i];
+
+		dev_dbg(sdev->dev,
+			"UAOL link %u: streams in/out/bidir %u/%u/%u, FIFO tx/rx %u/%u\n", i,
+			(u32)FIELD_GET(SOF_IPC4_UAOL_INPUT_STREAMS_MASK, link->stream_caps),
+			(u32)FIELD_GET(SOF_IPC4_UAOL_OUTPUT_STREAMS_MASK, link->stream_caps),
+			(u32)FIELD_GET(SOF_IPC4_UAOL_BIDIRECTIONAL_STREAMS_MASK,
+				       link->stream_caps),
+			link->max_tx_fifo_size, link->max_rx_fifo_size);
+	}
+
+	return 0;
+}
+
 int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
@@ -524,6 +566,11 @@ int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 			 */
 			ipc4_data->libraries_restored = ipc4_data->fw_context_save;
 			break;
+		case SOF_IPC4_FW_CFG_UAOL_SUPPORT:
+			ipc4_data->uaol_supported = *tuple->value;
+			trace_sof_ipc4_fw_config(sdev, "UAOL support",
+						 *tuple->value);
+			break;
 		case SOF_IPC4_FW_CFG_SOF_INFO:
 			ret = sof_ipc4_query_sof_info(sdev, tuple->value, tuple->size);
 			if (ret)
@@ -554,6 +601,11 @@ int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 		tuple = (struct sof_ipc4_tuple *)((u8 *)msg.data_ptr + offset);
 
 		switch (tuple->type) {
+		case SOF_IPC4_HW_CFG_INTEL_UAOL_CAPS:
+			/* a layout we cannot parse costs UAOL, not the DSP */
+			if (sof_ipc4_query_uaol_caps(sdev, tuple->value, tuple->size))
+				dev_warn(sdev->dev, "UAOL capabilities ignored\n");
+			break;
 		case SOF_IPC4_HW_CFG_INTEL_MIC_PRIVACY_CAPS:
 			if (ipc4_data->intel_configure_mic_privacy) {
 				struct sof_ipc4_intel_mic_privacy_cap *caps;

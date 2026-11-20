@@ -58,6 +58,7 @@ enum {
 	SOF_LINK_BT_OFFLOAD,
 	SOF_LINK_HDMI_IN,
 	SOF_LINK_HDA,
+	SOF_LINK_UAOL,
 };
 
 #define SOF_LINK_ORDER_MASK	(0xF)
@@ -121,6 +122,9 @@ struct sof_rt5682_private {
  * @ssp_amp: ssp port number of speaker BE link
  * @ssp_bt: ssp port number of BT offload BE link
  * @ssp_mask_hdmi_in: ssp port mask of HDMI-IN BE link
+ * @uaol_link_mask: mask of the USB offload links to create BE links for
+ * @uaol_playback_num: playback BE links to create per USB offload link
+ * @uaol_capture_num: capture BE links to create per USB offload link
  * @bt_offload_present: true to create BT offload BE link
  * @hda_codec_present: true to create HDA codec BE links
  * @codec_link: pointer to headset codec dai link
@@ -144,6 +148,9 @@ struct sof_card_private {
 	int ssp_amp;
 	int ssp_bt;
 	unsigned long ssp_mask_hdmi_in;
+	unsigned long uaol_link_mask;
+	unsigned int uaol_playback_num;
+	unsigned int uaol_capture_num;
 
 	bool bt_offload_present;
 	bool hda_codec_present;
