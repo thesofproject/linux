@@ -179,7 +179,8 @@ static size_t sof_ipc4_fw_parse_basefw_ext_man(struct snd_sof_dev *sdev)
 }
 
 static int sof_ipc4_load_library(struct snd_sof_dev *sdev, unsigned long lib_id,
-				 const char *lib_filename, bool optional)
+				 const char *lib_filename, bool optional,
+				 bool unloadable)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_fw_library *fw_lib;
@@ -227,6 +228,7 @@ static int sof_ipc4_load_library(struct snd_sof_dev *sdev, unsigned long lib_id,
 
 	fw_lib->sof_fw.payload_offset = payload_offset;
 	fw_lib->id = lib_id;
+	fw_lib->unloadable = unloadable;
 
 	/* Fix up the module ID numbers within the library */
 	for (i = 0; i < fw_lib->num_modules; i++)
@@ -239,6 +241,12 @@ static int sof_ipc4_load_library(struct snd_sof_dev *sdev, unsigned long lib_id,
 	ret = xa_insert(&ipc4_data->fw_lib_xa, lib_id, fw_lib, GFP_KERNEL);
 	if (unlikely(ret))
 		goto release;
+
+	ret = sof_ipc4_query_sof_info(sdev);
+	if (ret)
+		dev_warn(sdev->dev,
+			 "%s: Failed to refresh runtime SOF info after loading %s: %d\n",
+			 __func__, lib_filename, ret);
 
 	return 0;
 
@@ -312,7 +320,7 @@ int sof_ipc4_complete_split_release(struct snd_sof_dev *sdev)
 			return -ENOMEM;
 		}
 
-		ret = sof_ipc4_load_library(sdev, lib_id, lib_filename, true);
+		ret = sof_ipc4_load_library(sdev, lib_id, lib_filename, true, false);
 		if (ret)
 			dev_warn(sdev->dev, "%s: Failed to load %s: %d\n",
 				 __func__, lib_filename, ret);
@@ -344,20 +352,128 @@ static int sof_ipc4_load_library_by_uuid(struct snd_sof_dev *sdev,
 	if (!lib_filename)
 		return -ENOMEM;
 
-	ret = sof_ipc4_load_library(sdev, lib_id, lib_filename, false);
+	ret = sof_ipc4_load_library(sdev, lib_id, lib_filename, false, true);
 
 	kfree(lib_filename);
 
 	return ret;
 }
 
-struct sof_ipc4_fw_module *sof_ipc4_find_module_by_uuid(struct snd_sof_dev *sdev,
-							const guid_t *uuid)
+static bool sof_ipc4_fw_library_is_idle(struct sof_ipc4_fw_library *fw_lib)
+{
+	int i;
+
+	if (!fw_lib || !fw_lib->id || !fw_lib->unloadable)
+		return false;
+
+	for (i = 0; i < fw_lib->num_modules; i++) {
+		if (!ida_is_empty(&fw_lib->modules[i].m_ida))
+			return false;
+	}
+
+	return true;
+}
+
+static void sof_ipc4_detach_library_widgets(struct snd_sof_dev *sdev,
+					    struct sof_ipc4_fw_library *fw_lib)
+{
+	struct sof_ipc4_fw_module *mods_end = fw_lib->modules + fw_lib->num_modules;
+	struct snd_sof_widget *swidget;
+
+	if (!fw_lib->modules || !fw_lib->num_modules)
+		return;
+
+	list_for_each_entry(swidget, &sdev->widget_list, list) {
+		struct sof_ipc4_fw_module *fw_module = swidget->module_info;
+
+		if (fw_module >= fw_lib->modules && fw_module < mods_end)
+			swidget->module_info = NULL;
+	}
+}
+
+int sof_ipc4_unload_library(struct snd_sof_dev *sdev, unsigned long lib_id)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct sof_ipc4_fw_library *fw_lib;
+	struct sof_ipc4_msg msg = {{ 0 }};
+	u32 id_payload;
+	int ret;
+
+	if (!ipc4_data->library_unload_supported)
+		return -EOPNOTSUPP;
+
+	if (!lib_id)
+		return -EINVAL;
+
+	fw_lib = xa_load(&ipc4_data->fw_lib_xa, lib_id);
+	if (!fw_lib)
+		return -ENOENT;
+
+	if (!sof_ipc4_fw_library_is_idle(fw_lib))
+		return -EBUSY;
+
+	id_payload = lib_id;
+	msg.primary = SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MOD_ID(SOF_IPC4_MOD_INIT_BASEFW_MOD_ID);
+	msg.primary |= SOF_IPC4_MOD_INSTANCE(SOF_IPC4_MOD_INIT_BASEFW_INSTANCE_ID);
+	msg.extension = SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_FW_PARAM_SOF_LIBRARY_UNLOAD);
+	msg.data_ptr = &id_payload;
+	msg.data_size = sizeof(id_payload);
+
+	ret = iops->set_get_data(sdev, &msg, msg.data_size, true);
+	if (ret) {
+		dev_warn(sdev->dev, "Failed to unload library id %lu: %d\n", lib_id, ret);
+		return ret;
+	}
+
+	dev_dbg(sdev->dev, "Unloaded library id %lu\n", lib_id);
+	sof_ipc4_detach_library_widgets(sdev, fw_lib);
+	xa_erase(&ipc4_data->fw_lib_xa, lib_id);
+	release_firmware(fw_lib->sof_fw.fw);
+	devm_kfree(sdev->dev, fw_lib->modules);
+	devm_kfree(sdev->dev, fw_lib);
+
+	ret = sof_ipc4_query_sof_info(sdev);
+	if (ret)
+		dev_warn(sdev->dev,
+			 "Failed to refresh runtime SOF info after unloading lib %lu: %d\n",
+			 lib_id, ret);
+
+	return 0;
+}
+
+static int sof_ipc4_purge_idle_library(struct snd_sof_dev *sdev, unsigned long *freed_id)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_fw_library *fw_lib;
 	unsigned long lib_id;
-	int i, ret;
+
+	if (!ipc4_data->library_unload_supported)
+		return -EOPNOTSUPP;
+
+	xa_for_each_start(&ipc4_data->fw_lib_xa, lib_id, fw_lib, 1) {
+		if (!sof_ipc4_fw_library_is_idle(fw_lib))
+			continue;
+
+		if (!sof_ipc4_unload_library(sdev, lib_id)) {
+			if (freed_id)
+				*freed_id = lib_id;
+			return 0;
+		}
+	}
+
+	return -EBUSY;
+}
+
+struct sof_ipc4_fw_module *sof_ipc4_find_loaded_module_by_uuid(struct snd_sof_dev *sdev,
+								   const guid_t *uuid)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct sof_ipc4_fw_library *fw_lib;
+	unsigned long lib_id;
+	int i;
 
 	if (guid_is_null(uuid))
 		return NULL;
@@ -369,28 +485,52 @@ struct sof_ipc4_fw_module *sof_ipc4_find_module_by_uuid(struct snd_sof_dev *sdev
 		}
 	}
 
-	/*
-	 * Do not attempt to load external library in case the maximum number of
-	 * firmware libraries have been already loaded
-	 */
-	if ((lib_id + 1) == ipc4_data->max_libs_count) {
-		dev_err(sdev->dev,
-			"%s: Maximum allowed number of libraries reached (%u)\n",
-			__func__, ipc4_data->max_libs_count);
-		return NULL;
+	return NULL;
+}
+
+struct sof_ipc4_fw_module *sof_ipc4_find_module_by_uuid(struct snd_sof_dev *sdev,
+							const guid_t *uuid)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct sof_ipc4_fw_library *fw_lib;
+	struct sof_ipc4_fw_module *fw_module;
+	unsigned long lib_id = 0;
+	int i, ret;
+
+	fw_module = sof_ipc4_find_loaded_module_by_uuid(sdev, uuid);
+	if (fw_module || guid_is_null(uuid))
+		return fw_module;
+
+	for (lib_id = 1; lib_id < ipc4_data->max_libs_count; lib_id++) {
+		if (!xa_load(&ipc4_data->fw_lib_xa, lib_id))
+			break;
+	}
+
+	if (lib_id >= ipc4_data->max_libs_count) {
+		ret = sof_ipc4_purge_idle_library(sdev, &lib_id);
+		if (ret) {
+			dev_err(sdev->dev,
+				"%s: Maximum allowed number of libraries reached (%u)\n",
+				__func__, ipc4_data->max_libs_count);
+			return NULL;
+		}
 	}
 
 	/* The module cannot be found, try to load it as a library */
-	ret = sof_ipc4_load_library_by_uuid(sdev, lib_id + 1, uuid);
+	ret = sof_ipc4_load_library_by_uuid(sdev, lib_id, uuid);
+	if (ret && !sof_ipc4_purge_idle_library(sdev, NULL))
+		ret = sof_ipc4_load_library_by_uuid(sdev, lib_id, uuid);
 	if (ret)
 		return NULL;
 
 	/* Look for the module in the newly loaded library, it should be available now */
-	xa_for_each_start(&ipc4_data->fw_lib_xa, lib_id, fw_lib, lib_id) {
-		for (i = 0; i < fw_lib->num_modules; i++) {
-			if (guid_equal(uuid, &fw_lib->modules[i].man4_module_entry.uuid))
-				return &fw_lib->modules[i];
-		}
+	fw_lib = xa_load(&ipc4_data->fw_lib_xa, lib_id);
+	if (!fw_lib)
+		return NULL;
+
+	for (i = 0; i < fw_lib->num_modules; i++) {
+		if (guid_equal(uuid, &fw_lib->modules[i].man4_module_entry.uuid))
+			return &fw_lib->modules[i];
 	}
 
 	return NULL;
@@ -417,36 +557,138 @@ static int sof_ipc4_validate_firmware(struct snd_sof_dev *sdev)
 	return 0;
 }
 
-static int sof_ipc4_query_sof_info(struct snd_sof_dev *sdev,
-				   void *sof_info_data, u32 sof_info_size)
+static int sof_ipc4_parse_sof_info(struct snd_sof_dev *sdev,
+				   void *sof_info_data, u32 sof_info_size,
+				   bool replace)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	void *new_codec_info = NULL;
 	struct sof_ipc4_tuple *tuple;
+	size_t tuple_size;
 	size_t offset = 0;
+	int ret = 0;
 
-	/*
-	 * No size validation is needed as the sof_info data is coming from
-	 * firmware as part of the firmware config, it is guarantied to be
-	 * correct.
-	 */
 	while (offset < sof_info_size) {
+		if (sof_info_size - offset < sizeof(*tuple)) {
+			dev_err(sdev->dev, "Invalid SOF info tuple header at offset %zu\n",
+				offset);
+			ret = -EINVAL;
+			goto out_free;
+		}
+
 		tuple = (struct sof_ipc4_tuple *)((u8 *)sof_info_data + offset);
+		tuple_size = sizeof(*tuple) + tuple->size;
+		if (tuple_size < sizeof(*tuple) || tuple_size > sof_info_size - offset) {
+			dev_err(sdev->dev, "Invalid SOF info tuple size %u at offset %zu\n",
+				tuple->size, offset);
+			ret = -EINVAL;
+			goto out_free;
+		}
 
 		switch (tuple->type) {
 		case SOF_IPC4_SOF_CODEC_INFO:
-			ipc4_data->codec_info = devm_kmemdup(sdev->dev, tuple->value,
-							     tuple->size, GFP_KERNEL);
-			if (!ipc4_data->codec_info)
-				return -ENOMEM;
+		{
+			u32 count;
+
+			if (tuple->size < sizeof(u32)) {
+				dev_err(sdev->dev, "Invalid codec info tuple size %u\n",
+					tuple->size);
+				ret = -EINVAL;
+				goto out_free;
+			}
+
+			count = *(const u32 *)tuple->value;
+			if (count > (tuple->size - sizeof(u32)) / sizeof(u32)) {
+				dev_err(sdev->dev,
+					"Invalid codec info item count %u for size %u\n",
+					count, tuple->size);
+				ret = -EINVAL;
+				goto out_free;
+			}
+
+			if (new_codec_info) {
+				dev_err(sdev->dev, "Duplicate codec info tuple\n");
+				ret = -EINVAL;
+				goto out_free;
+			}
+
+			if (count) {
+				new_codec_info = kmemdup(tuple->value, tuple->size, GFP_KERNEL);
+				if (!new_codec_info) {
+					ret = -ENOMEM;
+					goto out_free;
+				}
+			}
+			dev_dbg(sdev->dev, "SOF codec_info %s: %u items\n",
+				replace ? "refreshed" : "parsed", count);
 			break;
+		}
+		case SOF_IPC4_SOF_CAPS:
+		{
+			u32 caps;
+
+			if (tuple->size < sizeof(u32)) {
+				dev_err(sdev->dev, "Invalid SOF caps tuple size %u\n",
+					tuple->size);
+				ret = -EINVAL;
+				goto out_free;
+			}
+			caps = *(const u32 *)tuple->value;
+			ipc4_data->sof_info_runtime_supported =
+				!!(caps & SOF_IPC4_SOF_CAP_RUNTIME_SOF_INFO);
+			ipc4_data->library_unload_supported =
+				!!(caps & SOF_IPC4_SOF_CAP_LIBRARY_UNLOAD);
+			dev_dbg(sdev->dev, "SOF caps: 0x%x (runtime_info=%d, lib_unload=%d)\n",
+				caps, ipc4_data->sof_info_runtime_supported,
+				ipc4_data->library_unload_supported);
+			break;
+		}
 		default:
 			break;
 		}
 
-		offset += sizeof(*tuple) + tuple->size;
+		offset += tuple_size;
 	}
 
-	return 0;
+	if (replace || new_codec_info) {
+		guard(mutex)(&ipc4_data->codec_info_mutex);
+		kfree(ipc4_data->codec_info);
+		ipc4_data->codec_info = new_codec_info;
+		new_codec_info = NULL;
+	}
+
+out_free:
+	kfree(new_codec_info);
+	return ret;
+}
+
+int sof_ipc4_query_sof_info(struct snd_sof_dev *sdev)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	const struct sof_ipc_ops *iops = sdev->ipc->ops;
+	struct sof_ipc4_msg msg = {{ 0 }};
+	int ret;
+
+	if (!ipc4_data->sof_info_runtime_supported)
+		return 0;
+
+	msg.primary = SOF_IPC4_MSG_TARGET(SOF_IPC4_MODULE_MSG);
+	msg.primary |= SOF_IPC4_MSG_DIR(SOF_IPC4_MSG_REQUEST);
+	msg.primary |= SOF_IPC4_MOD_ID(SOF_IPC4_MOD_INIT_BASEFW_MOD_ID);
+	msg.primary |= SOF_IPC4_MOD_INSTANCE(SOF_IPC4_MOD_INIT_BASEFW_INSTANCE_ID);
+	msg.extension = SOF_IPC4_MOD_EXT_MSG_PARAM_ID(SOF_IPC4_FW_PARAM_SOF_INFO_GET);
+
+	msg.data_size = sdev->ipc->max_payload_size;
+	msg.data_ptr = kzalloc(msg.data_size, GFP_KERNEL);
+	if (!msg.data_ptr)
+		return -ENOMEM;
+
+	ret = iops->set_get_data(sdev, &msg, msg.data_size, false);
+	if (!ret)
+		ret = sof_ipc4_parse_sof_info(sdev, msg.data_ptr, msg.data_size, true);
+
+	kfree(msg.data_ptr);
+	return ret;
 }
 
 int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
@@ -525,7 +767,7 @@ int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev)
 			ipc4_data->libraries_restored = ipc4_data->fw_context_save;
 			break;
 		case SOF_IPC4_FW_CFG_SOF_INFO:
-			ret = sof_ipc4_query_sof_info(sdev, tuple->value, tuple->size);
+			ret = sof_ipc4_parse_sof_info(sdev, tuple->value, tuple->size, false);
 			if (ret)
 				goto out;
 			break;
@@ -579,10 +821,12 @@ int sof_ipc4_reload_fw_libraries(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
 	struct sof_ipc4_fw_library *fw_lib;
+	bool has_ext_libs = false;
 	unsigned long lib_id;
 	int ret = 0;
 
 	xa_for_each_start(&ipc4_data->fw_lib_xa, lib_id, fw_lib, 1) {
+		has_ext_libs = true;
 		ret = ipc4_data->load_library(sdev, fw_lib, true);
 		if (ret) {
 			dev_err(sdev->dev, "%s: Failed to reload library: %s, %d\n",
@@ -590,6 +834,10 @@ int sof_ipc4_reload_fw_libraries(struct snd_sof_dev *sdev)
 			break;
 		}
 	}
+
+	if (!ret && has_ext_libs && !ipc4_data->libraries_restored &&
+	    ipc4_data->sof_info_runtime_supported)
+		ret = sof_ipc4_query_sof_info(sdev);
 
 	return ret;
 }

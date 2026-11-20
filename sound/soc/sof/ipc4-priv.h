@@ -49,6 +49,7 @@ struct sof_ipc4_fw_module {
  *	are not supported
  * @num_modules : Number of FW modules in the library
  * @modules: Array of FW modules
+ * @unloadable: True for demand-loaded UUID libraries that may be purged
  */
 struct sof_ipc4_fw_library {
 	struct sof_firmware sof_fw;
@@ -56,6 +57,7 @@ struct sof_ipc4_fw_library {
 	u32 id;
 	int num_modules;
 	struct sof_ipc4_fw_module *modules;
+	bool unloadable;
 };
 
 struct snd_ipc4_nhlt {
@@ -83,6 +85,11 @@ struct snd_ipc4_nhlt {
  *
  * @codec_info: Information about the available codecs in booted firmware. The
  *		data is to be used by the code for compressed support.
+ * @codec_info_mutex: Mutex protecting updates and reads of @codec_info
+ * @sof_info_runtime_supported: Firmware supports runtime SOF info queries via
+ *				SOF_IPC4_FW_PARAM_SOF_INFO_GET
+ * @library_unload_supported: Firmware supports unloading idle libraries via
+ *			      SOF_IPC4_FW_PARAM_SOF_LIBRARY_UNLOAD
  * @load_library: Callback function for platform dependent library loading
  * @pipeline_state_mutex: Mutex to protect pipeline triggers, ref counts, states and deletion
  */
@@ -100,6 +107,9 @@ struct sof_ipc4_fw_data {
 	struct list_head nhlt_list;
 
 	void *codec_info;
+	struct mutex codec_info_mutex; /* protect runtime updates to codec_info */
+	bool sof_info_runtime_supported;
+	bool library_unload_supported;
 
 	int (*load_library)(struct snd_sof_dev *sdev,
 			    struct sof_ipc4_fw_library *fw_lib, bool reload);
@@ -145,7 +155,11 @@ int sof_ipc4_mtrace_update_pos(struct snd_sof_dev *sdev, int core);
 
 int sof_ipc4_complete_split_release(struct snd_sof_dev *sdev);
 int sof_ipc4_query_fw_configuration(struct snd_sof_dev *sdev);
+int sof_ipc4_query_sof_info(struct snd_sof_dev *sdev);
 int sof_ipc4_reload_fw_libraries(struct snd_sof_dev *sdev);
+int sof_ipc4_unload_library(struct snd_sof_dev *sdev, unsigned long lib_id);
+struct sof_ipc4_fw_module *sof_ipc4_find_loaded_module_by_uuid(struct snd_sof_dev *sdev,
+								   const guid_t *uuid);
 struct sof_ipc4_fw_module *sof_ipc4_find_module_by_uuid(struct snd_sof_dev *sdev,
 							const guid_t *uuid);
 

@@ -410,6 +410,8 @@ enum sof_ipc4_base_fw_params {
 	SOF_IPC4_FW_PARAM_LIBRARIES_INFO_GET = 16,
 	SOF_IPC4_FW_PARAM_SYSTEM_TIME = 20,
 	SOF_IPC4_FW_PARAM_MIC_PRIVACY_STATE_CHANGE = 35,
+	SOF_IPC4_FW_PARAM_SOF_INFO_GET = 37,
+	SOF_IPC4_FW_PARAM_SOF_LIBRARY_UNLOAD = 38,
 };
 
 enum sof_ipc4_fw_config_params {
@@ -456,7 +458,11 @@ struct sof_ipc4_fw_version {
  */
 enum ipc4_fw_sof_info_params {
 	SOF_IPC4_SOF_CODEC_INFO,
+	SOF_IPC4_SOF_CAPS,
 };
+
+#define SOF_IPC4_SOF_CAP_RUNTIME_SOF_INFO	BIT(0)
+#define SOF_IPC4_SOF_CAP_LIBRARY_UNLOAD		BIT(1)
 
 /* Payload data for SOF_IPC4_MOD_SET_DX */
 struct sof_ipc4_dx_state_info {
