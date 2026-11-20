@@ -401,6 +401,8 @@ static const struct reg_default tac_reg_default[] = {
 	{TAC_USAGE_REG(SM, OT113), 0x0},
 	{TAC_MUTE_REG(SM, FU113, LEFT), 0x1},
 	{TAC_MUTE_REG(SM, FU113, RIGHT), 0x1},
+	{TAC_VOLUME_REG(SM, FU113, LEFT), 0x9c00},
+	{TAC_VOLUME_REG(SM, FU113, RIGHT), 0x9c00},
 	{TAC_GAIN_REG(SM, FU113, LEFT), 0x0},
 	{TAC_GAIN_REG(SM, FU113, RIGHT), 0x0},
 	{TAC_MUTE_REG(SM, FU11,  LEFT), 0x1},
@@ -417,11 +419,11 @@ static const struct reg_default tac_reg_default[] = {
 	{TAC_USAGE_REG(UAJ, OT45), 0x0},
 	{TAC_MUTE_REG(UAJ, FU41, LEFT), 0x1},
 	{TAC_MUTE_REG(UAJ, FU41, RIGHT), 0x1},
-	{TAC_VOLUME_REG(UAJ, FU41, LEFT), 0x0},
-	{TAC_VOLUME_REG(UAJ, FU41, RIGHT), 0x0},
+	{TAC_VOLUME_REG(UAJ, FU41, LEFT), 0x9c00},
+	{TAC_VOLUME_REG(UAJ, FU41, RIGHT), 0x9c00},
 	{TAC_MUTE_REG(UAJ, FU36, RIGHT), 0x1},
 	{SDW_SDCA_CTL(TAC_FUNCTION_ID_UAJ, TAC_SDCA_ENT_FU36,
-		      TAC_SDCA_CHANNEL_VOLUME, TAC_JACK_MONO_CS), 0x0},
+		      TAC_SDCA_CHANNEL_VOLUME, TAC_JACK_MONO_CS), 0x9c00},
 	{TAC_XU_BYPASS_REG(UAJ, XU42), 0x0},
 	{SDW_SDCA_CTL(TAC_FUNCTION_ID_UAJ, TAC_SDCA_ENT_CS36,
 		      TAC_SDCA_CTL_CS_SAMP_RATE_IDX, 0), 0x0},
@@ -434,6 +436,18 @@ static const struct reg_sequence tac_spk_seq[] = {
 			      TAC_SDCA_CHANNEL_VOLUME, TAC_CHANNEL_LEFT), 0),
 	REG_SEQ0(SDW_SDCA_CTL(TAC_FUNCTION_ID_SA, TAC_SDCA_ENT_FU21,
 			      TAC_SDCA_CHANNEL_VOLUME, TAC_CHANNEL_RIGHT), 0),
+};
+
+static const struct reg_sequence tac_dmic_seq[] = {
+	REG_SEQ0(TAC_VOLUME_REG(SM, FU113, LEFT), 0),
+	REG_SEQ0(TAC_VOLUME_REG(SM, FU113, RIGHT), 0),
+};
+
+static const struct reg_sequence tac_uaj_seq[] = {
+	REG_SEQ0(TAC_VOLUME_REG(UAJ, FU41, LEFT), 0),
+	REG_SEQ0(TAC_VOLUME_REG(UAJ, FU41, RIGHT), 0),
+	REG_SEQ0(SDW_SDCA_CTL(TAC_FUNCTION_ID_UAJ, TAC_SDCA_ENT_FU36,
+			      TAC_SDCA_CHANNEL_VOLUME, TAC_JACK_MONO_CS), 0),
 };
 
 static bool tac_volatile_reg(struct device *dev, unsigned int reg)
@@ -1168,6 +1182,40 @@ clear:
 	return 0;
 }
 
+static struct snd_soc_dai_driver tac5272_dai_driver[] = {
+	{
+		.name = "tac5xx2-aif3",
+		.id = TAC5XX2_UAJ,
+		.playback = {
+			.stream_name = "DP4 UAJ Speaker Playback",
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = TAC5XX2_DEVICE_RATES,
+			.formats = TAC5XX2_DEVICE_FORMATS,
+		},
+		.capture = {
+			.stream_name = "DP7 UAJ Mic Capture",
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = TAC5XX2_DEVICE_RATES,
+			.formats = TAC5XX2_DEVICE_FORMATS,
+		},
+		.ops = &tac_dai_ops,
+	},
+	{
+		.name = "tac5xx2-aif2",
+		.id = TAC5XX2_DMIC,
+		.capture = {
+			.stream_name = "DP3 Mic Capture",
+			.channels_min = 1,
+			.channels_max = 4,
+			.rates = TAC5XX2_DEVICE_RATES,
+			.formats = TAC5XX2_DEVICE_FORMATS,
+		},
+		.ops = &tac_dai_ops,
+	},
+};
+
 static struct snd_soc_dai_driver tac5572_dai_driver[] = {
 	{
 		.name = "tac5xx2-aif1",
@@ -1353,40 +1401,78 @@ static struct snd_soc_dai_driver tas2883_dai_driver[] = {
 static s32 tac_component_probe(struct snd_soc_component *component)
 {
 	struct tac5xx2_prv *tac_dev = snd_soc_component_get_drvdata(component);
+	u32 part_id = tac_dev->part_id;
 	int ret;
 
 	ret = pm_runtime_resume(component->dev);
 	if (ret < 0 && ret != -EACCES)
 		return ret;
 
-	if (!tac_has_uaj_support(tac_dev))
-		goto done_comp_probe;
+	switch (part_id) {
+	case 0x5272:
+	case 0x5572:
+	case 0x5672:
+	case 0x5682:
+	case 0x2883:
+		ret = snd_soc_dapm_new_controls(snd_soc_component_to_dapm(component),
+						tac5xx2_common_widgets,
+					ARRAY_SIZE(tac5xx2_common_widgets));
+		if (ret) {
+			dev_err(component->dev, "Failed to add common widgets: %d\n", ret);
+			break;
+		}
 
-	ret = snd_soc_dapm_new_controls(snd_soc_component_to_dapm(component),
-					tac_uaj_widgets,
-					ARRAY_SIZE(tac_uaj_widgets));
-	if (ret) {
-		dev_err(component->dev, "Failed to add UAJ widgets: %d\n", ret);
-		return ret;
+		ret = snd_soc_dapm_add_routes(snd_soc_component_to_dapm(component),
+					      tac5xx2_common_routes,
+					      ARRAY_SIZE(tac5xx2_common_routes));
+		if (ret) {
+			dev_err(component->dev, "Failed to add common routes: %d\n", ret);
+			break;
+		}
+
+		ret = snd_soc_add_component_controls(component, tac5xx2_snd_controls,
+						     ARRAY_SIZE(tac5xx2_snd_controls));
+		if (ret) {
+			dev_err(component->dev, "Failed to add common controls: %d\n", ret);
+			break;
+		}
+
+		if (part_id == 0x2883)
+			break;
+
+		if (!tac_has_uaj_support(tac_dev)) {
+			if (part_id == 0x5272) {
+				dev_err(component->dev, "tac5272 without UAJ support is invalid\n");
+				ret = -EINVAL;
+			}
+			break;
+		}
+
+		ret = snd_soc_dapm_new_controls(snd_soc_component_to_dapm(component),
+						tac_uaj_widgets,
+						ARRAY_SIZE(tac_uaj_widgets));
+		if (ret) {
+			dev_err(component->dev, "Failed to add UAJ widgets: %d\n", ret);
+			break;
+		}
+
+		ret = snd_soc_dapm_add_routes(snd_soc_component_to_dapm(component),
+					      tac_uaj_routes, ARRAY_SIZE(tac_uaj_routes));
+		if (ret) {
+			dev_err(component->dev, "Failed to add UAJ routes: %d\n", ret);
+			break;
+		}
+
+		ret = snd_soc_add_component_controls(component, tac_uaj_controls,
+						     ARRAY_SIZE(tac_uaj_controls));
+		if (ret)
+			dev_err(component->dev, "Failed to add UAJ controls: %d\n", ret);
+
+		break;
 	}
 
-	ret = snd_soc_dapm_add_routes(snd_soc_component_to_dapm(component),
-				      tac_uaj_routes, ARRAY_SIZE(tac_uaj_routes));
-	if (ret) {
-		dev_err(component->dev, "Failed to add UAJ routes: %d\n", ret);
-		return ret;
-	}
-
-	ret = snd_soc_add_component_controls(component, tac_uaj_controls,
-					     ARRAY_SIZE(tac_uaj_controls));
-	if (ret) {
-		dev_err(component->dev, "Failed to add UAJ controls: %d\n", ret);
-			return ret;
-	}
-
-done_comp_probe:
 	tac_dev->component = component;
-	return 0;
+	return ret;
 }
 
 static void tac_component_remove(struct snd_soc_component *codec)
@@ -1399,12 +1485,6 @@ static void tac_component_remove(struct snd_soc_component *codec)
 static const struct snd_soc_component_driver soc_codec_driver_tacdevice = {
 	.probe = tac_component_probe,
 	.remove = tac_component_remove,
-	.controls = tac5xx2_snd_controls,
-	.num_controls = ARRAY_SIZE(tac5xx2_snd_controls),
-	.dapm_widgets = tac5xx2_common_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(tac5xx2_common_widgets),
-	.dapm_routes = tac5xx2_common_routes,
-	.num_dapm_routes = ARRAY_SIZE(tac5xx2_common_routes),
 	.idle_bias_on = 0,
 	.endianness = 1,
 };
@@ -1419,6 +1499,10 @@ static s32 tac_init(struct tac5xx2_prv *tac_dev)
 	dev_set_drvdata(tac_dev->dev, tac_dev);
 
 	switch (tac_dev->part_id) {
+	case 0x5272:
+		dai_drv = tac5272_dai_driver;
+		num_dais = ARRAY_SIZE(tac5272_dai_driver);
+		break;
 	case 0x5572:
 		dai_drv = tac5572_dai_driver;
 		num_dais = ARRAY_SIZE(tac5572_dai_driver);
@@ -1783,6 +1867,15 @@ static int tac_io_init(struct device *dev, struct sdw_slave *slave, bool first)
 			goto io_init_err;
 		}
 		dev_dbg(dev, "smartmic init done\n");
+
+		if (first) {
+			ret = regmap_multi_reg_write(tac_dev->regmap, tac_dmic_seq,
+						     ARRAY_SIZE(tac_dmic_seq));
+			if (ret) {
+				dev_err(dev, "dmic vol init failed, err=%d\n", ret);
+				goto io_init_err;
+			}
+		}
 	}
 
 	if (tac_dev->uaj_func_data) {
@@ -1795,6 +1888,13 @@ static int tac_io_init(struct device *dev, struct sdw_slave *slave, bool first)
 		dev_dbg(dev, "uaj init done\n");
 
 		if (first) {
+			ret = regmap_multi_reg_write(tac_dev->regmap, tac_uaj_seq,
+						     ARRAY_SIZE(tac_uaj_seq));
+			if (ret) {
+				dev_err(dev, "uaj vol init failed, err=%d\n", ret);
+				goto io_init_err;
+			}
+
 			if (tac_dev->hs_jack) {
 				ret = tac5xx2_jack_init(tac_dev);
 				if (ret) {
@@ -1885,44 +1985,10 @@ static int tac5xx2_sdw_read_prop(struct sdw_slave *peripheral)
 	return 0;
 }
 
-static int tac_port_prep(struct sdw_slave *slave, struct sdw_prepare_ch *prep_ch,
-			 enum sdw_port_prep_ops pre_ops)
-{
-	struct device *dev = &slave->dev;
-	struct tac5xx2_prv *tac_dev = dev_get_drvdata(dev);
-	unsigned int val;
-	int ret;
-
-	if (pre_ops != SDW_OPS_PORT_POST_PREP)
-		return 0;
-
-	if (!tac_dev->fw_dl_success)
-		return 0;
-
-	ret = regmap_read(tac_dev->regmap, TAC_DSP_ALGO_STATUS, &val);
-	if (ret) {
-		dev_err(dev, "Failed to read algo status: %d\n", ret);
-		return ret;
-	}
-
-	if (val != TAC_DSP_ALGO_STATUS_RUNNING) {
-		dev_dbg(dev, "Algo not running (0x%02x), re-enabling\n", val);
-		ret = regmap_write(tac_dev->regmap, TAC_DSP_ALGO_STATUS,
-				   TAC_DSP_ALGO_STATUS_RUNNING);
-		if (ret) {
-			dev_err(dev, "Failed to re-enable algo: %d\n", ret);
-			return ret;
-		}
-	}
-
-	return 0;
-}
-
 static const struct sdw_slave_ops tac_sdw_ops = {
 	.read_prop = tac5xx2_sdw_read_prop,
 	.update_status = tac_update_status,
 	.interrupt_callback = tac_interrupt_callback,
-	.port_prep = tac_port_prep,
 };
 
 static s32 tac_sdw_probe(struct sdw_slave *peripheral,
@@ -2045,6 +2111,7 @@ static void tac_sdw_remove(struct sdw_slave *peripheral)
 }
 
 static const struct sdw_device_id tac_sdw_id[] = {
+	SDW_SLAVE_ENTRY(0x0102, 0x5272, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5572, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5672, 0),
 	SDW_SLAVE_ENTRY(0x0102, 0x5682, 0),
