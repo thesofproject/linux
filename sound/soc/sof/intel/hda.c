@@ -1213,8 +1213,13 @@ static struct snd_soc_acpi_adr_device *find_acpi_adr_device(struct device *dev,
 			return NULL;
 		}
 		for (j = 0; j < codec_info_list[i].dai_num; j++) {
-			/* Check if the endpoint is present by the SDCA DisCo table */
-			if (!is_endpoint_present(sdw_device, codec_info_list[i].dais[j].dai_type))
+			/*
+			 * Check if the endpoint is present by the SDCA DisCo table. Also skip the
+			 * companion amp endpoints. The companion amp endpoints should be added in
+			 * the mach table if it is present.
+			 */
+			if (!is_endpoint_present(sdw_device, codec_info_list[i].dais[j].dai_type) ||
+			    (codec_info_list[i].dais[j].quirk & SOC_SDW_COMPANION_AMPS))
 				continue;
 
 			endpoints[ep_index].num = j;

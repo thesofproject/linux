@@ -70,7 +70,11 @@ void sdw_compute_slave_ports(struct sdw_master_runtime *m_rt,
 
 			port_bo += bps * ch;
 			slave_total_ch += ch;
+
 		}
+		/* Make sure all Peripherals use the same bit slots */
+		if (m_rt->stream->transport_type == SDW_TRANSPORT_PERIPHERAL_PERIPHERAL)
+			port_bo = t_data->block_offset;
 
 		if (m_rt->direction == SDW_DATA_DIR_TX &&
 		    m_rt->ch_count == slave_total_ch) {

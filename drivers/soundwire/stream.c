@@ -412,6 +412,9 @@ static int sdw_enable_disable_ports(struct sdw_master_runtime *m_rt, bool en)
 		}
 	}
 
+	if (m_rt->stream->transport_type == SDW_TRANSPORT_PERIPHERAL_PERIPHERAL)
+		return 0;
+
 	/* Enable/Disable Master port(s) */
 	list_for_each_entry(m_port, &m_rt->port_list, port_node) {
 		ret = sdw_enable_disable_master_ports(m_rt, m_port, en);
@@ -1393,6 +1396,7 @@ static int sdw_config_stream(struct device *dev,
 	}
 
 	stream->type = stream_config->type;
+	stream->transport_type = stream_config->transport_type;
 	stream->params.rate = stream_config->frame_rate;
 	stream->params.bps = stream_config->bps;
 
@@ -2021,6 +2025,14 @@ void sdw_release_stream(struct sdw_stream_runtime *stream)
 }
 EXPORT_SYMBOL(sdw_release_stream);
 
+static int sdw_get_port(struct sdw_bus *bus)
+{
+	if (!bus->ops || !bus->ops->get_port || !bus->ops->put_port)
+		return -EOPNOTSUPP;
+
+	return bus->ops->get_port(bus);
+}
+
 /**
  * sdw_stream_add_master() - Allocate and add master runtime to a stream
  *
@@ -2037,17 +2049,22 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 			  struct sdw_stream_runtime *stream)
 {
 	struct sdw_master_runtime *m_rt;
+	struct sdw_port_config p2p_port_config;
 	bool alloc_master_rt = false;
+	bool alloc_master_port = false;
+	int reserved_port = -1;
 	int ret;
 
 	mutex_lock(&bus->bus_lock);
+	m_rt = sdw_master_rt_find(bus, stream);
 
 	/*
 	 * For multi link streams, add the second master only if
 	 * the bus supports it.
 	 * Check if bus->multi_link is set
 	 */
-	if (!bus->multi_link && stream->m_rt_count > 0) {
+	if (!bus->multi_link && stream->m_rt_count > 0 &&
+	    (!m_rt || !sdw_master_port_allocated(m_rt))) {
 		dev_err(bus->dev,
 			"Multilink not supported, link %d\n", bus->link_id);
 		ret = -EINVAL;
@@ -2058,7 +2075,6 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 	 * check if Master is already allocated (e.g. as a result of Slave adding
 	 * it first), if so skip allocation and go to configuration
 	 */
-	m_rt = sdw_master_rt_find(bus, stream);
 	if (!m_rt) {
 		m_rt = sdw_master_rt_alloc(bus, stream);
 		if (IS_ERR(m_rt)) {
@@ -2082,28 +2098,79 @@ int sdw_stream_add_master(struct sdw_bus *bus,
 		if (ret)
 			goto alloc_error;
 
+		alloc_master_port = true;
 		stream->m_rt_count++;
 	}
 
 	ret = sdw_master_rt_config(m_rt, stream_config);
 	if (ret < 0)
-		goto unlock;
+		goto config_error;
 
 	ret = sdw_config_stream(bus->dev, stream, stream_config, false);
 	if (ret)
-		goto unlock;
+		goto config_error;
+
+	if (stream_config->transport_type == SDW_TRANSPORT_PERIPHERAL_PERIPHERAL) {
+		struct sdw_port_runtime *p_rt;
+
+		if (num_ports != 1) {
+			ret = -EOPNOTSUPP;
+			goto config_error;
+		}
+
+		if (!list_is_singular(&m_rt->port_list)) {
+			ret = -EINVAL;
+			goto config_error;
+		}
+
+		p_rt = list_first_entry(&m_rt->port_list, struct sdw_port_runtime, port_node);
+		if (!alloc_master_port && SDW_VALID_PORT_RANGE(p_rt->num)) {
+			ret = p_rt->num;
+		} else {
+			ret = sdw_get_port(bus);
+			if (ret < 0)
+				goto config_error;
+			reserved_port = ret;
+			if (!SDW_VALID_PORT_RANGE(ret)) {
+				ret = -EINVAL;
+				goto config_error;
+			}
+		}
+
+		p2p_port_config = *port_config;
+		p2p_port_config.num = ret;
+		port_config = &p2p_port_config;
+	}
 
 	ret = sdw_master_port_config(m_rt, port_config);
+	if (ret)
+		goto config_error;
+	reserved_port = -1;
 
+	goto unlock;
+
+config_error:
+	if (stream_config->transport_type == SDW_TRANSPORT_PERIPHERAL_PERIPHERAL) {
+		if (alloc_master_port) {
+			sdw_master_port_free(m_rt);
+			stream->m_rt_count--;
+		}
+		if (alloc_master_rt)
+			sdw_master_rt_free(m_rt, stream);
+	}
 	goto unlock;
 
 alloc_error:
 	/*
 	 * we only cleanup what was allocated in this routine
 	 */
+	if (stream_config->transport_type == SDW_TRANSPORT_PERIPHERAL_PERIPHERAL)
+		sdw_master_port_free(m_rt);
 	if (alloc_master_rt)
 		sdw_master_rt_free(m_rt, stream);
 unlock:
+	if (reserved_port >= 0)
+		bus->ops->put_port(bus, reserved_port);
 	mutex_unlock(&bus->bus_lock);
 	return ret;
 }
@@ -2121,6 +2188,7 @@ int sdw_stream_remove_master(struct sdw_bus *bus,
 			     struct sdw_stream_runtime *stream)
 {
 	struct sdw_master_runtime *m_rt, *_m_rt;
+	struct sdw_port_runtime *p_rt;
 
 	mutex_lock(&bus->bus_lock);
 
@@ -2129,6 +2197,11 @@ int sdw_stream_remove_master(struct sdw_bus *bus,
 		if (m_rt->bus != bus)
 			continue;
 
+		if (stream->transport_type == SDW_TRANSPORT_PERIPHERAL_PERIPHERAL &&
+		    bus->ops && bus->ops->put_port) {
+			list_for_each_entry(p_rt, &m_rt->port_list, port_node)
+				bus->ops->put_port(bus, p_rt->num);
+		}
 		sdw_master_port_free(m_rt);
 		sdw_master_rt_free(m_rt, stream);
 		stream->m_rt_count--;

@@ -415,9 +415,11 @@ static int soc_card_dai_links_create(struct snd_soc_card *card)
 	struct device *dev = card->dev;
 	int sdw_be_num = 0, dmic_num = 0;
 	struct asoc_sdw_mc_private *ctx = snd_soc_card_get_drvdata(card);
+	struct asoc_sdw_companion_amp_endpoint *sof_comp_ends;
 	struct snd_soc_aux_dev *soc_aux;
 	struct snd_soc_codec_conf *codec_conf;
 	struct snd_soc_dai_link *dai_links;
+	int num_comp_amps = 0;
 	int num_devs = 0;
 	int num_ends = 0;
 	int num_aux = 0;
@@ -425,8 +427,9 @@ static int soc_card_dai_links_create(struct snd_soc_card *card)
 	int num_links;
 	int be_id = 0;
 	int ret;
+	int i;
 
-	ret = asoc_sdw_count_sdw_endpoints(card, &num_devs, &num_ends, &num_aux);
+	ret = asoc_sdw_count_sdw_endpoints(card, &num_devs, &num_ends, &num_aux, &num_comp_amps);
 	if (ret < 0) {
 		dev_err(dev, "failed to count devices/endpoints: %d\n", ret);
 		return ret;
@@ -442,7 +445,7 @@ static int soc_card_dai_links_create(struct snd_soc_card *card)
 
 	/* One per endpoint, ie. each DAI on each codec/amp */
 	struct asoc_sdw_endpoint *soc_ends __free(kfree) =
-		kzalloc_objs(*soc_ends, num_ends);
+		kzalloc_objs(*soc_ends, num_ends + num_comp_amps);
 	if (!soc_ends)
 		return -ENOMEM;
 
@@ -450,7 +453,15 @@ static int soc_card_dai_links_create(struct snd_soc_card *card)
 	if (!soc_aux)
 		return -ENOMEM;
 
-	ret = asoc_sdw_parse_sdw_endpoints(dev, ctx, soc_aux, soc_dais, soc_ends, &num_confs);
+	sof_comp_ends = devm_kcalloc(dev, num_comp_amps, sizeof(*sof_comp_ends), GFP_KERNEL);
+	if (!sof_comp_ends)
+		return -ENOMEM;
+
+	for (i = 0; i < num_comp_amps; i++)
+		INIT_LIST_HEAD(&sof_comp_ends[i].comp_ends);
+
+	ret = asoc_sdw_parse_sdw_endpoints(dev, ctx, soc_aux, soc_dais, soc_ends, sof_comp_ends,
+					   &num_confs);
 	if (ret < 0)
 		return ret;
 

@@ -299,6 +299,7 @@ enum {
 	RT721_AIF1, /* For headset mic and headphone */
 	RT721_AIF2, /* For speaker */
 	RT721_AIF3, /* For dmic */
+	RT721_AIF4, /* For comp-in */
 	RT721_AIFS,
 };
 

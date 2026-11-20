@@ -289,6 +289,60 @@ static void intel_put_device_num_ida(struct sdw_bus *bus, struct sdw_slave *slav
 		ida_free(&intel_peripheral_ida, slave->dev_num);
 }
 
+static int intel_get_port(struct sdw_bus *bus)
+{
+	struct sdw_cdns *cdns = bus_to_cdns(bus);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	unsigned int limit = min_t(unsigned int, cdns->num_ports, SDW_MAX_PORTS);
+	unsigned int port;
+
+	port = find_next_zero_bit(&sdw->used_ports, limit, 2);
+	if (port >= limit)
+		return -ENOSPC;
+
+	set_bit(port, &sdw->used_ports);
+	return port;
+}
+
+static void intel_put_port(struct sdw_bus *bus, unsigned int port)
+{
+	struct sdw_intel *sdw = cdns_to_intel(bus_to_cdns(bus));
+
+	clear_bit(port, &sdw->used_ports);
+}
+
+int intel_dai_probe(struct snd_soc_dai *dai)
+{
+	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
+	int ret = 0;
+
+	if (dai->id >= SDW_MAX_PORTS)
+		return 0;
+
+	mutex_lock(&cdns->bus.bus_lock);
+	if (test_and_set_bit(dai->id, &sdw->used_ports))
+		ret = -EBUSY;
+	mutex_unlock(&cdns->bus.bus_lock);
+
+	return ret;
+}
+
+int intel_dai_remove(struct snd_soc_dai *dai)
+{
+	struct sdw_cdns *cdns = snd_soc_dai_get_drvdata(dai);
+	struct sdw_intel *sdw = cdns_to_intel(cdns);
+
+	if (dai->id >= SDW_MAX_PORTS)
+		return 0;
+
+	mutex_lock(&cdns->bus.bus_lock);
+	clear_bit(dai->id, &sdw->used_ports);
+	mutex_unlock(&cdns->bus.bus_lock);
+
+	return 0;
+}
+
 static struct sdw_master_ops sdw_intel_ops = {
 	.read_prop = intel_prop_read,
 	.override_adr = sdw_dmi_override_adr,
@@ -300,6 +354,8 @@ static struct sdw_master_ops sdw_intel_ops = {
 	.read_ping_status = cdns_read_ping_status,
 	.get_device_num =  intel_get_device_num_ida,
 	.put_device_num = intel_put_device_num_ida,
+	.get_port = intel_get_port,
+	.put_port = intel_put_port,
 	.new_peripheral_assigned = generic_new_peripheral_assigned,
 
 	.bpt_send_async = generic_bpt_send_async,

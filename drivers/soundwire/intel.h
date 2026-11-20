@@ -75,6 +75,7 @@ struct sdw_intel_bpt {
 struct sdw_intel {
 	struct sdw_cdns cdns;
 	int instance;
+	unsigned long used_ports;
 	struct sdw_intel_link_res *link_res;
 	bool startup_done;
 	struct sdw_intel_bpt bpt_ctx;
@@ -125,6 +126,9 @@ static inline void intel_writew(void __iomem *base, int offset, u16 value)
 }
 
 #define cdns_to_intel(_cdns) container_of(_cdns, struct sdw_intel, cdns)
+
+int intel_dai_probe(struct snd_soc_dai *dai);
+int intel_dai_remove(struct snd_soc_dai *dai);
 
 #define INTEL_MASTER_RESET_ITERATIONS	10
 
