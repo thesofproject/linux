@@ -298,17 +298,17 @@ static int ipc3_wait_tx_done(struct snd_sof_ipc *ipc, void *reply_data)
 				 msecs_to_jiffies(sdev->ipc_timeout));
 
 	if (ret == 0) {
-		dev_err(sdev->dev,
-			"ipc tx timed out for %#x (msg/reply size: %d/%zu)\n",
-			hdr->cmd, hdr->size, msg->reply_size);
+		dev_err_ratelimited(sdev->dev,
+				    "ipc tx timed out for %#x (msg/reply size: %d/%zu)\n",
+				    hdr->cmd, hdr->size, msg->reply_size);
 		snd_sof_handle_fw_exception(ipc->sdev, "IPC timeout");
 		ret = -ETIMEDOUT;
 	} else {
 		ret = msg->reply_error;
 		if (ret < 0) {
-			dev_err(sdev->dev,
-				"ipc tx error for %#x (msg/reply size: %d/%zu): %d\n",
-				hdr->cmd, hdr->size, msg->reply_size, ret);
+			dev_err_ratelimited(sdev->dev,
+					    "ipc tx error for %#x (msg/reply size: %d/%zu): %d\n",
+					    hdr->cmd, hdr->size, msg->reply_size, ret);
 		} else {
 			if (sof_debug_check_flag(SOF_DBG_PRINT_IPC_SUCCESS_LOGS))
 				ipc3_log_header(sdev->dev, "ipc tx succeeded", hdr->cmd);
@@ -371,8 +371,9 @@ static int sof_ipc3_tx_msg(struct snd_sof_dev *sdev, void *msg_data, size_t msg_
 		/* ensure the DSP is in D0 before sending a new IPC */
 		ret = snd_sof_dsp_set_power_state(sdev, &target_state);
 		if (ret < 0) {
-			dev_err(sdev->dev, "%s: resuming DSP failed: %d\n",
-				__func__, ret);
+			dev_err_ratelimited(sdev->dev,
+					    "%s: resuming DSP failed: %d\n",
+					    __func__, ret);
 			return ret;
 		}
 	}

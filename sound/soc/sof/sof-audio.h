@@ -668,6 +668,12 @@ struct snd_sof_widget *snd_sof_find_swidget_by_comp_id(struct snd_sof_dev *sdev,
 		(__spcm)->pcm.pcm_name, __dir,					\
 		##__VA_ARGS__)
 
+#define spcm_err_ratelimited(__spcm, __dir, __fmt, ...)				\
+	dev_err_ratelimited((__spcm)->scomp->dev, "%s: pcm%u (%s), dir %d: " __fmt,	\
+			    __func__, le32_to_cpu((__spcm)->pcm.pcm_id),		\
+			    (__spcm)->pcm.pcm_name, __dir,				\
+			    ##__VA_ARGS__)
+
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
 void snd_sof_compr_fragment_elapsed(struct snd_compr_stream *cstream);
 void snd_sof_compr_init_elapsed_work(struct work_struct *work);
