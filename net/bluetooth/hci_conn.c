@@ -229,7 +229,52 @@ static bool find_next_esco_param(struct hci_conn *conn,
 	return conn->attempt <= size;
 }
 
-static int configure_datapath_sync(struct hci_dev *hdev, struct bt_codec *codec)
+int hci_configure_datapath(struct hci_dev *hdev, __u8 link,
+			   struct bt_codec *codec)
+{
+	int err;
+	__u8 vnd_len, *vnd_data = NULL;
+	struct hci_op_configure_data_path *cmd = NULL;
+
+	if (!codec->data_path || !hdev->get_codec_config_data)
+		return 0;
+
+	err = hdev->get_codec_config_data(hdev, link, codec, &vnd_len,
+					  &vnd_data);
+	if (err < 0)
+		goto error;
+
+	cmd = kzalloc(sizeof(*cmd) + vnd_len, GFP_ATOMIC);
+	if (!cmd) {
+		err = -ENOMEM;
+		goto error;
+	}
+
+	err = hdev->get_data_path_id(hdev, &cmd->data_path_id);
+	if (err < 0)
+		goto error;
+
+	cmd->vnd_len = vnd_len;
+	memcpy(cmd->vnd_data, vnd_data, vnd_len);
+
+	cmd->direction = 0x00;
+	err = hci_send_cmd(hdev, HCI_CONFIGURE_DATA_PATH,
+			   sizeof(*cmd) + vnd_len, cmd);
+	if (err < 0)
+		goto error;
+
+	cmd->direction = 0x01;
+	err = hci_send_cmd(hdev, HCI_CONFIGURE_DATA_PATH,
+			   sizeof(*cmd) + vnd_len, cmd);
+
+error:
+	kfree(cmd);
+	kfree(vnd_data);
+	return err;
+}
+
+static int configure_datapath_sync(struct hci_dev *hdev, __u8 link,
+				   struct bt_codec *codec)
 {
 	int err;
 	__u8 vnd_len, *vnd_data = NULL;
@@ -242,7 +287,7 @@ static int configure_datapath_sync(struct hci_dev *hdev, struct bt_codec *codec)
 	if (!codec->data_path || !hdev->get_codec_config_data)
 		return 0;
 
-	err = hdev->get_codec_config_data(hdev, ESCO_LINK, codec, &vnd_len,
+	err = hdev->get_codec_config_data(hdev, link, codec, &vnd_len,
 					  &vnd_data);
 	if (err < 0)
 		goto error;
@@ -288,7 +333,7 @@ static int hci_enhanced_setup_sync(struct hci_dev *hdev, void *data)
 
 	bt_dev_dbg(hdev, "hcon %p", conn);
 
-	configure_datapath_sync(hdev, &conn->codec);
+	configure_datapath_sync(hdev, ESCO_LINK, &conn->codec);
 
 	conn->state = BT_CONNECT;
 	conn->out = true;
@@ -357,6 +402,8 @@ static int hci_enhanced_setup_sync(struct hci_dev *hdev, void *data)
 		cp.out_transport_unit_size = 1;
 		break;
 
+	case 0x00: /* u-law */
+	case 0x01: /* A-law */
 	case BT_CODEC_CVSD:
 		if (conn->parent && lmp_esco_capable(conn->parent)) {
 			if (!find_next_esco_param(conn, esco_param_cvsd,
@@ -368,8 +415,8 @@ static int hci_enhanced_setup_sync(struct hci_dev *hdev, void *data)
 				goto unlock;
 			param = &sco_param_cvsd[conn->attempt - 1];
 		}
-		cp.tx_coding_format.id = 2;
-		cp.rx_coding_format.id = 2;
+		cp.tx_coding_format.id = conn->codec.id;
+		cp.rx_coding_format.id = conn->codec.id;
 		cp.tx_codec_frame_size = __cpu_to_le16(60);
 		cp.rx_codec_frame_size = __cpu_to_le16(60);
 		cp.in_bandwidth = __cpu_to_le32(16000);
@@ -493,6 +540,138 @@ bool hci_setup_sync(struct hci_conn *conn, __u16 handle)
 	}
 
 	return hci_setup_sync_conn(conn, handle);
+}
+
+static int hci_enhanced_accept_sync(struct hci_dev *hdev, void *data)
+{
+	struct hci_conn *conn = data;
+	struct hci_cp_enhanced_accept_sync_conn cp;
+
+	if (!hci_conn_valid(hdev, conn))
+		return -ECANCELED;
+
+	bt_dev_dbg(hdev, "hcon %p", conn);
+
+	configure_datapath_sync(hdev, ESCO_LINK, &conn->codec);
+
+	memset(&cp, 0x00, sizeof(cp));
+
+	bacpy(&cp.bdaddr, &conn->dst);
+	cp.pkt_type = cpu_to_le16(conn->pkt_type);
+	cp.tx_bandwidth = cpu_to_le32(0x00001f40);
+	cp.rx_bandwidth = cpu_to_le32(0x00001f40);
+
+	switch (conn->codec.id) {
+	case BT_CODEC_MSBC:
+		cp.tx_coding_format.id = 0x05;
+		cp.rx_coding_format.id = 0x05;
+		cp.tx_codec_frame_size = __cpu_to_le16(60);
+		cp.rx_codec_frame_size = __cpu_to_le16(60);
+		cp.in_bandwidth = __cpu_to_le32(32000);
+		cp.out_bandwidth = __cpu_to_le32(32000);
+		cp.in_coding_format.id = 0x04;
+		cp.out_coding_format.id = 0x04;
+		cp.in_coded_data_size = __cpu_to_le16(16);
+		cp.out_coded_data_size = __cpu_to_le16(16);
+		cp.in_pcm_data_format = 2;
+		cp.out_pcm_data_format = 2;
+		cp.in_pcm_sample_payload_msb_pos = 0;
+		cp.out_pcm_sample_payload_msb_pos = 0;
+		cp.in_data_path = conn->codec.data_path;
+		cp.out_data_path = conn->codec.data_path;
+		cp.in_transport_unit_size = 1;
+		cp.out_transport_unit_size = 1;
+		if (conn->pkt_type & ESCO_2EV3)
+			cp.max_latency = cpu_to_le16(0x0008);
+		else
+			cp.max_latency = cpu_to_le16(0x000D);
+		cp.retrans_effort = 0x02;
+		break;
+
+	case BT_CODEC_TRANSPARENT:
+		cp.tx_coding_format.id = 0x03;
+		cp.rx_coding_format.id = 0x03;
+		cp.tx_codec_frame_size = __cpu_to_le16(60);
+		cp.rx_codec_frame_size = __cpu_to_le16(60);
+		cp.in_bandwidth = __cpu_to_le32(0x1f40);
+		cp.out_bandwidth = __cpu_to_le32(0x1f40);
+		cp.in_coding_format.id = 0x03;
+		cp.out_coding_format.id = 0x03;
+		cp.in_coded_data_size = __cpu_to_le16(16);
+		cp.out_coded_data_size = __cpu_to_le16(16);
+		cp.in_pcm_data_format = 2;
+		cp.out_pcm_data_format = 2;
+		cp.in_pcm_sample_payload_msb_pos = 0;
+		cp.out_pcm_sample_payload_msb_pos = 0;
+		cp.in_data_path = conn->codec.data_path;
+		cp.out_data_path = conn->codec.data_path;
+		cp.in_transport_unit_size = 1;
+		cp.out_transport_unit_size = 1;
+		if (conn->pkt_type & ESCO_2EV3)
+			cp.max_latency = cpu_to_le16(0x0008);
+		else
+			cp.max_latency = cpu_to_le16(0x000D);
+		cp.retrans_effort = 0x02;
+		break;
+
+	case 0x00: /* u-law */
+	case 0x01: /* A-law */
+	case BT_CODEC_CVSD:
+	default:
+		cp.tx_coding_format.id = (conn->codec.id <= 0x02) ? conn->codec.id : 2;
+		cp.rx_coding_format.id = (conn->codec.id <= 0x02) ? conn->codec.id : 2;
+		cp.tx_codec_frame_size = __cpu_to_le16(60);
+		cp.rx_codec_frame_size = __cpu_to_le16(60);
+		cp.in_bandwidth = __cpu_to_le32(16000);
+		cp.out_bandwidth = __cpu_to_le32(16000);
+		cp.in_coding_format.id = 4;
+		cp.out_coding_format.id = 4;
+		cp.in_coded_data_size = __cpu_to_le16(16);
+		cp.out_coded_data_size = __cpu_to_le16(16);
+		cp.in_pcm_data_format = 2;
+		cp.out_pcm_data_format = 2;
+		cp.in_pcm_sample_payload_msb_pos = 0;
+		cp.out_pcm_sample_payload_msb_pos = 0;
+		cp.in_data_path = conn->codec.data_path;
+		cp.out_data_path = conn->codec.data_path;
+		cp.in_transport_unit_size = 16;
+		cp.out_transport_unit_size = 16;
+		cp.max_latency = cpu_to_le16(0xffff);
+		cp.retrans_effort = 0xff;
+		break;
+	}
+
+	if (hci_send_cmd(hdev, HCI_OP_ENHANCED_ACCEPT_SYNC_CONN,
+			 sizeof(cp), &cp) < 0)
+		return -EIO;
+
+	return 0;
+}
+
+static void hci_enhanced_accept_sync_destroy(struct hci_dev *hdev, void *data,
+					     int err)
+{
+	struct hci_conn *conn = data;
+
+	hci_conn_put(conn);
+}
+
+bool hci_accept_sync(struct hci_conn *conn)
+{
+	int result;
+
+	if (!enhanced_sync_conn_capable(conn->hdev))
+		return false;
+
+	hci_conn_get(conn);
+	result = hci_cmd_sync_queue(conn->hdev, hci_enhanced_accept_sync,
+				    conn, hci_enhanced_accept_sync_destroy);
+	if (result < 0) {
+		hci_conn_put(conn);
+		return false;
+	}
+
+	return true;
 }
 
 struct le_conn_update_data {
@@ -2163,34 +2342,119 @@ struct hci_conn *hci_bind_cis(struct hci_dev *hdev, bdaddr_t *dst,
 	return cis;
 }
 
-bool hci_iso_setup_path(struct hci_conn *conn)
+static int hci_iso_build_lc3_cfg(const struct hci_conn *conn,
+				 const struct bt_iso_io_qos *io,
+				 __u8 *cfg, __u8 *cfg_len)
+{
+	__u16 sdu = io->sdu ? io->sdu : 40;
+	__u8 freq;
+
+	if (conn->codec_cfg_len > 0) {
+		if (conn->codec_cfg_len > HCI_MAX_CODEC_CFG_LEN)
+			return -EINVAL;
+		memcpy(cfg, conn->codec_cfg, conn->codec_cfg_len);
+		*cfg_len = conn->codec_cfg_len;
+		return 0;
+	}
+
+	if (io->interval == 7500)
+		freq = (sdu >= 75) ? 0x08 : 0x03;
+	else if (io->interval == 10000)
+		freq = (sdu >= 100) ? 0x08 : 0x03;
+	else
+		freq = (sdu >= 75) ? 0x08 : 0x03;
+
+	/* Sampling_Frequency (0x01): 0x03 = 16 kHz, 0x08 = 48 kHz */
+	cfg[0] = 0x02;
+	cfg[1] = 0x01;
+	cfg[2] = freq;
+	/* Frame_Duration (0x02): 0x00 = 7.5 ms, 0x01 = 10 ms */
+	cfg[3] = 0x02;
+	cfg[4] = 0x02;
+	cfg[5] = (io->interval == 7500) ? 0x00 : 0x01;
+	/* Octets_Per_Codec_Frame (0x04) */
+	cfg[6] = 0x03;
+	cfg[7] = 0x04;
+	cfg[8] = sdu & 0xff;
+	cfg[9] = (sdu >> 8) & 0xff;
+	*cfg_len = 10;
+
+	return 0;
+}
+
+static bool hci_iso_setup_dir_path(struct hci_conn *conn, __u8 direction,
+				   const struct bt_iso_io_qos *io,
+				   bool *dp_configured)
 {
 	struct hci_dev *hdev = conn->hdev;
-	struct hci_cp_le_setup_iso_path cmd;
+	struct {
+		struct hci_cp_le_setup_iso_path cp;
+		__u8 cfg[HCI_MAX_CODEC_CFG_LEN];
+	} __packed cmd;
+	__u8 path = conn->codec.data_path;
+	__u8 codec = path ? conn->codec.id : 0x03; /* Transparent Data */
+	__le16 cid = path ? cpu_to_le16(conn->codec.cid) : 0;
+	__le16 vid = path ? cpu_to_le16(conn->codec.vid) : 0;
+	__u8 cfg_len = 0;
 
 	memset(&cmd, 0, sizeof(cmd));
 
-	if (conn->iso_qos.ucast.out.sdu) {
-		cmd.handle = cpu_to_le16(conn->handle);
-		cmd.direction = 0x00; /* Input (Host to Controller) */
-		cmd.path = 0x00; /* HCI path if enabled */
-		cmd.codec = 0x03; /* Transparent Data */
-
-		if (hci_send_cmd(hdev, HCI_OP_LE_SETUP_ISO_PATH, sizeof(cmd),
-				 &cmd) < 0)
+	if (path && codec == BT_CODEC_LC3) {
+		if (hci_iso_build_lc3_cfg(conn, io, cmd.cfg, &cfg_len) < 0)
 			return false;
+		cmd.cp.codec_cfg_len = cfg_len;
 	}
 
-	if (conn->iso_qos.ucast.in.sdu) {
-		cmd.handle = cpu_to_le16(conn->handle);
-		cmd.direction = 0x01; /* Output (Controller to Host) */
-		cmd.path = 0x00; /* HCI path if enabled */
-		cmd.codec = 0x03; /* Transparent Data */
+	if (path && !*dp_configured) {
+		struct {
+			struct bt_codec codec;
+			struct bt_codec_caps caps;
+			__u8 data[HCI_MAX_CODEC_CFG_LEN];
+		} __packed cbuf;
 
-		if (hci_send_cmd(hdev, HCI_OP_LE_SETUP_ISO_PATH, sizeof(cmd),
-				 &cmd) < 0)
+		memset(&cbuf, 0, sizeof(cbuf));
+		cbuf.codec = conn->codec;
+		if (cfg_len) {
+			cbuf.codec.num_caps = 1;
+			cbuf.caps.len = cfg_len;
+			memcpy(cbuf.data, cmd.cfg, cfg_len);
+		}
+		if (hci_configure_datapath(hdev, conn->type, &cbuf.codec) < 0)
 			return false;
+		*dp_configured = true;
 	}
+
+	cmd.cp.handle = cpu_to_le16(conn->handle);
+	cmd.cp.direction = direction;
+	cmd.cp.path = path;
+	cmd.cp.codec = codec;
+	cmd.cp.codec_cid = cid;
+	cmd.cp.codec_vid = vid;
+
+	return hci_send_cmd(hdev, HCI_OP_LE_SETUP_ISO_PATH,
+			    sizeof(cmd.cp) + cfg_len, &cmd) >= 0;
+}
+
+bool hci_iso_setup_path(struct hci_conn *conn)
+{
+	const struct bt_iso_io_qos *out, *in;
+	bool dp_configured = false;
+
+	if (conn->type == BIS_LINK) {
+		out = &conn->iso_qos.bcast.out;
+		in = &conn->iso_qos.bcast.in;
+	} else {
+		out = &conn->iso_qos.ucast.out;
+		in = &conn->iso_qos.ucast.in;
+	}
+
+	if (out->sdu &&
+	    !hci_iso_setup_dir_path(conn, 0x00, out, &dp_configured))
+		return false;
+
+	if (in->sdu &&
+	    !hci_iso_setup_dir_path(conn, 0x01, in, &dp_configured))
+		return false;
 
 	return true;
 }

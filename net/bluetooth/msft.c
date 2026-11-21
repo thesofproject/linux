@@ -5,6 +5,7 @@
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
+#include <net/bluetooth/l2cap.h>
 #include <net/bluetooth/mgmt.h>
 
 #include "mgmt_util.h"
@@ -79,6 +80,88 @@ struct msft_rp_le_set_advertisement_filter_enable {
 	__u8 sub_opcode;
 } __packed;
 
+/* Microsoft Bluetooth HCI Vendor-Specific Extension for AVDTP hardware offload
+ * (feature bit 10 in HCI_VS_MSFT_Read_Supported_Features). Command and event
+ * structures are wire-protocol HCI packets mapped onto skb->data with __le16
+ * fields at unaligned byte offsets, so __packed is required without extra
+ * struct alignment padding. Capability payloads use standard Bluetooth SIG
+ * AVDTP v1.3 (Section 8.21.5) Media Codec Service Capability elements and
+ * A2DP v1.3 (Sections 4.3.2 & 4.5.2) SBC / MPEG-2,4 AAC Codec Information
+ * Elements.
+ */
+#define AVDTP_SVC_CAT_MEDIA_CODEC		0x07
+#define AVDTP_CAP_HDR_LEN			2
+#define AVDTP_MEDIA_CODEC_HDR_LEN		2
+#define AVDTP_MEDIA_TYPE_AUDIO			0x00
+
+#define A2DP_CODEC_SBC				0x00
+#define A2DP_CODEC_MPEG24			0x02
+#define A2DP_CODEC_VENDOR			0xff
+
+#define AVDTP_SBC_CIE_LEN			4
+#define AVDTP_SBC_LOSC				(AVDTP_MEDIA_CODEC_HDR_LEN + \
+						 AVDTP_SBC_CIE_LEN)
+#define AVDTP_SBC_CAP_LEN			(AVDTP_CAP_HDR_LEN + \
+						 AVDTP_SBC_LOSC)
+
+#define AVDTP_AAC_CIE_LEN			6
+#define AVDTP_AAC_LOSC				(AVDTP_MEDIA_CODEC_HDR_LEN + \
+						 AVDTP_AAC_CIE_LEN)
+#define AVDTP_AAC_CAP_LEN			(AVDTP_CAP_HDR_LEN + \
+						 AVDTP_AAC_LOSC)
+#define AVDTP_AAC_VBR_BIT			0x80
+#define AVDTP_AAC_BITRATE_HI_MASK		0x7f
+#define AVDTP_AAC_MIN_BITRATE			128000
+#define AVDTP_AAC_MAX_BITRATE			192000
+
+/* Intel Bluetooth Assigned Company ID and vendor A2DP offload codec IDs */
+#define BT_COMPID_INTEL				0x0002
+#define BTINTEL_A2DP_VID_SBC			0x0000
+#define BTINTEL_A2DP_VID_AAC			0x0002
+
+#define MSFT_OP_AVDTP_CAPABILITIES_CONF		0x07
+struct msft_cp_avdtp_capabilities_conf {
+	__u8 sub_opcode;
+	__u8 ext_codec_count;
+	__u8 audio_if_param_count;
+} __packed;
+
+struct msft_rp_avdtp_capabilities_conf {
+	__u8 status;
+	__u8 sub_opcode;
+	__u8 int_codec_count;
+	__u8 data[];
+} __packed;
+
+#define MSFT_OP_AVDTP_OPEN			0x08
+struct msft_cp_avdtp_open {
+	__u8   sub_opcode;
+	__le16 acl_handle;
+	__le16 l2cap_dcid;
+	__le16 l2cap_mtu;
+	__u8   data[];
+} __packed;
+
+struct msft_rp_avdtp_open {
+	__u8   status;
+	__u8   sub_opcode;
+	__le16 avdtp_handle;
+	__u8   audio_if_param_count;
+} __packed;
+
+#define MSFT_OP_AVDTP_START			0x09
+#define MSFT_OP_AVDTP_SUSPEND			0x0a
+#define MSFT_OP_AVDTP_CLOSE			0x0b
+struct msft_cp_avdtp_handle {
+	__u8   sub_opcode;
+	__le16 avdtp_handle;
+} __packed;
+
+struct msft_rp_avdtp_handle {
+	__u8 status;
+	__u8 sub_opcode;
+} __packed;
+
 #define MSFT_EV_LE_MONITOR_DEVICE	0x02
 struct msft_ev_le_monitor_device {
 	__u8     addr_type;
@@ -136,6 +219,394 @@ struct msft_data {
 bool msft_monitor_supported(struct hci_dev *hdev)
 {
 	return !!(msft_get_features(hdev) & MSFT_FEATURE_MASK_LE_ADV_MONITOR);
+}
+
+bool msft_avdtp_supported(struct hci_dev *hdev)
+{
+	return !!(msft_get_features(hdev) & MSFT_FEATURE_MASK_AVDTP);
+}
+
+/* Validate an AVDTP Media Codec Service Capability TLV element */
+static bool msft_avdtp_valid_codec_cap(const u8 *pos, size_t rem,
+				       size_t *elem_len, u8 *codec_id)
+{
+	size_t len;
+	u8 losc;
+	u8 id;
+
+	if (rem < AVDTP_CAP_HDR_LEN + AVDTP_MEDIA_CODEC_HDR_LEN)
+		return false;
+
+	if (pos[0] != AVDTP_SVC_CAT_MEDIA_CODEC)
+		return false;
+
+	losc = pos[1];
+	if (losc < AVDTP_MEDIA_CODEC_HDR_LEN)
+		return false;
+
+	len = AVDTP_CAP_HDR_LEN + (size_t)losc;
+	if (len > rem)
+		return false;
+
+	if (pos[2] != AVDTP_MEDIA_TYPE_AUDIO)
+		return false;
+
+	id = pos[3];
+	switch (id) {
+	case A2DP_CODEC_SBC:
+		if (losc != AVDTP_SBC_LOSC)
+			return false;
+		break;
+	case A2DP_CODEC_MPEG24:
+		if (losc != AVDTP_AAC_LOSC)
+			return false;
+		break;
+	default:
+		return false;
+	}
+
+	*elem_len = len;
+	*codec_id = id;
+	return true;
+}
+
+/* This function requires the caller holds hci_req_sync_lock */
+static void msft_read_avdtp_capabilities(struct hci_dev *hdev)
+{
+	struct msft_cp_avdtp_capabilities_conf cp = {
+		.sub_opcode = MSFT_OP_AVDTP_CAPABILITIES_CONF,
+		.ext_codec_count = 0,
+		.audio_if_param_count = 0,
+	};
+	struct msft_rp_avdtp_capabilities_conf *rp;
+	struct sk_buff *skb;
+	const u8 *pos;
+	size_t rem;
+	u8 i;
+
+	skb = __hci_cmd_sync(hdev, hdev->msft_opcode, sizeof(cp), &cp,
+			     HCI_CMD_TIMEOUT);
+	if (IS_ERR(skb)) {
+		bt_dev_err(hdev, "Failed to read MSFT AVDTP capabilities (%ld)",
+			   PTR_ERR(skb));
+		return;
+	}
+
+	if (skb->len < sizeof(*rp)) {
+		bt_dev_err(hdev, "MSFT AVDTP capabilities length mismatch");
+		goto done;
+	}
+
+	rp = (void *)skb->data;
+	if (rp->status || rp->sub_opcode != MSFT_OP_AVDTP_CAPABILITIES_CONF)
+		goto done;
+
+	pos = rp->data;
+	rem = skb->len - sizeof(*rp);
+
+	/* Iterate through each internal AVDTP codec capability block returned by the controller */
+	for (i = 0;
+	     i < rp->int_codec_count &&
+	     rem >= AVDTP_CAP_HDR_LEN + AVDTP_MEDIA_CODEC_HDR_LEN;
+	     i++) {
+		struct codec_list *c, *entry;
+		size_t elem_len;
+		u8 codec_id;
+		bool exists = false;
+
+		/* Validate AVDTP Service Category, LOSC bounds, media type, and codec ID */
+		if (!msft_avdtp_valid_codec_cap(pos, rem, &elem_len, &codec_id))
+			break;
+
+		hci_dev_lock(hdev);
+		list_for_each_entry(c, &hdev->local_codecs, list) {
+			if (c->transport == HCI_TRANSPORT_ACL &&
+			    c->id == codec_id) {
+				exists = true;
+				break;
+			}
+		}
+
+		/* Register the AVDTP offload codec if not already present in local_codecs */
+		if (!exists) {
+			entry = kzalloc(sizeof(*entry) +
+					sizeof(struct hci_codec_caps) +
+					elem_len, GFP_KERNEL);
+			if (entry) {
+				entry->id = codec_id;
+				entry->transport = HCI_TRANSPORT_ACL;
+				entry->num_caps = 1;
+				entry->len = sizeof(struct hci_codec_caps) +
+					     elem_len;
+				entry->caps[0].len = elem_len;
+				memcpy(entry->caps[0].data, pos, elem_len);
+				list_add(&entry->list, &hdev->local_codecs);
+				bt_dev_info(hdev,
+					    "MSFT AVDTP offload codec 0x%02x registered (%zu bytes)",
+					    codec_id, elem_len);
+			}
+		}
+		hci_dev_unlock(hdev);
+
+		pos += elem_len;
+		rem -= elem_len;
+	}
+
+done:
+	kfree_skb(skb);
+}
+
+int msft_avdtp_close(struct hci_dev *hdev, __u16 avdtp_handle)
+{
+	struct msft_cp_avdtp_handle cp;
+	struct sk_buff *skb;
+	int err = 0;
+
+	if (!avdtp_handle || !msft_avdtp_supported(hdev))
+		return 0;
+
+	cp.sub_opcode = MSFT_OP_AVDTP_SUSPEND;
+	cp.avdtp_handle = cpu_to_le16(avdtp_handle);
+	skb = hci_cmd_sync(hdev, hdev->msft_opcode, sizeof(cp), &cp,
+			   HCI_CMD_TIMEOUT);
+	if (!IS_ERR(skb))
+		kfree_skb(skb);
+
+	cp.sub_opcode = MSFT_OP_AVDTP_CLOSE;
+	cp.avdtp_handle = cpu_to_le16(avdtp_handle);
+	skb = hci_cmd_sync(hdev, hdev->msft_opcode, sizeof(cp), &cp,
+			   HCI_CMD_TIMEOUT);
+	if (IS_ERR(skb)) {
+		err = PTR_ERR(skb);
+		bt_dev_err(hdev, "MSFT AVDTP close failed (%d)", err);
+		return err;
+	}
+
+	kfree_skb(skb);
+	bt_dev_info(hdev, "MSFT AVDTP offload closed: handle 0x%04x",
+		    avdtp_handle);
+	return 0;
+}
+
+int msft_avdtp_open(struct hci_dev *hdev, struct l2cap_chan *chan,
+		    struct bt_codec *codec, size_t caps_len)
+{
+	static const u8 default_sbc_cap[AVDTP_SBC_CAP_LEN] = {
+		AVDTP_SVC_CAT_MEDIA_CODEC, AVDTP_SBC_LOSC,
+		AVDTP_MEDIA_TYPE_AUDIO, A2DP_CODEC_SBC,
+		0x11, 0x15, 0x02, 0x33
+	};
+	static const u8 default_aac_cap[AVDTP_AAC_CAP_LEN] = {
+		AVDTP_SVC_CAT_MEDIA_CODEC, AVDTP_AAC_LOSC,
+		AVDTP_MEDIA_TYPE_AUDIO, A2DP_CODEC_MPEG24,
+		0x80, 0x00, 0x84, 0x82, 0xee, 0x00
+	};
+	struct msft_cp_avdtp_open *open_cp;
+	struct msft_rp_avdtp_open *open_rp;
+	struct msft_cp_avdtp_handle start_cp;
+	struct msft_rp_avdtp_handle *start_rp;
+	u8 custom_cap[AVDTP_AAC_CAP_LEN];
+	const u8 *cap_ptr = NULL;
+	size_t cap_size = 0;
+	size_t open_len;
+	struct sk_buff *skb;
+	u16 acl_handle = 0;
+	u16 avdtp_handle;
+	u16 dcid, mtu;
+	bool is_sbc, is_aac;
+	bool found_conn = false;
+	int err;
+
+	/* Verify the controller supports MSFT AVDTP offload */
+	if (!msft_avdtp_supported(hdev))
+		return -EOPNOTSUPP;
+
+	/* Close any active offload stream before reconfiguring or disabling */
+	if (chan->avdtp_handle) {
+		msft_avdtp_close(hdev, chan->avdtp_handle);
+		chan->avdtp_handle = 0;
+	}
+
+	if (!codec->data_path)
+		return 0;
+
+	/* Match standard A2DP codec IDs or Intel vendor-specific ACL codec IDs */
+	is_sbc = (codec->id == A2DP_CODEC_SBC) ||
+		 (codec->id == A2DP_CODEC_VENDOR &&
+		  codec->cid == BT_COMPID_INTEL &&
+		  codec->vid == BTINTEL_A2DP_VID_SBC);
+	is_aac = (codec->id == A2DP_CODEC_MPEG24) ||
+		 (codec->id == A2DP_CODEC_VENDOR &&
+		  codec->cid == BT_COMPID_INTEL &&
+		  codec->vid == BTINTEL_A2DP_VID_AAC);
+
+	if (!is_sbc && !is_aac) {
+		bt_dev_err(hdev,
+			   "Unsupported MSFT AVDTP codec id 0x%02x (cid 0x%04x vid 0x%04x)",
+			   codec->id, codec->cid, codec->vid);
+		return -EINVAL;
+	}
+
+	/* Check if user-space supplied codec-specific capability parameters */
+	if (codec->num_caps > 0) {
+		const struct bt_codec_caps *caps;
+		size_t parsed_len;
+		u8 parsed_id;
+
+		if (caps_len < sizeof(*caps))
+			return -EINVAL;
+
+		caps = (const void *)&codec[1];
+		if (caps_len < sizeof(*caps) + caps->len)
+			return -EINVAL;
+
+		/* Use a full AVDTP Media Codec Service Capability TLV directly if valid */
+		if (msft_avdtp_valid_codec_cap(caps->data, caps->len,
+					       &parsed_len, &parsed_id) &&
+		    parsed_len == caps->len) {
+			if ((is_sbc && parsed_id != A2DP_CODEC_SBC) ||
+			    (is_aac && parsed_id != A2DP_CODEC_MPEG24))
+				return -EINVAL;
+			cap_ptr = caps->data;
+			cap_size = caps->len;
+		/* Wrap a raw 4-byte SBC CIE into an 8-byte AVDTP Service Capability TLV */
+		} else if (is_sbc && caps->len == AVDTP_SBC_CIE_LEN) {
+			custom_cap[0] = AVDTP_SVC_CAT_MEDIA_CODEC;
+			custom_cap[1] = AVDTP_SBC_LOSC;
+			custom_cap[2] = AVDTP_MEDIA_TYPE_AUDIO;
+			custom_cap[3] = A2DP_CODEC_SBC;
+			memcpy(&custom_cap[4], caps->data, AVDTP_SBC_CIE_LEN);
+			cap_ptr = custom_cap;
+			cap_size = AVDTP_SBC_CAP_LEN;
+		/* Wrap a raw 6-byte AAC CIE into a 10-byte AVDTP Service Capability TLV */
+		} else if (is_aac && caps->len == AVDTP_AAC_CIE_LEN) {
+			u32 br;
+
+			custom_cap[0] = AVDTP_SVC_CAT_MEDIA_CODEC;
+			custom_cap[1] = AVDTP_AAC_LOSC;
+			custom_cap[2] = AVDTP_MEDIA_TYPE_AUDIO;
+			custom_cap[3] = A2DP_CODEC_MPEG24;
+			memcpy(&custom_cap[4], caps->data, AVDTP_AAC_CIE_LEN);
+			br = ((u32)(custom_cap[7] &
+				    AVDTP_AAC_BITRATE_HI_MASK) << 16) |
+			     ((u32)custom_cap[8] << 8) | custom_cap[9];
+			/* Reject nonzero bitrates below 128 kbps; cap 0 or >192 kbps */
+			if (br && br < AVDTP_AAC_MIN_BITRATE)
+				return -EINVAL;
+			if (!br || br > AVDTP_AAC_MAX_BITRATE) {
+				custom_cap[7] = (custom_cap[7] &
+						 AVDTP_AAC_VBR_BIT) |
+						((AVDTP_AAC_MAX_BITRATE >> 16) &
+						 AVDTP_AAC_BITRATE_HI_MASK);
+				custom_cap[8] = (AVDTP_AAC_MAX_BITRATE >> 8) &
+						0xff;
+				custom_cap[9] = AVDTP_AAC_MAX_BITRATE & 0xff;
+			}
+			cap_ptr = custom_cap;
+			cap_size = AVDTP_AAC_CAP_LEN;
+		} else {
+			return -EINVAL;
+		}
+	} else {
+		/* Use default SBC or AAC capability when no capability was supplied */
+		if (is_sbc) {
+			cap_ptr = default_sbc_cap;
+			cap_size = sizeof(default_sbc_cap);
+		} else {
+			cap_ptr = default_aac_cap;
+			cap_size = sizeof(default_aac_cap);
+		}
+	}
+
+	/* Require a connected BR/EDR ACL L2CAP channel with an assigned DCID */
+	l2cap_chan_lock(chan);
+	if (chan->state == BT_CONNECTED && chan->conn && chan->conn->hcon &&
+	    chan->conn->hcon->type == ACL_LINK &&
+	    !HCI_CONN_HANDLE_UNSET(chan->conn->hcon->handle) && chan->dcid) {
+		acl_handle = chan->conn->hcon->handle;
+		dcid = chan->dcid;
+		mtu = chan->omtu ? chan->omtu : L2CAP_DEFAULT_MTU;
+		found_conn = true;
+	}
+	l2cap_chan_unlock(chan);
+
+	if (!found_conn) {
+		bt_dev_err(hdev,
+			   "MSFT AVDTP offload requires a connected BR/EDR ACL L2CAP channel");
+		return -ENOTCONN;
+	}
+
+	open_len = sizeof(*open_cp) + cap_size + 1;
+	open_cp = kzalloc(open_len, GFP_KERNEL);
+	if (!open_cp)
+		return -ENOMEM;
+
+	open_cp->sub_opcode = MSFT_OP_AVDTP_OPEN;
+	open_cp->acl_handle = cpu_to_le16(acl_handle);
+	open_cp->l2cap_dcid = cpu_to_le16(dcid);
+	open_cp->l2cap_mtu = cpu_to_le16(mtu);
+	memcpy(open_cp->data, cap_ptr, cap_size);
+	open_cp->data[cap_size] = 0x00; /* Audio_interface_parameter_count */
+
+	/* Send MSFT AVDTP Open command to allocate an offloaded stream handle on the controller */
+	skb = hci_cmd_sync(hdev, hdev->msft_opcode, open_len, open_cp,
+			   HCI_CMD_TIMEOUT);
+	kfree(open_cp);
+	if (IS_ERR(skb)) {
+		err = PTR_ERR(skb);
+		bt_dev_err(hdev, "MSFT AVDTP Open failed (%d)", err);
+		return err;
+	}
+
+	if (skb->len < sizeof(*open_rp)) {
+		kfree_skb(skb);
+		return -EIO;
+	}
+
+	open_rp = (void *)skb->data;
+	if (open_rp->status || open_rp->sub_opcode != MSFT_OP_AVDTP_OPEN) {
+		err = -bt_to_errno(open_rp->status);
+		kfree_skb(skb);
+		return err ? err : -EIO;
+	}
+
+	avdtp_handle = __le16_to_cpu(open_rp->avdtp_handle);
+	kfree_skb(skb);
+
+	start_cp.sub_opcode = MSFT_OP_AVDTP_START;
+	start_cp.avdtp_handle = cpu_to_le16(avdtp_handle);
+
+	/* Send MSFT AVDTP Start command to start SSP TDM audio and hardware encoding */
+	skb = hci_cmd_sync(hdev, hdev->msft_opcode, sizeof(start_cp), &start_cp,
+			   HCI_CMD_TIMEOUT);
+	if (IS_ERR(skb)) {
+		err = PTR_ERR(skb);
+		bt_dev_err(hdev, "MSFT AVDTP Start failed (%d)", err);
+		msft_avdtp_close(hdev, avdtp_handle);
+		return err;
+	}
+
+	if (skb->len < sizeof(*start_rp)) {
+		kfree_skb(skb);
+		msft_avdtp_close(hdev, avdtp_handle);
+		return -EIO;
+	}
+
+	start_rp = (void *)skb->data;
+	if (start_rp->status || start_rp->sub_opcode != MSFT_OP_AVDTP_START) {
+		err = -bt_to_errno(start_rp->status);
+		kfree_skb(skb);
+		msft_avdtp_close(hdev, avdtp_handle);
+		return err ? err : -EIO;
+	}
+
+	kfree_skb(skb);
+	chan->avdtp_handle = avdtp_handle;
+
+	bt_dev_info(hdev,
+		    "MSFT AVDTP offload started: acl 0x%04x dcid 0x%04x mtu %u codec 0x%02x handle 0x%04x",
+		    acl_handle, dcid, mtu, codec->id, avdtp_handle);
+	return 0;
 }
 
 static bool read_supported_features(struct hci_dev *hdev,
@@ -669,6 +1140,9 @@ void msft_do_open(struct hci_dev *hdev)
 		 */
 		reregister_monitor(hdev);
 	}
+
+	if (msft_avdtp_supported(hdev))
+		msft_read_avdtp_capabilities(hdev);
 }
 
 void msft_do_close(struct hci_dev *hdev)

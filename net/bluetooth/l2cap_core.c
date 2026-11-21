@@ -479,6 +479,7 @@ struct l2cap_chan *l2cap_chan_create(void)
 	skb_queue_head_init(&chan->tx_q);
 	skb_queue_head_init(&chan->srej_q);
 	mutex_init(&chan->lock);
+	mutex_init(&chan->avdtp_lock);
 
 	/* Set default lock nesting level */
 	atomic_set(&chan->nesting, L2CAP_NESTING_NORMAL);
