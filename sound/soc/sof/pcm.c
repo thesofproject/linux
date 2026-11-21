@@ -90,7 +90,7 @@ sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_run
 
 		ret = sof_widget_list_prepare(sdev, spcm, params, platform_params, dir);
 		if (ret < 0) {
-			spcm_err(spcm, dir, "widget list prepare failed\n");
+			spcm_err_ratelimited(spcm, dir, "widget list prepare failed\n");
 			spcm->stream[dir].list = NULL;
 			snd_soc_dapm_dai_free_widgets(&list);
 			return ret;
@@ -162,7 +162,8 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	platform_params = &spcm->platform_params[substream->stream];
 	ret = snd_sof_pcm_platform_hw_params(sdev, substream, params, platform_params);
 	if (ret < 0) {
-		spcm_err(spcm, substream->stream, "platform hw params failed\n");
+		spcm_err_ratelimited(spcm, substream->stream,
+				     "platform hw params failed\n");
 		return ret;
 	}
 
@@ -179,8 +180,9 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 
 		host_widget = snd_sof_find_swidget_by_comp_id(sdev, host_comp_id);
 		if (!host_widget) {
-			spcm_err(spcm, substream->stream,
-				 "failed to find host widget with comp_id %d\n", host_comp_id);
+			spcm_err_ratelimited(spcm, substream->stream,
+					     "failed to find host widget with comp_id %d\n",
+					     host_comp_id);
 			return -EINVAL;
 		}
 
@@ -226,8 +228,8 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 			ret = pcm_ops->hw_free(sdev->component, substream, spcm,
 					       substream->stream);
 			if (ret < 0) {
-				spcm_err(spcm, substream->stream,
-					 "pcm_ops->hw_free failed %d\n", ret);
+				spcm_err_ratelimited(spcm, substream->stream,
+						     "pcm_ops->hw_free failed %d\n", ret);
 				err = ret;
 			}
 		}
@@ -239,8 +241,8 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	/* reset the DMA */
 	ret = snd_sof_pcm_platform_hw_free(sdev, substream);
 	if (ret < 0) {
-		spcm_err(spcm, substream->stream,
-			 "platform hw free failed %d\n", ret);
+		spcm_err_ratelimited(spcm, substream->stream,
+				     "platform hw free failed %d\n", ret);
 		if (!err)
 			err = ret;
 	}
@@ -249,8 +251,8 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	if (free_widget_list) {
 		ret = sof_widget_list_free(sdev, spcm, dir);
 		if (ret < 0) {
-			spcm_err(spcm, substream->stream,
-				 "sof_widget_list_free failed %d\n", ret);
+			spcm_err_ratelimited(spcm, substream->stream,
+					     "sof_widget_list_free failed %d\n", ret);
 			if (!err)
 				err = ret;
 		}
@@ -351,8 +353,8 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 
 	ret = sof_pcm_hw_params(component, substream, &spcm->params[substream->stream]);
 	if (ret < 0) {
-		spcm_err(spcm, substream->stream,
-			 "failed to set hw_params after resume\n");
+		spcm_err_ratelimited(spcm, substream->stream,
+				     "failed to set hw_params after resume\n");
 		return ret;
 	}
 
@@ -361,8 +363,9 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	platform_params = &spcm->platform_params[substream->stream];
 	ret = sof_widget_list_setup(sdev, spcm, params, platform_params, dir);
 	if (ret < 0) {
-		dev_err(sdev->dev, "failed widget list set up for pcm %d dir %u\n",
-			le32_to_cpu(spcm->pcm.pcm_id), dir);
+		dev_err_ratelimited(sdev->dev,
+				    "failed widget list set up for pcm %d dir %u\n",
+				    le32_to_cpu(spcm->pcm.pcm_id), dir);
 		spcm->stream[dir].list = NULL;
 		snd_soc_dapm_dai_free_widgets(&list);
 		return ret;
