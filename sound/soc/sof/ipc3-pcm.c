@@ -119,9 +119,9 @@ static int sof_ipc3_pcm_hw_params(struct snd_soc_component *component,
 	ret = sof_ipc_tx_message(sdev->ipc, &pcm, sizeof(pcm),
 				 &ipc_params_reply, sizeof(ipc_params_reply));
 	if (ret < 0) {
-		spcm_err(spcm, substream->stream,
-			 "STREAM_PCM_PARAMS ipc failed for stream_tag %d\n",
-			 pcm.params.stream_tag);
+		spcm_err_ratelimited(spcm, substream->stream,
+				     "STREAM_PCM_PARAMS ipc failed for stream_tag %d\n",
+				     pcm.params.stream_tag);
 		return ret;
 	}
 

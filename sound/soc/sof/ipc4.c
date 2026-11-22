@@ -412,15 +412,15 @@ static int ipc4_wait_tx_done(struct snd_sof_ipc *ipc, void *reply_data)
 	ret = wait_event_timeout(msg->waitq, msg->ipc_complete,
 				 msecs_to_jiffies(sdev->ipc_timeout));
 	if (ret == 0) {
-		dev_err(sdev->dev, "ipc timed out for %#x|%#x\n",
-			ipc4_msg->primary, ipc4_msg->extension);
+		dev_err_ratelimited(sdev->dev, "ipc timed out for %#x|%#x\n",
+				    ipc4_msg->primary, ipc4_msg->extension);
 		snd_sof_handle_fw_exception(ipc->sdev, "IPC timeout");
 		return -ETIMEDOUT;
 	}
 
 	if (msg->reply_error) {
-		dev_err(sdev->dev, "ipc error for msg %#x|%#x\n",
-			ipc4_msg->primary, ipc4_msg->extension);
+		dev_err_ratelimited(sdev->dev, "ipc error for msg %#x|%#x\n",
+				    ipc4_msg->primary, ipc4_msg->extension);
 		ret =  msg->reply_error;
 	} else {
 		if (reply_data) {
