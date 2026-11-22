@@ -813,7 +813,7 @@ static const struct snd_soc_dapm_route lm49453_audio_map[] = {
 	{ "HPR Mixer", "DMIC1L Switch", "DMIC1 Left" },
 	{ "HPR Mixer", "DMIC1R Switch", "DMIC1 Right" },
 	{ "HPR Mixer", "DMIC2L Switch", "DMIC2 Left" },
-	{ "HPR Mixer", "DMIC2L Switch", "DMIC2 Right" },
+	{ "HPR Mixer", "DMIC2R Switch", "DMIC2 Right" },
 	{ "HPR Mixer", "Sidetone Switch", "Sidetone" },
 
 	{ "HPR DAC", NULL, "HPR Mixer" },
@@ -1432,8 +1432,7 @@ static int lm49453_i2c_probe(struct i2c_client *i2c)
 	struct lm49453_priv *lm49453;
 	int ret = 0;
 
-	lm49453 = devm_kzalloc(&i2c->dev, sizeof(struct lm49453_priv),
-				GFP_KERNEL);
+	lm49453 = devm_kzalloc_obj(&i2c->dev, struct lm49453_priv);
 
 	if (lm49453 == NULL)
 		return -ENOMEM;

@@ -401,8 +401,7 @@ static int stm32_spdifrx_dma_ctrl_register(struct device *dev,
 		return dev_err_probe(dev, PTR_ERR(spdifrx->ctrl_chan),
 				     "dma_request_chan error\n");
 
-	spdifrx->dmab = devm_kzalloc(dev, sizeof(struct snd_dma_buffer),
-				     GFP_KERNEL);
+	spdifrx->dmab = devm_kzalloc_obj(dev, struct snd_dma_buffer);
 	if (!spdifrx->dmab)
 		return -ENOMEM;
 
@@ -424,10 +423,8 @@ static int stm32_spdifrx_dma_ctrl_register(struct device *dev,
 
 	ret = dmaengine_slave_config(spdifrx->ctrl_chan,
 				     &spdifrx->slave_config);
-	if (ret < 0) {
+	if (ret < 0)
 		dev_err(dev, "dmaengine_slave_config returned error %d\n", ret);
-		spdifrx->ctrl_chan = NULL;
-	}
 
 	return ret;
 };
@@ -945,7 +942,7 @@ static int stm32_spdifrx_probe(struct platform_device *pdev)
 	u32 ver, idr;
 	int ret;
 
-	spdifrx = devm_kzalloc(&pdev->dev, sizeof(*spdifrx), GFP_KERNEL);
+	spdifrx = devm_kzalloc_obj(&pdev->dev, *spdifrx);
 	if (!spdifrx)
 		return -ENOMEM;
 
