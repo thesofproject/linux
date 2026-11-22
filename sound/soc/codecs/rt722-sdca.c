@@ -31,6 +31,18 @@
 
 #define RT722_NID_ADDR(nid, reg) ((nid) << 20 | (reg))
 
+static bool rt722_sdca_is_acer_sfp14_55(void);
+
+/*
+ * Acer Swift Pro SFP14-55: Quirk to enable internal stereo speakers.
+ * Upstream rt722 hardcodes PDE entity 0x23, but Acer ACPI declares PDE entity 0x41.
+ * In addition, digital path bit 15 in MISC_CTRL1, Class-D configuration, and
+ * stream EAPD/power management must be applied for playback.
+ */
+static bool acer_speaker_quirk = true;
+module_param(acer_speaker_quirk, bool, 0644);
+MODULE_PARM_DESC(acer_speaker_quirk, "Enable speaker enablement quirk for Acer SFP14-55");
+
 int rt722_sdca_index_write(struct rt722_sdca_priv *rt722,
 		unsigned int nid, unsigned int reg, unsigned int value)
 {
@@ -76,6 +88,7 @@ static int rt722_sdca_index_update_bits(struct rt722_sdca_priv *rt722,
 	set_mask_bits(&tmp, mask, val);
 	return rt722_sdca_index_write(rt722, nid, reg, tmp);
 }
+
 
 static int rt722_sdca_btn_type(unsigned char *buffer)
 {
@@ -1270,12 +1283,63 @@ static int rt722_sdca_pde23_event(struct snd_soc_dapm_widget *w,
 			SDW_SDCA_CTL(FUNC_NUM_AMP, RT722_SDCA_ENT_PDE23,
 				RT722_SDCA_CTL_REQ_POWER_STATE, 0), ps0);
 		rt722_pde_transition_delay(rt722, FUNC_NUM_AMP, RT722_SDCA_ENT_PDE23, ps0);
+
+		if (rt722_sdca_is_acer_sfp14_55()) {
+			/* Map Amp PDE to Entity 0x41 (hardware default is 0x2323) */
+			rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL,
+					       RT722_AMP_PDE_FLOAT_CTL, 0x4141);
+
+			/* Route digital stream to Class-D amp (bit 15) */
+			rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+						     RT722_MISC_CTRL1, 0x8000, 0x8000);
+
+			/* Codec_D0: global PLL, LDO3_ISEL and LDO1-BG */
+			rt722_sdca_index_update_bits(rt722,
+						     RT722_VENDOR_ANALOG_CTL,
+						     RT722_MISC_POWER_CTL0,
+						     0x8000, 0x8000);
+			rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+						     RT722_LDO2_3_CTL1,
+						     0x01c0, 0x01c0);
+			rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+						     RT722_LDO1_CTL,
+						     0xa000, 0x2000);
+
+			/* ACPI FIT Class-D registers */
+			rt722_sdca_index_write(rt722, RT722_VENDOR_REG,
+					       RT722_CLSD_CTRL2, 0x890a);
+			rt722_sdca_index_write(rt722, RT722_VENDOR_REG,
+					       0x37, 0xfc15);
+			rt722_sdca_index_write(rt722, RT722_VENDOR_REG,
+					       0x40, 0x8800);
+
+			/* AMP_D0: PLL + LDO1 + LDO2 for the amplifier */
+			rt722_sdca_index_update_bits(rt722, RT722_VENDOR_ANALOG_CTL,
+						     RT722_AMP_POWER_CTL,
+						     0xddf8, 0x9800);
+
+			/* AMP_StreamRun: EAPD high, then let the amp settle gently */
+			rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+						     RT722_AMP_EAPD_CTL,
+						     0x0360, 0x0360);
+			usleep_range(80000, 81000);
+		}
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		regmap_write(rt722->regmap,
 			SDW_SDCA_CTL(FUNC_NUM_AMP, RT722_SDCA_ENT_PDE23,
 				RT722_SDCA_CTL_REQ_POWER_STATE, 0), ps3);
 		rt722_pde_transition_delay(rt722, FUNC_NUM_AMP, RT722_SDCA_ENT_PDE23, ps3);
+
+		if (rt722_sdca_is_acer_sfp14_55()) {
+			/* AMP_StreamPause/AMP_D3: EAPD low, then power down PLL/LDOs */
+			rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+						     RT722_AMP_EAPD_CTL,
+						     0x0360, 0x0260);
+			rt722_sdca_index_update_bits(rt722, RT722_VENDOR_ANALOG_CTL,
+						     RT722_AMP_POWER_CTL,
+						     0x9800, 0x0000);
+		}
 		break;
 	}
 	return 0;
@@ -1677,6 +1741,72 @@ static const struct dmi_system_id dmi_dell_mono_spk_quirk_table[] = {
 	{}
 };
 
+static const struct dmi_system_id dmi_acer_sfp14_55_fit_table[] = {
+	{
+		.ident = "Acer Swift Pro SFP14-55",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "SFP14-55"),
+			DMI_MATCH(DMI_BOARD_NAME, "SFP14-55"),
+		}
+	},
+	{}
+};
+
+static bool rt722_sdca_is_acer_sfp14_55(void)
+{
+	return acer_speaker_quirk && dmi_check_system(dmi_acer_sfp14_55_fit_table);
+}
+
+/*
+ * Acer Swift Pro SFP14-55: hardware preset for the RT722 SDCA codec.
+ * Configures the Class-D amp, LDOs, and internal routing.
+ */
+static void rt722_sdca_acer_sfp14_55_preset(struct rt722_sdca_priv *rt722)
+{
+	/* 1. Map Class-D Amp Power Domain to Entity 0x41 */
+	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL,
+			       RT722_AMP_PDE_FLOAT_CTL, 0x4141);
+
+	/* 2. Route digital stream to Class-D amp (bit 15) */
+	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+				     RT722_MISC_CTRL1, 0x8000, 0x8000);
+
+	/* 3. Codec_D0: global PLL, LDO3_ISEL and LDO1-BG */
+	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_ANALOG_CTL,
+				     RT722_MISC_POWER_CTL0, 0x8000, 0x8000);
+	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+				     RT722_LDO2_3_CTL1, 0x01c0, 0x01c0);
+	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+				     RT722_LDO1_CTL, 0xa000, 0x2000);
+
+	/* 4. Class-D filter and timing registers */
+	rt722_sdca_index_write(rt722, RT722_VENDOR_REG,
+			       RT722_CLSD_CTRL2, 0x890a);
+	rt722_sdca_index_write(rt722, RT722_VENDOR_REG, 0x37, 0xfc15);
+	rt722_sdca_index_write(rt722, RT722_VENDOR_REG, 0x40, 0x8800);
+
+	/* 5. ACPI AF04 0x5d block */
+	rt722_sdca_index_write(rt722, 0x5d, 0x10000, 0x99ff);
+	rt722_sdca_index_write(rt722, 0x5d, 0x10002, 0x0000);
+	rt722_sdca_index_write(rt722, 0x5d, 0x10003, 0x0025);
+	rt722_sdca_index_write(rt722, 0x5d, 0x10004, 0x5f5f);
+
+	/* 6. ACPI AF04 0x2f03 register */
+	regmap_write(rt722->regmap, 0x2f03, 0x06);
+
+	/* 7. ACPI AF04 0x61 HDA/jack block */
+	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, 0x01, 0x0100);
+	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, 0x3d, 0x1041);
+	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, 0x20, 0x413e);
+	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, 0x39, 0x1041);
+	rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, 0x1b, 0x0600);
+
+	/* 8. Initial EAPD starts in standby (low); stream run raises it */
+	rt722_sdca_index_update_bits(rt722, RT722_VENDOR_REG,
+				     RT722_AMP_EAPD_CTL, 0x0360, 0x0260);
+}
+
 static void rt722_sdca_dmic_preset(struct rt722_sdca_priv *rt722)
 {
 	unsigned int mic_func_status;
@@ -1752,9 +1882,13 @@ static void rt722_sdca_amp_preset(struct rt722_sdca_priv *rt722)
 		/* W1C Trigger Calibration */
 		rt722_sdca_index_write(rt722, RT722_VENDOR_CALI, RT722_DC_CALIB_CTRL,
 			0xf02d);
-		/* Set DAC02/ClassD power entity floating control */
-		rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, RT722_AMP_PDE_FLOAT_CTL,
-			0x2323);
+		if (rt722_sdca_is_acer_sfp14_55()) {
+			rt722_sdca_acer_sfp14_55_preset(rt722);
+		} else {
+			/* Set DAC02/ClassD power entity floating control */
+			rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL,
+				RT722_AMP_PDE_FLOAT_CTL, 0x2323);
+		}
 		/* Set EAPD high */
 		rt722_sdca_index_write(rt722, RT722_VENDOR_HDA_CTL, RT722_EAPD_CTL,
 			0x0002);

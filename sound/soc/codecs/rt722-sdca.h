@@ -70,6 +70,7 @@ struct rt722_sdca_dmic_kctrl_priv {
 #define RT722_JD_CTRL1				0x09
 #define RT722_MISC_CTRL2			0x0d
 #define RT722_LDO2_3_CTL1			0x0e
+#define RT722_AMP_EAPD_CTL			0x10
 #define RT722_LDO1_CTL				0x1a
 #define RT722_HP_JD_CTRL			0x24
 #define RT722_CLSD_CTRL2			0x38
@@ -108,6 +109,7 @@ struct rt722_sdca_dmic_kctrl_priv {
 /* Index (NID:5fh) */
 #define RT722_MISC_POWER_CTL0			0x00
 #define RT722_MISC_POWER_CTL7			0x08
+#define RT722_AMP_POWER_CTL			0x0b
 
 /* Index (NID:61h) */
 #define RT722_HDA_LEGACY_MUX_CTL0		0x00
@@ -196,7 +198,7 @@ struct rt722_sdca_dmic_kctrl_priv {
 #define RT722_SDCA_ENT_USER_FU10		0x19
 #define RT722_SDCA_ENT_USER_FU1E		0x1e
 #define RT722_SDCA_ENT_FU15			0x15
-#define RT722_SDCA_ENT_PDE23			0x23
+#define RT722_SDCA_ENT_PDE23			0x41
 #define RT722_SDCA_ENT_PDE40			0x40
 #define RT722_SDCA_ENT_PDE11			0x11
 #define RT722_SDCA_ENT_PDE12			0x12
