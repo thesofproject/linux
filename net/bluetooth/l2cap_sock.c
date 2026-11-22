@@ -35,6 +35,7 @@
 #include <net/bluetooth/l2cap.h>
 
 #include "smp.h"
+#include "msft.h"
 
 static struct bt_sock_list l2cap_sk_list = {
 	.lock = __RW_LOCK_UNLOCKED(l2cap_sk_list.lock)
@@ -591,6 +592,12 @@ static int l2cap_sock_getsockopt(struct socket *sock, int level, int optname,
 	struct bt_security sec;
 	struct bt_power pwr;
 	int len, mode, err = 0;
+	int buf_len;
+	struct codec_list *c;
+	u8 num_codecs, i;
+	struct hci_dev *hdev;
+	struct hci_codec_caps *caps;
+	struct bt_codec codec;
 	u32 opt;
 	u16 mtu;
 	u8 mval;
@@ -743,6 +750,93 @@ static int l2cap_sock_getsockopt(struct socket *sock, int level, int optname,
 		if (copy_to_iter(&mval, sizeof(mval), &sopt->iter_out) !=
 		    sizeof(mval))
 			err = -EFAULT;
+		break;
+
+	case BT_CODEC:
+		num_codecs = 0;
+		buf_len = 0;
+
+		hdev = hci_get_route(&chan->dst, &chan->src, chan->src_type);
+		if (!hdev) {
+			err = -EBADFD;
+			break;
+		}
+
+		if (!hci_dev_test_flag(hdev, HCI_OFFLOAD_CODECS_ENABLED) ||
+		    !hdev->get_data_path_id) {
+			hci_dev_put(hdev);
+			err = -EOPNOTSUPP;
+			break;
+		}
+
+		release_sock(sk);
+		l2cap_chan_unlock(chan);
+
+		hci_dev_lock(hdev);
+		list_for_each_entry(c, &hdev->local_codecs, list) {
+			if (c->transport != HCI_TRANSPORT_ACL)
+				continue;
+			num_codecs++;
+			for (i = 0, caps = c->caps; i < c->num_caps; i++) {
+				buf_len += 1 + caps->len;
+				caps = (void *)&caps->data[caps->len];
+			}
+			buf_len += sizeof(struct bt_codec);
+		}
+		hci_dev_unlock(hdev);
+
+		buf_len += sizeof(struct bt_codecs);
+		if (buf_len > len) {
+			hci_dev_put(hdev);
+			return -ENOBUFS;
+		}
+
+		if (copy_to_iter(&num_codecs, sizeof(num_codecs),
+				 &sopt->iter_out) != sizeof(num_codecs)) {
+			hci_dev_put(hdev);
+			return -EFAULT;
+		}
+
+		hci_dev_lock(hdev);
+		list_for_each_entry(c, &hdev->local_codecs, list) {
+			if (c->transport != HCI_TRANSPORT_ACL)
+				continue;
+
+			codec.id = c->id;
+			codec.cid = c->cid;
+			codec.vid = c->vid;
+			err = hdev->get_data_path_id(hdev, &codec.data_path);
+			if (err < 0)
+				break;
+			codec.num_caps = c->num_caps;
+			if (copy_to_iter(&codec, sizeof(codec), &sopt->iter_out)
+			    != sizeof(codec)) {
+				err = -EFAULT;
+				break;
+			}
+
+			len = 0;
+			for (i = 0, caps = c->caps; i < c->num_caps; i++) {
+				len += 1 + caps->len;
+				caps = (void *)&caps->data[caps->len];
+			}
+
+			if (len &&
+			    copy_to_iter(c->caps, len, &sopt->iter_out) != len) {
+				err = -EFAULT;
+				break;
+			}
+		}
+
+		hci_dev_unlock(hdev);
+		hci_dev_put(hdev);
+
+		l2cap_chan_lock(chan);
+		lock_sock(sk);
+
+		if (!err)
+			sopt->optlen = buf_len;
+
 		break;
 
 	default:
@@ -935,6 +1029,9 @@ static int l2cap_sock_setsockopt(struct socket *sock, int level, int optname,
 	struct bt_security sec;
 	struct bt_power pwr;
 	struct l2cap_conn *conn;
+	struct bt_codecs *codecs;
+	struct hci_dev *hdev;
+	__u8 buffer[255];
 	int err = 0;
 	u32 opt, phys;
 	u16 mtu;
@@ -1158,6 +1255,82 @@ static int l2cap_sock_setsockopt(struct socket *sock, int level, int optname,
 
 		BT_DBG("mode 0x%2.2x", chan->mode);
 
+		break;
+
+	case BT_CODEC:
+		if (optlen < sizeof(struct bt_codecs) ||
+		    optlen > sizeof(buffer)) {
+			err = -EINVAL;
+			break;
+		}
+
+		err = copy_struct_from_sockptr(buffer, sizeof(buffer), optval,
+					       optlen);
+		if (err)
+			break;
+
+		codecs = (void *)buffer;
+
+		if (codecs->num_codecs != 1 ||
+		    optlen < struct_size(codecs, codecs, codecs->num_codecs)) {
+			err = -EINVAL;
+			break;
+		}
+
+		if (codecs->codecs[0].data_path) {
+			if (sk->sk_state != BT_CONNECTED ||
+			    !chan->conn || !chan->conn->hcon ||
+			    HCI_CONN_HANDLE_UNSET(chan->conn->hcon->handle) ||
+			    !chan->dcid) {
+				err = -ENOTCONN;
+				break;
+			}
+			if (chan->conn->hcon->type != ACL_LINK) {
+				err = -EINVAL;
+				break;
+			}
+			hdev = hci_dev_hold(chan->conn->hcon->hdev);
+		} else {
+			hdev = (chan->conn && chan->conn->hcon) ?
+			       hci_dev_hold(chan->conn->hcon->hdev) :
+			       hci_get_route(&chan->dst, &chan->src,
+					     chan->src_type);
+		}
+
+		if (!hdev) {
+			err = -EBADFD;
+			break;
+		}
+
+		if (!hci_dev_test_flag(hdev, HCI_OFFLOAD_CODECS_ENABLED) ||
+		    !hdev->get_data_path_id) {
+			hci_dev_put(hdev);
+			err = -EOPNOTSUPP;
+			break;
+		}
+
+		/* Check if the controller supports MSFT AVDTP hardware offload */
+		if (msft_avdtp_supported(hdev)) {
+			size_t caps_len = optlen -
+					  struct_size(codecs, codecs, 1);
+
+			l2cap_chan_hold(chan);
+			release_sock(sk);
+			l2cap_chan_unlock(chan);
+
+			mutex_lock(&chan->avdtp_lock);
+			err = msft_avdtp_open(hdev, chan, &codecs->codecs[0],
+					      caps_len);
+			mutex_unlock(&chan->avdtp_lock);
+
+			l2cap_chan_lock(chan);
+			lock_sock(sk);
+			l2cap_chan_put(chan);
+		} else {
+			err = hci_configure_datapath(hdev, ACL_LINK,
+						     &codecs->codecs[0]);
+		}
+		hci_dev_put(hdev);
 		break;
 
 	default:
@@ -1529,6 +1702,25 @@ static int l2cap_sock_release(struct socket *sock)
 
 	err = l2cap_sock_shutdown(sock, SHUT_RDWR);
 	chan = l2cap_pi(sk)->chan;
+
+	/* Check if an active MSFT AVDTP offload stream needs to be closed */
+	if (chan) {
+		l2cap_chan_hold(chan);
+		mutex_lock(&chan->avdtp_lock);
+		if (chan->avdtp_handle) {
+			struct hci_dev *hdev;
+
+			hdev = hci_get_route(&chan->dst, &chan->src,
+					     chan->src_type);
+			if (hdev) {
+				msft_avdtp_close(hdev, chan->avdtp_handle);
+				hci_dev_put(hdev);
+			}
+			chan->avdtp_handle = 0;
+		}
+		mutex_unlock(&chan->avdtp_lock);
+		l2cap_chan_put(chan);
+	}
 
 	l2cap_chan_hold(chan);
 	l2cap_chan_lock(chan);

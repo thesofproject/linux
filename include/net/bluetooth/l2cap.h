@@ -531,6 +531,8 @@ struct l2cap_chan {
 	__u8		mode;
 	__u8		chan_type;
 	__u8		chan_policy;
+	__u16		avdtp_handle;
+	struct mutex	avdtp_lock;
 
 	__u8		sec_level;
 

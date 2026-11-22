@@ -9,10 +9,17 @@
 #define MSFT_FEATURE_MASK_LE_ADV_MONITOR		BIT(3)
 #define MSFT_FEATURE_MASK_CURVE_VALIDITY		BIT(4)
 #define MSFT_FEATURE_MASK_CONCURRENT_ADV_MONITOR	BIT(5)
+#define MSFT_FEATURE_MASK_AVDTP				BIT(10)
+
+struct l2cap_chan;
 
 #if IS_ENABLED(CONFIG_BT_MSFTEXT)
 
 bool msft_monitor_supported(struct hci_dev *hdev);
+bool msft_avdtp_supported(struct hci_dev *hdev);
+int msft_avdtp_open(struct hci_dev *hdev, struct l2cap_chan *chan,
+		    struct bt_codec *codec, size_t caps_len);
+int msft_avdtp_close(struct hci_dev *hdev, __u16 avdtp_handle);
 void msft_register(struct hci_dev *hdev);
 void msft_release(struct hci_dev *hdev);
 void msft_do_open(struct hci_dev *hdev);
@@ -32,6 +39,23 @@ bool msft_curve_validity(struct hci_dev *hdev);
 static inline bool msft_monitor_supported(struct hci_dev *hdev)
 {
 	return false;
+}
+
+static inline bool msft_avdtp_supported(struct hci_dev *hdev)
+{
+	return false;
+}
+
+static inline int msft_avdtp_open(struct hci_dev *hdev,
+				  struct l2cap_chan *chan,
+				  struct bt_codec *codec, size_t caps_len)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int msft_avdtp_close(struct hci_dev *hdev, __u16 avdtp_handle)
+{
+	return -EOPNOTSUPP;
 }
 
 static inline void msft_register(struct hci_dev *hdev) {}

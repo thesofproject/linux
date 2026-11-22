@@ -1023,6 +1023,34 @@ struct hci_cp_enhanced_setup_sync_conn {
 	__u8     retrans_effort;
 } __packed;
 
+#define HCI_OP_ENHANCED_ACCEPT_SYNC_CONN	0x043e
+struct hci_cp_enhanced_accept_sync_conn {
+	bdaddr_t bdaddr;
+	__le32   tx_bandwidth;
+	__le32   rx_bandwidth;
+	struct   hci_coding_format tx_coding_format;
+	struct   hci_coding_format rx_coding_format;
+	__le16   tx_codec_frame_size;
+	__le16   rx_codec_frame_size;
+	__le32   in_bandwidth;
+	__le32   out_bandwidth;
+	struct   hci_coding_format in_coding_format;
+	struct   hci_coding_format out_coding_format;
+	__le16   in_coded_data_size;
+	__le16   out_coded_data_size;
+	__u8     in_pcm_data_format;
+	__u8     out_pcm_data_format;
+	__u8     in_pcm_sample_payload_msb_pos;
+	__u8     out_pcm_sample_payload_msb_pos;
+	__u8     in_data_path;
+	__u8     out_data_path;
+	__u8     in_transport_unit_size;
+	__u8     out_transport_unit_size;
+	__le16   max_latency;
+	__le16   pkt_type;
+	__u8     retrans_effort;
+} __packed;
+
 struct hci_rp_logical_link_cancel {
 	__u8     status;
 	__u8     phy_handle;
@@ -3484,7 +3512,10 @@ static inline __u16 hci_acl_dlen(const struct sk_buff *skb)
 #define hci_iso_data_flags(h)		((h) >> 14)
 
 /* codec transport types */
+#define HCI_TRANSPORT_ACL	0x00
 #define HCI_TRANSPORT_SCO_ESCO	0x01
+#define HCI_TRANSPORT_LE_CIS	0x02
+#define HCI_TRANSPORT_LE_BIS	0x03
 
 /* le24 support */
 static inline void hci_cpu_to_le24(__u32 val, __u8 dst[3])

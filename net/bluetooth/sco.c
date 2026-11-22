@@ -645,6 +645,8 @@ static void sco_sock_init(struct sock *sk, struct sock *parent)
 	if (parent) {
 		sk->sk_type = parent->sk_type;
 		bt_sk(sk)->flags = bt_sk(parent)->flags;
+		sco_pi(sk)->setting = sco_pi(parent)->setting;
+		sco_pi(sk)->codec = sco_pi(parent)->codec;
 		security_sk_clone(parent, sk);
 	}
 }
@@ -950,6 +952,8 @@ static void sco_conn_defer_accept(struct hci_conn *conn, u16 setting)
 		cp.role = 0x00; /* Ignored */
 
 		hci_send_cmd(hdev, HCI_OP_ACCEPT_CONN_REQ, sizeof(cp), &cp);
+	} else if (enhanced_sync_conn_capable(hdev) && conn->codec.data_path) {
+		hci_accept_sync(conn);
 	} else {
 		struct hci_cp_accept_sync_conn_req cp;
 
@@ -998,6 +1002,7 @@ static int sco_sock_recvmsg(struct socket *sock, struct msghdr *msg,
 
 	if (sk->sk_state == BT_CONNECT2 &&
 	    test_bit(BT_SK_DEFER_SETUP, &bt_sk(sk)->flags)) {
+		pi->conn->hcon->codec = pi->codec;
 		sco_conn_defer_accept(pi->conn->hcon, pi->setting);
 		sk->sk_state = BT_CONFIG;
 
@@ -1082,7 +1087,7 @@ static int sco_sock_setsockopt(struct socket *sock, int level, int optname,
 
 	case BT_CODEC:
 		if (sk->sk_state != BT_OPEN && sk->sk_state != BT_BOUND &&
-		    sk->sk_state != BT_CONNECT2) {
+		    sk->sk_state != BT_LISTEN && sk->sk_state != BT_CONNECT2) {
 			err = -EINVAL;
 			break;
 		}
@@ -1513,6 +1518,23 @@ release:
 }
 
 /* ----- SCO interface with lower layer (HCI) ----- */
+void sco_conn_set_codec(struct hci_dev *hdev, struct hci_conn *conn)
+{
+	struct sock *parent;
+
+	parent = sco_get_sock_listen(&hdev->bdaddr);
+	if (!parent)
+		return;
+
+	lock_sock(parent);
+	if (parent->sk_state == BT_LISTEN && !sock_flag(parent, SOCK_ZAPPED)) {
+		conn->codec = sco_pi(parent)->codec;
+		conn->setting = sco_pi(parent)->setting;
+	}
+	release_sock(parent);
+	sock_put(parent);
+}
+
 int sco_connect_ind(struct hci_dev *hdev, bdaddr_t *bdaddr, __u8 *flags)
 {
 	struct sock *sk;
