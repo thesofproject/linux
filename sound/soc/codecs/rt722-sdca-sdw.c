@@ -125,6 +125,7 @@ static int rt722_sdca_mbq_size(struct device *dev, unsigned int reg)
 	case 0x5b00003:
 	case 0x5c00011:
 	case 0x5d00006:
+	case 0x5d10000 ... 0x5d10004:
 	case 0x5f00000 ... 0x5f0000d:
 	case 0x5f00030:
 	case 0x6100000 ... 0x6100051:
