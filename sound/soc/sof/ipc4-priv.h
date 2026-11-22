@@ -172,6 +172,8 @@ int sof_ipc4_get_stream_start_offset(struct snd_sof_dev *sdev,
 				     struct snd_sof_pcm_stream *sps,
 				     struct sof_ipc4_timestamp_info *time_info);
 u64 sof_ipc4_frames_dai_to_host(struct sof_ipc4_timestamp_info *time_info, u64 value);
+int snd_sof_ipc4_load_library_from_buf(struct snd_sof_dev *sdev, u32 lib_id,
+				       const void *buf, size_t size);
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
 void sof_ipc4_compr_drain_done(struct snd_sof_dev *sdev, void *ipc_message);
