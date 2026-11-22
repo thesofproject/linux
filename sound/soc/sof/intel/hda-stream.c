@@ -127,6 +127,9 @@ int hda_dsp_stream_setup_bdl(struct snd_sof_dev *sdev,
 
 		chunk_size = snd_sgbuf_get_chunk_size(dmab, 0, hstream->bufsize);
 
+		dev_info(sdev->dev, "BDL setup: bufsize=%u chunk_size=%u dmab_bytes=%zu\n",
+			 hstream->bufsize, chunk_size, dmab->bytes);
+
 		period_bytes = hstream->bufsize;
 
 		/*

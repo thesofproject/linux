@@ -61,7 +61,7 @@ MODULE_PARM_DESC(boot_timeout,
 #endif
 
 /* SOF defaults if not provided by the platform in ms */
-#define TIMEOUT_DEFAULT_IPC_MS  500
+#define TIMEOUT_DEFAULT_IPC_MS  1500
 #define TIMEOUT_DEFAULT_BOOT_MS 2000
 
 /**
