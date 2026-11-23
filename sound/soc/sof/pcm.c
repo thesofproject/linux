@@ -66,6 +66,37 @@ void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL(snd_sof_pcm_period_elapsed);
 
+static int sof_pcm_set_dai_ignore_suspend(struct snd_soc_pcm_runtime *rtd, int dir)
+{
+	struct snd_soc_dai *dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_dapm_widget *widget = snd_soc_dai_get_widget(dai, dir);
+	struct snd_soc_dapm_widget_list *list;
+	int i, ret;
+
+	if (!widget)
+		return -ENODEV;
+
+	ret = snd_soc_dapm_dai_get_connected_widgets(dai, dir, &list, NULL);
+	if (ret < 0)
+		return ret;
+
+	ret = -ENODEV;
+	snd_soc_dapm_mutex_lock(rtd->card);
+	for (i = 0; i < list->num_widgets; i++) {
+		if (list->widgets[i]->is_ep & SND_SOC_DAPM_EP_SOURCE) {
+			list->widgets[i]->ignore_suspend = 1;
+			ret = 0;
+		}
+	}
+	if (!ret)
+		widget->ignore_suspend = 1;
+	snd_soc_dapm_mutex_unlock(rtd->card);
+
+	snd_soc_dapm_dai_free_widgets(&list);
+
+	return ret;
+}
+
 int
 sof_pcm_setup_connected_widgets(struct snd_sof_dev *sdev, struct snd_soc_pcm_runtime *rtd,
 				struct snd_sof_pcm *spcm, struct snd_pcm_hw_params *params,
@@ -216,6 +247,19 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	int err = 0;
 
 	if (spcm->prepared[substream->stream]) {
+		if (spcm->stream[dir].suspend_ignored && pcm_ops && pcm_ops->trigger) {
+			ret = pcm_ops->trigger(sdev->component, substream, spcm,
+					       SNDRV_PCM_TRIGGER_STOP, dir);
+			if (ret < 0) {
+				spcm_err(spcm, substream->stream,
+					 "retained stream stop failed %d\n", ret);
+				err = ret;
+			}
+			if (!pcm_ops->platform_stop_during_hw_free)
+				snd_sof_pcm_platform_trigger(sdev, substream,
+						     SNDRV_PCM_TRIGGER_STOP);
+		}
+
 		/* stop DMA first if needed */
 		if (pcm_ops && pcm_ops->platform_stop_during_hw_free)
 			snd_sof_pcm_platform_trigger(sdev, substream,
@@ -235,6 +279,8 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 		spcm->prepared[substream->stream] = false;
 		spcm->pending_stop[substream->stream] = false;
 	}
+
+	spcm->stream[dir].suspend_ignored = false;
 
 	/* reset the DMA */
 	ret = snd_sof_pcm_platform_hw_free(sdev, substream);
@@ -269,8 +315,7 @@ int sof_pcm_free_all_streams(struct snd_sof_dev *sdev)
 		for_each_pcm_streams(dir) {
 			substream = spcm->stream[dir].substream;
 
-			if (!substream || !substream->runtime ||
-			    spcm->stream[dir].suspend_ignored)
+			if (!substream || !substream->runtime)
 				continue;
 
 			if (spcm->stream[dir].list) {
@@ -283,6 +328,54 @@ int sof_pcm_free_all_streams(struct snd_sof_dev *sdev)
 	}
 
 	return 0;
+}
+
+/*
+ * The BEs of a suspended retained FE are in SUSPEND, or in PREPARE if the FE was prepared again
+ * without being started. Return true if all of them are in one of these states and no other FE
+ * is running or retaining them.
+ */
+static bool sof_pcm_fe_owns_retained_bes(struct snd_soc_pcm_runtime *fe, int stream)
+{
+	struct snd_soc_dpcm *dpcm, *fe_dpcm;
+	bool found = false;
+
+	for_each_dpcm_be(fe, stream, dpcm) {
+		struct snd_soc_pcm_runtime *be = dpcm->be;
+		int state = be->dpcm[stream].state;
+
+		if (state != SND_SOC_DPCM_STATE_SUSPEND && state != SND_SOC_DPCM_STATE_PREPARE)
+			return false;
+
+		for_each_dpcm_fe(be, stream, fe_dpcm) {
+			struct snd_soc_component *component;
+			struct snd_sof_pcm *spcm;
+
+			if (fe_dpcm->fe == fe)
+				continue;
+
+			component = snd_soc_rtdcom_lookup(fe_dpcm->fe, SOF_AUDIO_PCM_DRV_NAME);
+			if (component) {
+				spcm = snd_sof_find_spcm_dai(component, fe_dpcm->fe);
+				if (spcm && spcm->prepared[stream] &&
+				    spcm->stream[stream].suspend_ignored)
+					return false;
+			}
+
+			/* A prepared but never started peer does not use the running BE. */
+			switch (fe_dpcm->fe->dpcm[stream].state) {
+			case SND_SOC_DPCM_STATE_START:
+			case SND_SOC_DPCM_STATE_PAUSED:
+				return false;
+			default:
+				break;
+			}
+		}
+
+		found = true;
+	}
+
+	return found;
 }
 
 static int sof_pcm_hw_free(struct snd_soc_component *component,
@@ -302,6 +395,24 @@ static int sof_pcm_hw_free(struct snd_soc_component *component,
 		return -EINVAL;
 
 	spcm_dbg(spcm, substream->stream, "Entry: hw_free\n");
+
+	/*
+	 * ALSA sends no STOP for a suspended PCM, so the retained BEs are still running.
+	 * Bring them to START in the DPCM state machine (PREPARE -> START, SUSPEND -> START) to be
+	 * able to STOP them before the FE frees their pipelines. Leave the BEs alone if another
+	 * FE is using them. START must come first, RESUME would make START count twice.
+	 */
+	if (spcm->prepared[substream->stream] &&
+	    spcm->stream[substream->stream].suspend_ignored &&
+	    sof_pcm_fe_owns_retained_bes(rtd, substream->stream)) {
+		ret = dpcm_be_dai_trigger(rtd, substream->stream, SNDRV_PCM_TRIGGER_START);
+		if (!ret)
+			ret = dpcm_be_dai_trigger(rtd, substream->stream, SNDRV_PCM_TRIGGER_RESUME);
+		if (!ret)
+			ret = dpcm_be_dai_trigger(rtd, substream->stream, SNDRV_PCM_TRIGGER_STOP);
+		if (ret < 0)
+			spcm_err(spcm, substream->stream, "retained BE stop failed %d\n", ret);
+	}
 
 	ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
 
@@ -337,12 +448,12 @@ static int sof_pcm_prepare(struct snd_soc_component *component,
 	spcm_dbg(spcm, substream->stream, "Entry: prepare\n");
 
 	if (spcm->prepared[substream->stream]) {
+		/* a retained stream is still running, nothing to rebuild */
 		if (!spcm->pending_stop[substream->stream])
 			return 0;
 
 		/*
-		 * this case should be reached in case of xruns where we absolutely
-		 * want to free-up and reset all PCM/DMA resources
+		 * Reset PCM/DMA resources after an xrun.
 		 */
 		ret = sof_pcm_stream_free(sdev, substream, spcm, substream->stream, true);
 		if (ret < 0)
@@ -448,6 +559,11 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 		    substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
 		    spcm->stream[substream->stream].d0i3_compatible &&
 		    spcm->stream[substream->stream].dsp_max_burst_size_in_ms <= 1) {
+			ret = sof_pcm_set_dai_ignore_suspend(rtd, substream->stream);
+			if (ret < 0)
+				spcm_err(spcm, substream->stream,
+					 "failed to retain DAPM widgets for WoV: %d\n", ret);
+
 			spcm->stream[substream->stream].suspend_ignored = true;
 			return 0;
 		}
@@ -498,6 +614,10 @@ static int sof_pcm_trigger(struct snd_soc_component *component,
 	default:
 		break;
 	}
+
+	if (!ret && (cmd == SNDRV_PCM_TRIGGER_STOP ||
+		     cmd == SNDRV_PCM_TRIGGER_PAUSE_PUSH))
+		spcm->stream[substream->stream].suspend_ignored = false;
 
 	/* free PCM if reset_hw_params is set and the STOP IPC is successful */
 	if (!ret && reset_hw_params)
@@ -636,6 +756,7 @@ static int sof_pcm_close(struct snd_soc_component *component,
 		 */
 	}
 
+	spcm->stream[substream->stream].suspend_ignored = false;
 	spcm->stream[substream->stream].substream = NULL;
 
 	return 0;

@@ -36,6 +36,7 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <sound/soc-dpcm.h>
 #include <sound/initval.h>
 #include "soc-internal.h"
 
@@ -1415,18 +1416,62 @@ static int dapm_new_dai_link(struct snd_soc_dapm_widget *w)
  * the ALSA card - when we are suspending the ALSA state for the card
  * is set to D3.
  */
+static bool dapm_be_has_active_ignore_suspend_fe(struct snd_soc_dapm_widget *widget)
+{
+	struct snd_soc_pcm_runtime *be;
+	struct snd_soc_dpcm *dpcm;
+	struct snd_soc_dai *be_dai, *fe_dai;
+	struct snd_soc_dapm_widget *fe_widget;
+	int i, j, stream;
+
+	if (widget->id == snd_soc_dapm_dai_in)
+		stream = SNDRV_PCM_STREAM_PLAYBACK;
+	else if (widget->id == snd_soc_dapm_dai_out)
+		stream = SNDRV_PCM_STREAM_CAPTURE;
+	else
+		return false;
+
+	/* DPCM client links are stable while the card is in system suspend. */
+	for_each_card_rtds(widget->dapm->card, be) {
+		if (!be->dai_link->no_pcm)
+			continue;
+
+		for_each_rtd_dais(be, i, be_dai) {
+			if (snd_soc_dai_get_widget(be_dai, stream) != widget)
+				continue;
+
+			for_each_dpcm_fe(be, stream, dpcm) {
+				if (dpcm->state == SND_SOC_DPCM_LINK_STATE_FREE)
+					continue;
+
+				for_each_rtd_cpu_dais(dpcm->fe, j, fe_dai) {
+					fe_widget = snd_soc_dai_get_widget(fe_dai, stream);
+					if (fe_widget && fe_widget->active &&
+					    fe_widget->ignore_suspend)
+						return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
 static int dapm_suspend_check(struct snd_soc_dapm_widget *widget)
 {
 	struct device *dev = snd_soc_dapm_to_dev(widget->dapm);
 	int level = snd_power_get_state(widget->dapm->card->snd_card);
+	bool ignore_suspend;
 
 	switch (level) {
 	case SNDRV_CTL_POWER_D3hot:
 	case SNDRV_CTL_POWER_D3cold:
-		if (widget->ignore_suspend)
+		ignore_suspend = widget->ignore_suspend ||
+			dapm_be_has_active_ignore_suspend_fe(widget);
+		if (ignore_suspend)
 			dev_dbg(dev, "ASoC: %s ignoring suspend\n",
 				widget->name);
-		return widget->ignore_suspend;
+		return ignore_suspend;
 	default:
 		return 1;
 	}
