@@ -682,7 +682,9 @@ static int sof_pcm_new(struct snd_soc_component *component,
 		 caps->name, caps->buffer_size_min, caps->buffer_size_max);
 
 	snd_pcm_set_managed_buffer(pcm->streams[stream].substream,
-				   SNDRV_DMA_TYPE_DEV_SG, sdev->dev,
+				   sof_ops(sdev)->pcm_contiguous_buffer ?
+					SNDRV_DMA_TYPE_DEV : SNDRV_DMA_TYPE_DEV_SG,
+				   sdev->dev,
 				   0, le32_to_cpu(caps->buffer_size_max));
 
 	/* Set the PCM device name for HDMI playback */
@@ -721,7 +723,9 @@ capture:
 		 caps->name, caps->buffer_size_min, caps->buffer_size_max);
 
 	snd_pcm_set_managed_buffer(pcm->streams[stream].substream,
-				   SNDRV_DMA_TYPE_DEV_SG, sdev->dev,
+				   sof_ops(sdev)->pcm_contiguous_buffer ?
+					SNDRV_DMA_TYPE_DEV : SNDRV_DMA_TYPE_DEV_SG,
+				   sdev->dev,
 				   0, le32_to_cpu(caps->buffer_size_max));
 
 	return 0;

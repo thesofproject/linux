@@ -25,13 +25,14 @@ static int imx95_ops_init(struct snd_sof_dev *sdev)
 	sof_imx9_ops.drv = get_chip_info(sdev)->drv;
 	sof_imx9_ops.num_drv = get_chip_info(sdev)->num_drv;
 
-	return 0;
+	return imx_ipc4_init_data(sdev);
 }
 
 static int imx95_chip_probe(struct snd_sof_dev *sdev)
 {
 	struct platform_device *pdev;
 	struct resource *res;
+	int ret;
 
 	pdev = to_platform_device(sdev->dev);
 
@@ -40,8 +41,17 @@ static int imx95_chip_probe(struct snd_sof_dev *sdev)
 		return dev_err_probe(sdev->dev, -ENODEV,
 				     "failed to fetch SRAM region\n");
 
-	return scmi_imx_lmm_reset_vector_set(IMX95_M7_LM_ID, IMX95_M7_CPU_ID,
-					     0, res->start);
+	/* the reset vector can only be set on a stopped LM, fails if already off */
+	scmi_imx_lmm_operation(IMX95_M7_LM_ID, SCMI_IMX_LMM_SHUTDOWN,
+			       SCMI_IMX_LMM_OP_FORCEFUL);
+
+	ret = scmi_imx_lmm_reset_vector_set(IMX95_M7_LM_ID, IMX95_M7_CPU_ID,
+					    0, res->start);
+	if (ret)
+		return dev_err_probe(sdev->dev, ret,
+				     "failed to set M7 reset vector\n");
+
+	return 0;
 }
 
 static int imx95_core_kick(struct snd_sof_dev *sdev)
@@ -71,6 +81,11 @@ static const struct imx_chip_info imx95_chip_info = {
 	.ipc_info = {
 		.boot_mbox_offset = 0x6001000,
 		.window_offset = 0x6000000,
+		/* IPC4 window layout; unlike i.MX8MP the host -> DSP box is first */
+		.ipc4_inbox_offset = 0x6001000 + IMX_IPC4_HDR_SIZE,
+		.ipc4_outbox_offset = 0x6000000 + IMX_IPC4_HDR_SIZE,
+		.ipc4_debug_offset = 0x6003000,
+		.ipc4_fw_regs_offset = 0x6003800,
 	},
 	.has_dma_reserved = true,
 	.memory = imx95_memory_regions,
@@ -89,7 +104,7 @@ static struct snd_sof_of_mach sof_imx9_machs[] = {
 	}
 };
 
-IMX_SOF_DEV_DESC(imx95, sof_imx9_machs, &imx95_chip_info, &sof_imx9_ops, imx95_ops_init);
+IMX_SOF_DEV_DESC_IPC4(imx95, sof_imx9_machs, &imx95_chip_info, &sof_imx9_ops, imx95_ops_init);
 
 static const struct of_device_id sof_of_imx9_ids[] = {
 	{
