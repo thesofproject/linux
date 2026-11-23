@@ -725,7 +725,7 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dai_runtime *dai_runtime;
 	struct sdw_cdns_pdi *pdi;
-	struct sdw_stream_config sconfig;
+	struct sdw_stream_config sconfig = {0};
 	int ch, dir;
 	int ret;
 
@@ -963,6 +963,8 @@ static int intel_component_dais_suspend(struct snd_soc_component *component)
 }
 
 static const struct snd_soc_dai_ops intel_pcm_dai_ops = {
+	.probe = intel_dai_probe,
+	.remove = intel_dai_remove,
 	.hw_params = intel_hw_params,
 	.prepare = intel_prepare,
 	.hw_free = intel_hw_free,

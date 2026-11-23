@@ -249,6 +249,7 @@ enum {
 	RT712_AIF1,
 	RT712_AIF2,
 	RT712_AIF3,
+	RT712_AIF4,
 };
 
 enum rt712_sdca_jd_src {

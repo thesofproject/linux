@@ -53,7 +53,7 @@ static int intel_ace2x_bpt_open_stream(struct sdw_intel *sdw, struct sdw_slave *
 	struct sdw_bus *bus = &cdns->bus;
 	struct sdw_master_prop *prop = &bus->prop;
 	struct sdw_stream_runtime *stream;
-	struct sdw_stream_config sconfig;
+	struct sdw_stream_config sconfig = {0};
 	struct sdw_port_config *pconfig;
 	unsigned int pdi0_buf_size_pre_frame;
 	unsigned int pdi1_buf_size_pre_frame;
@@ -724,7 +724,7 @@ static int intel_hw_params(struct snd_pcm_substream *substream,
 	struct sdw_intel *sdw = cdns_to_intel(cdns);
 	struct sdw_cdns_dai_runtime *dai_runtime;
 	struct sdw_cdns_pdi *pdi;
-	struct sdw_stream_config sconfig;
+	struct sdw_stream_config sconfig = {0};
 	int ch, dir;
 	int ret;
 
@@ -928,6 +928,8 @@ static int intel_trigger(struct snd_pcm_substream *substream, int cmd, struct sn
 }
 
 static const struct snd_soc_dai_ops intel_pcm_dai_ops = {
+	.probe = intel_dai_probe,
+	.remove = intel_dai_remove,
 	.hw_params = intel_hw_params,
 	.prepare = intel_prepare,
 	.hw_free = intel_hw_free,

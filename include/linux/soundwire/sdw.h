@@ -761,6 +761,17 @@ struct sdw_port_params {
 };
 
 /**
+ * enum sdw_transport_type: Data Port transport type
+ *
+ * @SDW_TRANSPORT_MANAGER_PERIPHERAL: Data is exchanged between the Manager and a Peripheral
+ * @SDW_TRANSPORT_PERIPHERAL_PERIPHERAL: Data is exchanged between Peripherals
+ */
+enum sdw_transport_type {
+	SDW_TRANSPORT_MANAGER_PERIPHERAL = 0,
+	SDW_TRANSPORT_PERIPHERAL_PERIPHERAL = 1,
+};
+
+/**
  * struct sdw_transport_params: Data Port Transport Parameters
  *
  * @blk_grp_ctrl_valid: Port implements block group control
@@ -873,6 +884,9 @@ struct sdw_bpt_msg;
  * Bits 31:24 are reserved.
  * @get_device_num: Callback for vendor-specific device_number allocation
  * @put_device_num: Callback for vendor-specific device_number release
+ * @get_port: Reserve an available manager data port, or return a negative error.
+ * Called with bus_lock held.
+ * @put_port: Release a port reserved by get_port, with bus_lock held.
  * @new_peripheral_assigned: Callback to handle enumeration of new peripheral.
  * @bpt_send_async: reserve resources for BPT stream and send message
  * using BTP protocol
@@ -891,6 +905,8 @@ struct sdw_master_ops {
 	u32 (*read_ping_status)(struct sdw_bus *bus);
 	int (*get_device_num)(struct sdw_bus *bus, struct sdw_slave *slave);
 	void (*put_device_num)(struct sdw_bus *bus, struct sdw_slave *slave);
+	int (*get_port)(struct sdw_bus *bus);
+	void (*put_port)(struct sdw_bus *bus, unsigned int port);
 	void (*new_peripheral_assigned)(struct sdw_bus *bus,
 					struct sdw_slave *slave,
 					int dev_num);
@@ -924,6 +940,7 @@ struct sdw_port_config {
  * @bps: Number of bits per audio sample
  * @direction: Data direction
  * @type: Stream type PCM, PDM or BPT
+ * @transport_type: Manager-Peripheral (default) or Peripheral-Peripheral transport
  */
 struct sdw_stream_config {
 	unsigned int frame_rate;
@@ -931,6 +948,7 @@ struct sdw_stream_config {
 	unsigned int bps;
 	enum sdw_data_direction direction;
 	enum sdw_stream_type type;
+	enum sdw_transport_type transport_type;
 };
 
 /**
@@ -974,6 +992,7 @@ struct sdw_stream_params {
  * @params: Stream parameters
  * @state: Current state of the stream
  * @type: Stream type PCM, PDM or BPT
+ * @transport_type: Manager-Peripheral or Peripheral-Peripheral transport
  * @m_rt_count: Count of Master runtime(s) in this stream
  * @master_list: List of Master runtime(s) in this stream.
  * master_list can contain only one m_rt per Master instance
@@ -984,6 +1003,7 @@ struct sdw_stream_runtime {
 	struct sdw_stream_params params;
 	enum sdw_stream_state state;
 	enum sdw_stream_type type;
+	enum sdw_transport_type transport_type;
 	int m_rt_count;
 	struct list_head master_list;
 };

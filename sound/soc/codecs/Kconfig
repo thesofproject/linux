@@ -1855,6 +1855,7 @@ config SND_SOC_RT1320_SDW
 	depends on SOUNDWIRE
 	select REGMAP_SOUNDWIRE
 	select REGMAP_SOUNDWIRE_MBQ
+	select SND_SOC_SDW_UTILS
 
 config SND_SOC_RT5514
 	tristate
