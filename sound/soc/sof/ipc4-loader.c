@@ -88,8 +88,8 @@ static ssize_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev,
 		sdev->fw_version.build = fw_header->build_version;
 	}
 
-	fw_lib->modules = devm_kmalloc_array(sdev->dev, fw_header->num_module_entries,
-					     sizeof(*fw_module), GFP_KERNEL);
+	fw_lib->modules = devm_kmalloc_objs(sdev->dev, *fw_module,
+					    fw_header->num_module_entries);
 	if (!fw_lib->modules)
 		return -ENOMEM;
 
@@ -150,9 +150,9 @@ static size_t sof_ipc4_fw_parse_basefw_ext_man(struct snd_sof_dev *sdev)
 	int ret;
 
 	if (sdev->dsp_test_mode_enabled)
-		fw_lib = devm_kzalloc(sdev->dev, sizeof(*fw_lib), GFP_KERNEL);
+		fw_lib = devm_kzalloc_obj(sdev->dev, *fw_lib);
 	else
-		fw_lib = devm_kzalloc(sdev->dev, sizeof(*fw_lib), GFP_KERNEL);
+		fw_lib = devm_kzalloc_obj(sdev->dev, *fw_lib);
 	if (!fw_lib)
 		return -ENOMEM;
 
@@ -191,7 +191,7 @@ static int sof_ipc4_load_library(struct snd_sof_dev *sdev, unsigned long lib_id,
 		return -EOPNOTSUPP;
 	}
 
-	fw_lib = devm_kzalloc(sdev->dev, sizeof(*fw_lib), GFP_KERNEL);
+	fw_lib = devm_kzalloc_obj(sdev->dev, *fw_lib);
 	if (!fw_lib)
 		return -ENOMEM;
 

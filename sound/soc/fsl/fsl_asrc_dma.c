@@ -261,7 +261,7 @@ static int fsl_asrc_dma_hw_params(struct snd_soc_component *component,
 		pair->dma_data.priority = tmp_data->priority;
 		dma_release_channel(tmp_chan);
 
-		of_dma_node = pair->dma_chan[!dir]->device->dev->of_node;
+		of_dma_node = dmaengine_get_provider_device(pair->dma_chan[!dir])->of_node;
 		pair->dma_chan[dir] =
 			__dma_request_channel(&mask, filter, &pair->dma_data,
 					      of_dma_node);
@@ -526,7 +526,7 @@ static int fsl_asrc_dma_pcm_new(struct snd_soc_component *component,
 
 	ret = snd_pcm_set_fixed_buffer_all(pcm,
 					   SNDRV_DMA_TYPE_DEV,
-					   chan->device->dev,
+					   dmaengine_get_dma_device(chan),
 					   FSL_ASRC_DMABUF_SIZE);
 
 	dma_release_channel(chan);

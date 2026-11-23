@@ -1410,7 +1410,7 @@ static int fsl_sai_check_version(struct device *dev)
 	return 0;
 }
 
-static int fsl_sai_reset_hw(struct device *dev)
+static void fsl_sai_reset_hw(struct device *dev)
 {
 	struct fsl_sai *sai = dev_get_drvdata(dev);
 	unsigned char ofs = sai->soc_data->reg_offset;
@@ -1421,18 +1421,12 @@ static int fsl_sai_reset_hw(struct device *dev)
 	 * Bootloader may leave SAI running causing interrupt storm.
 	 */
 	ret = regmap_write(sai->regmap, FSL_SAI_TCSR(ofs), 0);
-	if (ret) {
+	if (ret)
 		dev_err(dev, "Failed to clear TCSR: %d\n", ret);
-		return ret;
-	}
 
 	ret = regmap_write(sai->regmap, FSL_SAI_RCSR(ofs), 0);
-	if (ret) {
+	if (ret)
 		dev_err(dev, "Failed to clear RCSR: %d\n", ret);
-		return ret;
-	}
-
-	return 0;
 }
 
 /*
@@ -1485,7 +1479,7 @@ static int fsl_sai_read_dlcfg(struct fsl_sai *sai)
 
 	num_cfg = elems / 3;
 	/*  Add one more for default value */
-	cfg = devm_kcalloc(&pdev->dev, num_cfg + 1, sizeof(*cfg), GFP_KERNEL);
+	cfg = devm_kzalloc_objs(&pdev->dev, *cfg, num_cfg + 1);
 	if (!cfg)
 		return -ENOMEM;
 
@@ -1561,7 +1555,7 @@ static int fsl_sai_probe(struct platform_device *pdev)
 	u32 dmas[4];
 	u32 val;
 
-	sai = devm_kzalloc(dev, sizeof(*sai), GFP_KERNEL);
+	sai = devm_kzalloc_obj(dev, *sai);
 	if (!sai)
 		return -ENOMEM;
 
@@ -1627,8 +1621,10 @@ static int fsl_sai_probe(struct platform_device *pdev)
 
 	/* read dataline mask for rx and tx*/
 	ret = fsl_sai_read_dlcfg(sai);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(dev, "failed to read dlcfg %d\n", ret);
 		return ret;
+	}
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
