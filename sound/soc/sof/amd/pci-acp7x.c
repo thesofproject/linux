@@ -67,6 +67,7 @@ static const struct sof_dev_desc acp7b_desc = {
 	.nocodec_tplg_filename	= "sof-acp.tplg",
 	.ops			= &sof_acp7x_ops,
 	.ops_init		= sof_acp7x_ops_init,
+	.use_acpi_target_states = true,
 };
 
 static const struct sof_amd_acp_desc acp7f_chip_info = {
@@ -110,6 +111,7 @@ static const struct sof_dev_desc acp7f_desc = {
 	.nocodec_tplg_filename	= "sof-acp.tplg",
 	.ops			= &sof_acp7x_ops,
 	.ops_init		= sof_acp7x_ops_init,
+	.use_acpi_target_states = true,
 };
 
 static const struct pci_device_id acp7b_pci_id = {
