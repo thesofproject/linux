@@ -9,6 +9,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
+#include <linux/string.h>
 #include <sound/soc.h>
 #include <sound/soc-acpi.h>
 #include "sof-function-topology-lib.h"
@@ -37,6 +38,12 @@ static int get_platform_name(struct snd_soc_card *card,
 			     const struct snd_soc_acpi_mach *mach, char *platform)
 {
 	int ret;
+
+	if (mach->mach_params.tplg_platform) {
+		strscpy(platform, mach->mach_params.tplg_platform,
+			SOF_INTEL_PLATFORM_NAME_MAX);
+		return 0;
+	}
 
 	ret = sscanf(mach->sof_tplg_filename, "sof-%3s-*.tplg", platform);
 	if (ret != 1) {

@@ -1047,6 +1047,7 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 	struct snd_soc_acpi_mach_params *mach_params;
 	struct snd_soc_acpi_mach *hda_mach;
 	struct snd_sof_pdata *pdata = sdev->pdata;
+	const struct sof_intel_dsp_desc *chip = get_chip_info(pdata);
 	const char *tplg_filename;
 	int codec_num = 0;
 	int i;
@@ -1091,6 +1092,14 @@ static void hda_generic_machine_select(struct snd_sof_dev *sdev,
 
 			dev_info(bus->dev, "using HDA machine driver %s now\n",
 				 hda_mach->drv_name);
+
+			/*
+			 * The platform name is needed to form the function topology
+			 * file names, but sof_tplg_filename of the match table is
+			 * platform independent and is kept for the monolithic
+			 * topology fallback.
+			 */
+			hda_mach->mach_params.tplg_platform = chip->platform;
 
 			/*
 			 * topology: use the info from hda_machines since tplg file name
