@@ -942,6 +942,7 @@ static int sof_ipc4_init(struct snd_sof_dev *sdev)
 	int inbox_offset;
 
 	mutex_init(&ipc4_data->pipeline_state_mutex);
+	mutex_init(&ipc4_data->codec_info_mutex);
 
 	xa_init_flags(&ipc4_data->fw_lib_xa, XA_FLAGS_ALLOC);
 
@@ -992,6 +993,11 @@ static void sof_ipc4_exit(struct snd_sof_dev *sdev)
 	}
 
 	xa_destroy(&ipc4_data->fw_lib_xa);
+
+	mutex_lock(&ipc4_data->codec_info_mutex);
+	kfree(ipc4_data->codec_info);
+	ipc4_data->codec_info = NULL;
+	mutex_unlock(&ipc4_data->codec_info_mutex);
 }
 
 static int sof_ipc4_post_boot(struct snd_sof_dev *sdev)

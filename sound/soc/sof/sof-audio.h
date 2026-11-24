@@ -294,9 +294,28 @@ enum sof_tokens {
 	SOF_ACPI2S_TOKENS,
 	SOF_MICFIL_TOKENS,
 	SOF_ACP_SDW_TOKENS,
+	SOF_MEDIA_CODEC_TOKENS,
 
 	/* this should be the last */
 	SOF_TOKEN_COUNT,
+};
+
+/**
+ * struct sof_media_codec_fmt - Media decoder format-to-module-UUID mapping
+ * @codec_id: Compressed codec ID (SND_AUDIOCODEC_*)
+ * @min_rate: Minimum supported sample rate in Hz
+ * @max_rate: Maximum supported sample rate in Hz
+ * @channels: Supported channel count (0 matches any)
+ * @bit_depth: Supported bit depth (0 matches any)
+ * @module_uuid: Candidate firmware module UUID supporting this format
+ */
+struct sof_media_codec_fmt {
+	u32 codec_id;
+	u32 min_rate;
+	u32 max_rate;
+	u32 channels;
+	u32 bit_depth;
+	guid_t module_uuid;
 };
 
 /**
@@ -479,6 +498,9 @@ struct snd_sof_widget {
 
 	int num_tuples;
 	struct snd_sof_tuple *tuples;
+
+	int num_media_formats;
+	struct sof_media_codec_fmt *media_formats;
 
 	/*
 	 * The allowed range for num_input/output_pins is [0, SOF_WIDGET_MAX_NUM_PINS].

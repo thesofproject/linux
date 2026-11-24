@@ -194,6 +194,21 @@ static const struct sof_topology_token asrc_tokens[] = {
 		offsetof(struct sof_ipc4_asrc_data, asrc_mode)},
 };
 
+static const struct sof_topology_token media_codec_tokens[] = {
+	{SOF_TKN_MEDIA_CODEC_ID, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_media_codec_fmt, codec_id)},
+	{SOF_TKN_MEDIA_CODEC_MIN_RATE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_media_codec_fmt, min_rate)},
+	{SOF_TKN_MEDIA_CODEC_MAX_RATE, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_media_codec_fmt, max_rate)},
+	{SOF_TKN_MEDIA_CODEC_CHANNELS, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_media_codec_fmt, channels)},
+	{SOF_TKN_MEDIA_CODEC_BIT_DEPTH, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_u32,
+		offsetof(struct sof_media_codec_fmt, bit_depth)},
+	{SOF_TKN_MEDIA_CODEC_MODULE_UUID, SND_SOC_TPLG_TUPLE_TYPE_UUID, get_token_uuid,
+		offsetof(struct sof_media_codec_fmt, module_uuid)},
+};
+
 static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_DAI_TOKENS] = {"DAI tokens", dai_tokens, ARRAY_SIZE(dai_tokens)},
 	[SOF_PIPELINE_TOKENS] = {"Pipeline tokens", pipeline_tokens, ARRAY_SIZE(pipeline_tokens)},
@@ -216,6 +231,8 @@ static const struct sof_token_info ipc4_token_list[SOF_TOKEN_COUNT] = {
 	[SOF_GAIN_TOKENS] = {"Gain tokens", gain_tokens, ARRAY_SIZE(gain_tokens)},
 	[SOF_SRC_TOKENS] = {"SRC tokens", src_tokens, ARRAY_SIZE(src_tokens)},
 	[SOF_ASRC_TOKENS] = {"ASRC tokens", asrc_tokens, ARRAY_SIZE(asrc_tokens)},
+	[SOF_MEDIA_CODEC_TOKENS] = {"IPC4 Media codec tokens", media_codec_tokens,
+		ARRAY_SIZE(media_codec_tokens)},
 };
 
 struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_sof_dev *sdev,
@@ -227,7 +244,7 @@ struct snd_sof_widget *sof_ipc4_find_swidget_by_ids(struct snd_sof_dev *sdev,
 		struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 
 		/* Only active module instances have valid instance_id */
-		if (!swidget->use_count)
+		if (!swidget->use_count || !fw_module)
 			continue;
 
 		if (fw_module && fw_module->man4_module_entry.id == module_id &&
@@ -562,9 +579,20 @@ static int sof_ipc4_widget_set_module_info(struct snd_sof_widget *swidget)
 	struct snd_soc_component *scomp = swidget->scomp;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 
-	swidget->module_info = sof_ipc4_find_module_by_uuid(sdev, &swidget->uuid);
+	if (swidget->id == snd_soc_dapm_decoder && swidget->num_media_formats)
+		swidget->module_info = sof_ipc4_find_loaded_module_by_uuid(sdev, &swidget->uuid);
+	else
+		swidget->module_info = sof_ipc4_find_module_by_uuid(sdev, &swidget->uuid);
 
 	if (swidget->module_info)
+		return 0;
+
+	/*
+	 * Media decoder container widgets carry candidate codec UUIDs in
+	 * media_formats[] and may resolve and load their module on stream
+	 * configuration if the default UUID is not resident at topology load.
+	 */
+	if (swidget->id == snd_soc_dapm_decoder && swidget->num_media_formats)
 		return 0;
 
 	dev_err(sdev->dev, "failed to find module info for widget %s with UUID %pUL\n",
@@ -572,17 +600,11 @@ static int sof_ipc4_widget_set_module_info(struct snd_sof_widget *swidget)
 	return -EINVAL;
 }
 
-static int sof_ipc4_widget_setup_msg(struct snd_sof_widget *swidget, struct sof_ipc4_msg *msg)
+static void sof_ipc4_widget_init_msg_header(struct snd_sof_widget *swidget,
+					    struct sof_ipc4_fw_module *fw_module,
+					    struct sof_ipc4_msg *msg)
 {
-	struct sof_ipc4_fw_module *fw_module;
-	uint32_t type;
-	int ret;
-
-	ret = sof_ipc4_widget_set_module_info(swidget);
-	if (ret)
-		return ret;
-
-	fw_module = swidget->module_info;
+	u32 type;
 
 	msg->primary = fw_module->man4_module_entry.id;
 	msg->primary |= SOF_IPC4_MSG_TYPE_SET(SOF_IPC4_MOD_INIT_INSTANCE);
@@ -603,6 +625,22 @@ static int sof_ipc4_widget_setup_msg(struct snd_sof_widget *swidget, struct sof_
 		break;
 	}
 	msg->extension |= SOF_IPC4_MOD_EXT_DOMAIN(type);
+}
+
+static int sof_ipc4_widget_setup_msg(struct snd_sof_widget *swidget, struct sof_ipc4_msg *msg)
+{
+	struct sof_ipc4_fw_module *fw_module;
+	int ret;
+
+	ret = sof_ipc4_widget_set_module_info(swidget);
+	if (ret)
+		return ret;
+
+	fw_module = swidget->module_info;
+	if (!fw_module)
+		return 0;
+
+	sof_ipc4_widget_init_msg_header(swidget, fw_module, msg);
 
 	return 0;
 }
@@ -614,12 +652,16 @@ static void sof_ipc4_widget_update_kcontrol_module_id(struct snd_sof_widget *swi
 	struct sof_ipc4_fw_module *fw_module = swidget->module_info;
 	struct snd_sof_control *scontrol;
 
+	if (!fw_module)
+		return;
+
 	/* update module ID for all kcontrols for this widget */
 	list_for_each_entry(scontrol, &sdev->kcontrol_list, list) {
 		if (scontrol->comp_id == swidget->comp_id) {
 			struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 			struct sof_ipc4_msg *msg = &cdata->msg;
 
+			msg->primary &= ~SOF_IPC4_MOD_ID_MASK;
 			msg->primary |= fw_module->man4_module_entry.id;
 		}
 	}
@@ -1294,16 +1336,71 @@ static void sof_ipc4_widget_free_comp_mixer(struct snd_sof_widget *swidget)
 	swidget->private = NULL;
 }
 
+int sof_ipc4_process_bind_module(struct snd_sof_dev *sdev,
+				 struct snd_sof_widget *swidget,
+				 struct sof_ipc4_fw_module *fw_module)
+{
+	struct sof_ipc4_process *process = swidget->private;
+	struct sof_ipc4_base_module_cfg_ext *base_cfg_ext = NULL;
+	u32 base_cfg_ext_size = 0;
+	u32 ipc_config_size;
+	u32 init_config;
+	void *cfg;
+
+	if (!process || !fw_module)
+		return -EINVAL;
+
+	if (swidget->module_info == fw_module && process->ipc_config_data)
+		return 0;
+
+	init_config = FIELD_GET(SOF_IPC4_MODULE_INIT_CONFIG_MASK,
+				fw_module->man4_module_entry.type);
+	ipc_config_size = sizeof(struct sof_ipc4_base_module_cfg);
+
+	if (init_config == SOF_IPC4_MODULE_INIT_CONFIG_TYPE_BASE_CFG_WITH_EXT) {
+		base_cfg_ext_size = struct_size(base_cfg_ext, pin_formats,
+						size_add(swidget->num_input_pins,
+							 swidget->num_output_pins));
+		base_cfg_ext = kzalloc(base_cfg_ext_size, GFP_KERNEL);
+		if (!base_cfg_ext)
+			return -ENOMEM;
+
+		base_cfg_ext->num_input_pin_fmts = swidget->num_input_pins;
+		base_cfg_ext->num_output_pin_fmts = swidget->num_output_pins;
+		ipc_config_size += base_cfg_ext_size;
+	}
+
+	cfg = kzalloc(ipc_config_size, GFP_KERNEL);
+	if (!cfg) {
+		kfree(base_cfg_ext);
+		return -ENOMEM;
+	}
+
+	kfree(process->ipc_config_data);
+	kfree(process->base_config_ext);
+
+	swidget->module_info = fw_module;
+	process->init_config = init_config;
+	process->base_config_ext = base_cfg_ext;
+	process->base_config_ext_size = base_cfg_ext_size;
+	process->ipc_config_data = cfg;
+	process->ipc_config_size = ipc_config_size;
+
+	sof_ipc4_widget_init_msg_header(swidget, fw_module, &process->msg);
+	sof_ipc4_widget_update_kcontrol_module_id(swidget);
+
+	return 0;
+}
+
 /*
  * Add the process modules support. The process modules are defined as snd_soc_dapm_effect modules.
  */
 static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 {
 	struct snd_soc_component *scomp = swidget->scomp;
-	struct sof_ipc4_fw_module *fw_module;
+	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
 	struct snd_sof_pipeline *spipe = swidget->spipe;
 	struct sof_ipc4_process *process;
-	void *cfg;
 	int ret;
 
 	process = kzalloc_obj(*process);
@@ -1319,52 +1416,18 @@ static int sof_ipc4_widget_setup_comp_process(struct snd_sof_widget *swidget)
 
 	ret = sof_ipc4_widget_setup_msg(swidget, &process->msg);
 	if (ret)
-		goto err;
+		goto free_available_fmt;
 
-	/* parse process init module payload config type from module info */
-	fw_module = swidget->module_info;
-	process->init_config = FIELD_GET(SOF_IPC4_MODULE_INIT_CONFIG_MASK,
-					 fw_module->man4_module_entry.type);
-
-	process->ipc_config_size = sizeof(struct sof_ipc4_base_module_cfg);
-
-	/* allocate memory for base config extension if needed */
-	if (process->init_config == SOF_IPC4_MODULE_INIT_CONFIG_TYPE_BASE_CFG_WITH_EXT) {
-		struct sof_ipc4_base_module_cfg_ext *base_cfg_ext;
-		u32 ext_size = struct_size(base_cfg_ext, pin_formats,
-					   size_add(swidget->num_input_pins,
-						    swidget->num_output_pins));
-
-		base_cfg_ext = kzalloc(ext_size, GFP_KERNEL);
-		if (!base_cfg_ext) {
-			ret = -ENOMEM;
+	if (swidget->module_info) {
+		ret = sof_ipc4_process_bind_module(sdev, swidget, swidget->module_info);
+		if (ret)
 			goto free_available_fmt;
-		}
-
-		base_cfg_ext->num_input_pin_fmts = swidget->num_input_pins;
-		base_cfg_ext->num_output_pin_fmts = swidget->num_output_pins;
-		process->base_config_ext = base_cfg_ext;
-		process->base_config_ext_size = ext_size;
-		process->ipc_config_size += ext_size;
 	}
-
-	cfg = kzalloc(process->ipc_config_size, GFP_KERNEL);
-	if (!cfg) {
-		ret = -ENOMEM;
-		goto free_base_cfg_ext;
-	}
-
-	process->ipc_config_data = cfg;
-
-	sof_ipc4_widget_update_kcontrol_module_id(swidget);
 
 	/* set pipeline core mask to keep track of the core the module is scheduled to run on */
 	spipe->core_mask |= BIT(swidget->core);
 
 	return 0;
-free_base_cfg_ext:
-	kfree(process->base_config_ext);
-	process->base_config_ext = NULL;
 free_available_fmt:
 	sof_ipc4_free_audio_fmt(&process->available_fmt);
 err:
@@ -1396,6 +1459,14 @@ sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	struct sof_ipc4_pipeline *pipeline;
 	int task_mem, queue_mem;
 	int ibs, bss, total;
+
+	if (!fw_module) {
+		if (sof_ipc4_widget_set_module_info(swidget))
+			return;
+		fw_module = swidget->module_info;
+		if (!fw_module)
+			return;
+	}
 
 	ibs = base_config->ibs;
 	bss = base_config->is_pages;
@@ -2987,6 +3058,25 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	int input_fmt_index = 0;
 	int ret;
 
+	if (!swidget->module_info) {
+		ret = sof_ipc4_widget_set_module_info(swidget);
+		if (ret)
+			return ret;
+		if (swidget->module_info) {
+			ret = sof_ipc4_process_bind_module(sdev, swidget,
+							   swidget->module_info);
+			if (ret)
+				return ret;
+			cfg = process->ipc_config_data;
+		}
+	}
+
+	if (!swidget->module_info || !cfg) {
+		dev_err(sdev->dev, "module %s is not bound to a firmware module\n",
+			swidget->widget->name);
+		return -ENODEV;
+	}
+
 	if (available_fmt->num_input_formats) {
 		if (swidget->prepared) {
 			if (!available_fmt->num_output_formats)
@@ -3767,7 +3857,7 @@ static int sof_ipc4_widget_free(struct snd_sof_dev *sdev, struct snd_sof_widget 
 		struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
 		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
 
-		if (!pipeline->use_chain_dma)
+		if (!pipeline->use_chain_dma && fw_module)
 			ida_free(&fw_module->m_ida, swidget->instance_id);
 	}
 
@@ -4364,6 +4454,7 @@ static enum sof_tokens process_token_list[] = {
 	SOF_AUDIO_FMT_NUM_TOKENS,
 	SOF_IN_AUDIO_FORMAT_TOKENS,
 	SOF_OUT_AUDIO_FORMAT_TOKENS,
+	SOF_MEDIA_CODEC_TOKENS,
 	SOF_COMP_EXT_TOKENS,
 };
 
