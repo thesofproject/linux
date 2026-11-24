@@ -92,6 +92,25 @@ sideband_to_vdev(struct xhci_sideband *sb)
 }
 
 /*
+ * Return the current virt ep of sb->udev at ep_index,
+ * or NULL if vdev was freed or reallocated
+ */
+static struct xhci_virt_ep *
+sideband_to_ep(struct xhci_sideband *sb, unsigned int ep_index)
+{
+	struct xhci_virt_device *vdev;
+
+	lockdep_assert_held(&sb->mutex);
+	lockdep_assert_held(&sb->xhci->lock);
+
+	vdev = sideband_to_vdev(sb);
+	if (!vdev)
+		return NULL;
+
+	return &vdev->eps[ep_index];
+}
+
+/*
  * Synchronous xHCI stop endpoint helper. Issues a stop endpoint command and
  * waits for the command completion before returning. This does not call
  * xhci_handle_cmd_stop_ep(), which has additional handling for 'context error'
@@ -220,21 +239,17 @@ int
 xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 			   struct usb_host_endpoint *host_ep)
 {
-	struct xhci_virt_device *vdev;
 	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
+	unsigned long flags;
+	int ret = 0;
 
 	guard(mutex)(&sb->mutex);
 
-	vdev = sideband_to_vdev(sb);
-	if (!vdev)
-		return -ENODEV;
-
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
-	ep = &vdev->eps[ep_index];
 
-	if (ep->ep_state & EP_HAS_STREAMS)
-		return -EINVAL;
+	if (sb->eps[ep_index])
+		return -EBUSY;
 
 	/*
 	 * Note, we don't know the DMA mask of the audio DSP device, if its
@@ -244,13 +259,24 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 	 * and let this function add the endpoint and allocate the ring buffer
 	 * with the smallest common DMA mask
 	 */
-	if (sb->eps[ep_index] || ep->sideband)
-		return -EBUSY;
+	spin_lock_irqsave(&sb->xhci->lock, flags);
 
-	ep->sideband = sb;
-	sb->eps[ep_index] = ep;
+	ep = sideband_to_ep(sb, ep_index);
+	if (!ep) {
+		ret = -ENODEV;
+	} else if (ep->sideband) {
+		ret = -EBUSY;
+	} else if (ep->ep_state & EP_HAS_STREAMS) {
+		ret = -EINVAL;
+	} else {
+		/* success */
+		ep->sideband = sb;
+		sb->eps[ep_index] = ep;
+	}
 
-	return 0;
+	spin_unlock_irqrestore(&sb->xhci->lock, flags);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_add_endpoint);
 
