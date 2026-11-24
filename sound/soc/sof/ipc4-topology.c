@@ -1460,6 +1460,14 @@ sof_ipc4_update_resource_usage(struct snd_sof_dev *sdev, struct snd_sof_widget *
 	int task_mem, queue_mem;
 	int ibs, bss, total;
 
+	if (!fw_module) {
+		if (sof_ipc4_widget_set_module_info(swidget))
+			return;
+		fw_module = swidget->module_info;
+		if (!fw_module)
+			return;
+	}
+
 	ibs = base_config->ibs;
 	bss = base_config->is_pages;
 
@@ -3049,6 +3057,19 @@ static int sof_ipc4_prepare_process_module(struct snd_sof_widget *swidget,
 	int output_fmt_index = 0;
 	int input_fmt_index = 0;
 	int ret;
+
+	if (!swidget->module_info) {
+		ret = sof_ipc4_widget_set_module_info(swidget);
+		if (ret)
+			return ret;
+		if (swidget->module_info) {
+			ret = sof_ipc4_process_bind_module(sdev, swidget,
+							   swidget->module_info);
+			if (ret)
+				return ret;
+			cfg = process->ipc_config_data;
+		}
+	}
 
 	if (!swidget->module_info || !cfg) {
 		dev_err(sdev->dev, "module %s is not bound to a firmware module\n",

@@ -529,8 +529,21 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 			return -EINVAL;
 		}
 	} else if (!sof_ipc4_compr_codec_supported(sdev, params->codec.id, dir)) {
-		spcm_err(spcm, dir, "Unsupported codec id: %u\n", params->codec.id);
-		return -EINVAL;
+		if (codec_swidget && !codec_swidget->module_info &&
+		    !guid_is_null(&codec_swidget->uuid)) {
+			ret = snd_sof_boot_dsp_firmware(sdev);
+			if (ret)
+				return ret;
+			if (!sof_ipc4_find_module_by_uuid(sdev, &codec_swidget->uuid) ||
+			    !sof_ipc4_compr_codec_supported(sdev, params->codec.id, dir)) {
+				spcm_err(spcm, dir, "Unsupported codec id: %u\n",
+					 params->codec.id);
+				return -EINVAL;
+			}
+		} else {
+			spcm_err(spcm, dir, "Unsupported codec id: %u\n", params->codec.id);
+			return -EINVAL;
+		}
 	}
 
 	spcm_dbg(spcm, dir,
@@ -603,6 +616,15 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 	interval->min = compr_params->codec.sample_rate;
 	interval->max = compr_params->codec.sample_rate;
 
+	/*
+	 * Make sure that the DSP is booted up before widget/pipeline setup
+	 * (which may demand-load UUID libraries) in case on-demand DSP boot is
+	 * used, e.g. after runtime D3 suspend/resume.
+	 */
+	ret = snd_sof_boot_dsp_firmware(sdev);
+	if (ret)
+		return ret;
+
 	ret = sof_ipc4_compr_alloc_pages(sdev->dev, &spcm->stream[dir],
 					 component, cstream);
 	if (ret < 0)
@@ -654,14 +676,6 @@ static int sof_ipc4_compr_set_params(struct snd_soc_component *component,
 
 	process->init_ext_module_data = compr_data;
 	process->init_ext_module_size = sizeof(*compr_data);
-
-	/*
-	 * Make sure that the DSP is booted up, which might not be the
-	 * case if the on-demand DSP boot is used
-	 */
-	ret = snd_sof_boot_dsp_firmware(sdev);
-	if (ret)
-		goto clear_init_ext;
 
 	/* set the host DMA ID */
 	if (tplg_ops && tplg_ops->host_config)
