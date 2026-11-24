@@ -5,7 +5,9 @@
 //
 // Copyright(c) 2022 Intel Corporation
 
+#include <linux/debugfs.h>
 #include <linux/firmware.h>
+#include <linux/seq_file.h>
 #include <sound/sof/ext_manifest4.h>
 #include <sound/sof/ipc4/header.h>
 #include <trace/events/sof.h>
@@ -142,6 +144,37 @@ static ssize_t sof_ipc4_fw_parse_ext_man(struct snd_sof_dev *sdev,
 	return ext_man_hdr->len;
 }
 
+/*
+ * fw_lib_xa is RCU safe for readers, entries are fully initialized before
+ * they are inserted and they are never removed while the device is bound.
+ * Only the data copied from the manifest may be printed here: fw_lib->name and
+ * fw_mod_cfg point to the firmware file, which is released in sof_ipc4_exit()
+ * before the debugfs tree is removed.
+ */
+static int sof_ipc4_fw_modules_show(struct seq_file *s, void *unused)
+{
+	struct sof_ipc4_fw_data *ipc4_data = s->private;
+	struct sof_ipc4_fw_library *fw_lib;
+	unsigned long lib_id;
+	int i;
+
+	seq_printf(s, "lib | module | %-36s | name\n", "UUID");
+
+	xa_for_each(&ipc4_data->fw_lib_xa, lib_id, fw_lib) {
+		for (i = 0; i < fw_lib->num_modules; i++) {
+			struct sof_man4_module *entry = &fw_lib->modules[i].man4_module_entry;
+			u32 mod_id = entry->id & GENMASK(SOF_IPC4_MOD_LIB_ID_SHIFT - 1, 0);
+
+			seq_printf(s, "%-3lu | %-6u | %pUL | %.*s\n", lib_id, mod_id,
+				   &entry->uuid, (int)sizeof(entry->name),
+				   entry->name);
+		}
+	}
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(sof_ipc4_fw_modules);
+
 static size_t sof_ipc4_fw_parse_basefw_ext_man(struct snd_sof_dev *sdev)
 {
 	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
@@ -173,6 +206,10 @@ static size_t sof_ipc4_fw_parse_basefw_ext_man(struct snd_sof_dev *sdev)
 		ret = xa_insert(&ipc4_data->fw_lib_xa, 0, fw_lib, GFP_KERNEL);
 		if (ret)
 			return ret;
+
+		/* removed with the SOF debugfs root */
+		debugfs_create_file("fw_modules", 0444, sdev->debugfs_root, ipc4_data,
+				    &sof_ipc4_fw_modules_fops);
 	}
 
 	return payload_offset;
