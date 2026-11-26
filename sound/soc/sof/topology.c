@@ -298,6 +298,7 @@ static const struct sof_dai_types sof_dais[] = {
 	{"HDA", SOF_DAI_INTEL_HDA},
 	{"DMIC", SOF_DAI_INTEL_DMIC},
 	{"ALH", SOF_DAI_INTEL_ALH},
+	{"UAOL", SOF_DAI_INTEL_UAOL},
 	{"SAI", SOF_DAI_IMX_SAI},
 	{"ESAI", SOF_DAI_IMX_ESAI},
 	{"ACPBT", SOF_DAI_AMD_BT},

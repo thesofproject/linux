@@ -26,4 +26,7 @@ snd_usb_find_substream_format(struct snd_usb_substream *subs,
 int snd_usb_hw_params(struct snd_usb_substream *subs,
 		      struct snd_pcm_hw_params *hw_params);
 int snd_usb_hw_free(struct snd_usb_substream *subs);
+
+int snd_usb_offload_claim_substream(struct snd_usb_substream *subs);
+void snd_usb_offload_release_substream(struct snd_usb_substream *subs);
 #endif /* __USBAUDIO_PCM_H */

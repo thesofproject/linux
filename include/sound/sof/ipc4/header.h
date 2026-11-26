@@ -434,7 +434,7 @@ enum sof_ipc4_fw_config_params {
 	SOF_IPC4_FW_CFG_SCHEDULER_CONFIG,
 	SOF_IPC4_FW_CFG_XTAL_FREQ_HZ,
 	SOF_IPC4_FW_CFG_CLOCKS_CONFIG,
-	SOF_IPC4_FW_CFG_RESERVED,
+	SOF_IPC4_FW_CFG_UAOL_SUPPORT,
 	SOF_IPC4_FW_CFG_POWER_GATING_POLICY,
 	SOF_IPC4_FW_CFG_ASSERT_MODE,
 	/* Reserved: 24 - 28 */
@@ -467,8 +467,24 @@ struct sof_ipc4_dx_state_info {
 } __packed __aligned(4);
 
 enum sof_ipc4_hw_config_params {
+	SOF_IPC4_HW_CFG_INTEL_UAOL_CAPS = 10,
 	SOF_IPC4_HW_CFG_INTEL_MIC_PRIVACY_CAPS = 11,
 };
+
+#define SOF_IPC4_UAOL_INPUT_STREAMS_MASK		GENMASK(3, 0)
+#define SOF_IPC4_UAOL_OUTPUT_STREAMS_MASK		GENMASK(7, 4)
+#define SOF_IPC4_UAOL_BIDIRECTIONAL_STREAMS_MASK	GENMASK(12, 8)
+
+struct sof_ipc4_intel_uaol_link_caps {
+	u32 stream_caps;
+	u32 max_tx_fifo_size;
+	u32 max_rx_fifo_size;
+} __packed __aligned(4);
+
+struct sof_ipc4_intel_uaol_caps {
+	u32 link_count;
+	struct sof_ipc4_intel_uaol_link_caps link_caps[];
+} __packed __aligned(4);
 
 #define SOF_IPC_INTEL_MIC_PRIVACY_VERSION_PTL	1
 

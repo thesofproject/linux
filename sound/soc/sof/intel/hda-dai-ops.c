@@ -43,7 +43,7 @@ static bool hda_check_fes(struct snd_soc_pcm_runtime *rtd,
 
 static struct hdac_ext_stream *
 hda_link_stream_assign(struct hdac_bus *bus, struct snd_pcm_substream *substream,
-		       enum hda_bus_ml_link_type link_type)
+		       enum hda_bus_ml_link_type link_type, int stream_dir)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct sof_intel_hda_dev *sof_hda = bus_to_sof_hda(bus);
@@ -52,7 +52,6 @@ hda_link_stream_assign(struct hdac_bus *bus, struct snd_pcm_substream *substream
 	struct snd_sof_dev *sdev;
 	struct hdac_ext_stream *res = NULL;
 	struct hdac_stream *hstream = NULL;
-	int stream_dir = substream->stream;
 	bool is_multi = link_type == HDA_BUS_ML_LINK_HDA || link_type == HDA_BUS_ML_LINK_UAOL;
 	bool is_play = stream_dir == SNDRV_PCM_STREAM_PLAYBACK;
 	bool is_sdw = link_type == HDA_BUS_ML_LINK_SDW;
@@ -92,7 +91,7 @@ hda_link_stream_assign(struct hdac_bus *bus, struct snd_pcm_substream *substream
 	list_for_each_entry(hstream, &bus->stream_list, list) {
 		struct hdac_ext_stream *hext_stream =
 			stream_to_hdac_ext_stream(hstream);
-		if (hstream->direction != substream->stream)
+		if (hstream->direction != stream_dir)
 			continue;
 
 		hda_stream = hstream_to_sof_hda_stream(hext_stream);
@@ -160,6 +159,71 @@ hda_link_stream_assign(struct hdac_bus *bus, struct snd_pcm_substream *substream
 	return res;
 }
 
+/* Undo hda_link_stream_assign(); the stream index is already out of use */
+static void hda_link_stream_release(struct snd_sof_dev *sdev,
+				    struct hdac_ext_stream *hext_stream, int dir)
+{
+	struct sof_intel_hda_dev *sof_hda = sdev->pdata->hw_pdata;
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	unsigned int stream_idx = hext_stream->hstream.stream_tag - 1;
+
+	/*
+	 * Drop the stream index from the per-direction active concurrency masks.
+	 * The two masks are mutually exclusive for a given stream/direction
+	 * (and a stream of the SSP/DMIC kind appears in neither), so a blind
+	 * clear of both is safe and lets us avoid having to remember the
+	 * link type at allocation time.
+	 */
+	scoped_guard(spinlock_irq, &bus->reg_lock) {
+		sof_hda->link_dma_active_sdw_mask[dir] &= ~BIT(stream_idx);
+		sof_hda->link_dma_active_multi_mask[dir] &= ~BIT(stream_idx);
+	}
+
+	snd_hdac_ext_stream_release(hext_stream, HDAC_EXT_STREAM_TYPE_LINK);
+}
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
+
+/*
+ * A UAOL playback stream with an explicit feedback endpoint needs a second
+ * link DMA, in the capture direction, for the DSP to read the feedback
+ * through. It belongs to the playback substream but is not the DAI's DMA
+ * data and is not a stream of its own, so it is not registered as the
+ * link_substream either - hda_dai_suspend() has nothing to do with it.
+ */
+struct hdac_ext_stream *hda_uaol_assign_fb_link_stream(struct snd_sof_dev *sdev,
+						       struct snd_pcm_substream *substream,
+						       unsigned int format_val)
+{
+	struct hdac_ext_stream *hext_stream;
+
+	hext_stream = hda_link_stream_assign(sof_to_bus(sdev), substream,
+					     HDA_BUS_ML_LINK_UAOL, SNDRV_PCM_STREAM_CAPTURE);
+	if (!hext_stream)
+		return NULL;
+
+	hext_stream->link_substream = NULL;
+
+	snd_hdac_ext_stream_reset(hext_stream);
+	snd_hdac_ext_stream_setup(hext_stream, format_val);
+
+	return hext_stream;
+}
+
+void hda_uaol_release_fb_link_stream(struct snd_sof_dev *sdev,
+				     struct hdac_ext_stream *hext_stream)
+{
+	struct sof_intel_hda_stream *hda_stream = hstream_to_sof_hda_stream(hext_stream);
+
+	snd_hdac_ext_stream_clear(hext_stream);
+	hda_link_stream_release(sdev, hext_stream, SNDRV_PCM_STREAM_CAPTURE);
+
+	/* free the host DMA channel reserved by the hostless stream */
+	hda_stream->host_reserved = 0;
+}
+
+#endif /* IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD) */
+
 static struct hdac_ext_stream *hda_get_hext_stream(struct snd_sof_dev *sdev,
 						   struct snd_soc_dai *cpu_dai,
 						   struct snd_pcm_substream *substream)
@@ -195,7 +259,8 @@ static struct hdac_ext_stream *hda_assign_hext_stream(struct snd_sof_dev *sdev,
 	struct hdac_ext_stream *hext_stream;
 	enum hda_bus_ml_link_type link_type = hda_bus_ml_link_get_type(hlink);
 
-	hext_stream = hda_link_stream_assign(sof_to_bus(sdev), substream, link_type);
+	hext_stream = hda_link_stream_assign(sof_to_bus(sdev), substream, link_type,
+					     substream->stream);
 	if (!hext_stream)
 		return NULL;
 
@@ -208,25 +273,9 @@ static void hda_release_hext_stream(struct snd_sof_dev *sdev, struct snd_soc_dai
 				    struct snd_pcm_substream *substream)
 {
 	struct hdac_ext_stream *hext_stream = hda_get_hext_stream(sdev, cpu_dai, substream);
-	struct sof_intel_hda_dev *sof_hda = sdev->pdata->hw_pdata;
-	struct hdac_bus *bus = sof_to_bus(sdev);
-	int dir = substream->stream;
-	unsigned int stream_idx = hext_stream->hstream.stream_tag - 1;
-
-	/*
-	 * Drop the stream index from the per-direction active concurrency masks.
-	 * The two masks are mutually exclusive for a given stream/direction
-	 * (and a stream of the SSP/DMIC kind appears in neither), so a blind
-	 * clear of both is safe and lets us avoid having to remember the
-	 * link type at allocation time.
-	 */
-	scoped_guard(spinlock_irq, &bus->reg_lock) {
-		sof_hda->link_dma_active_sdw_mask[dir] &= ~BIT(stream_idx);
-		sof_hda->link_dma_active_multi_mask[dir] &= ~BIT(stream_idx);
-	}
 
 	snd_soc_dai_set_dma_data(cpu_dai, substream, NULL);
-	snd_hdac_ext_stream_release(hext_stream, HDAC_EXT_STREAM_TYPE_LINK);
+	hda_link_stream_release(sdev, hext_stream, substream->stream);
 }
 
 static void hda_setup_hext_stream(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream,
@@ -412,6 +461,14 @@ hda_ipc4_find_owning_pipe_widget(struct snd_pcm_substream *substream)
 	}
 
 	return NULL;
+}
+
+static struct hdac_ext_link *uaol_get_hlink(struct snd_sof_dev *sdev,
+					    struct snd_pcm_substream *substream)
+{
+	struct hdac_bus *bus = sof_to_bus(sdev);
+
+	return hdac_bus_eml_uaol_get_hlink(bus);
 }
 
 static int hda_ipc4_pre_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
@@ -632,6 +689,19 @@ static const struct hda_dai_widget_dma_ops dmic_ipc4_dma_ops = {
 	.get_hlink = dmic_get_hlink,
 };
 
+static const struct hda_dai_widget_dma_ops uaol_ipc4_dma_ops = {
+	.get_hext_stream = hda_ipc4_get_hext_stream,
+	.assign_hext_stream = hda_assign_hext_stream,
+	.release_hext_stream = hda_release_hext_stream,
+	.setup_hext_stream = hda_setup_hext_stream,
+	.reset_hext_stream = hda_reset_hext_stream,
+	.pre_trigger = hda_ipc4_pre_trigger,
+	.trigger = hda_trigger,
+	.post_trigger = hda_ipc4_post_trigger,
+	.calc_stream_format = generic_calc_stream_format,
+	.get_hlink = uaol_get_hlink,
+};
+
 static const struct hda_dai_widget_dma_ops sdw_ipc4_dma_ops = {
 	.get_hext_stream = hda_ipc4_get_hext_stream,
 	.assign_hext_stream = hda_assign_hext_stream,
@@ -798,6 +868,10 @@ hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidg
 			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
 				return NULL;
 			return &dmic_ipc4_dma_ops;
+		case SOF_DAI_INTEL_UAOL:
+			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
+				return NULL;
+			return &uaol_ipc4_dma_ops;
 		case SOF_DAI_INTEL_ALH:
 			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
 				return NULL;

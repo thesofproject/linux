@@ -21,6 +21,11 @@
 #include "../sof-audio.h"
 #include "shim.h"
 
+struct usb_offload_ctx;
+struct usb_device;
+struct usb_offload_usb_dev_info;
+struct snd_soc_usb;
+
 /* PCI registers */
 #define PCI_TCSEL			0x44
 #define PCI_PGCTL			PCI_TCSEL
@@ -421,9 +426,24 @@
 #define SOF_SKL_NUM_DAIS_NOCODEC	9
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_AUDIO_CODEC)
-#define SOF_SKL_NUM_DAIS		16
+#define SOF_SKL_NUM_DAIS_BASE		16
 #else
-#define SOF_SKL_NUM_DAIS		SOF_SKL_NUM_DAIS_NOCODEC
+#define SOF_SKL_NUM_DAIS_BASE		SOF_SKL_NUM_DAIS_NOCODEC
+#endif
+
+/*
+ * The UAOL DAIs are the last entries of skl_dai[]. A link has a stream per
+ * direction for each one it can run concurrently; how many of these the
+ * machine driver uses is reported in the mach_params.
+ */
+#define SOF_UAOL_MAX_PLAYBACK_STREAMS	2
+#define SOF_UAOL_MAX_CAPTURE_STREAMS	2
+#define SOF_UAOL_NUM_DAIS		(SOF_UAOL_MAX_PLAYBACK_STREAMS + \
+					 SOF_UAOL_MAX_CAPTURE_STREAMS)
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
+#define SOF_SKL_NUM_DAIS		(SOF_SKL_NUM_DAIS_BASE + SOF_UAOL_NUM_DAIS)
+#else
+#define SOF_SKL_NUM_DAIS		SOF_SKL_NUM_DAIS_BASE
 #endif
 
 /* Intel HD Audio SRAM Window 0*/
@@ -492,6 +512,45 @@ struct sof_ace3_mic_privacy {
 	struct work_struct work;
 };
 
+/*
+ * One UAOL backend: the DAI it is bound to and the USB stream it holds. This
+ * lives for the lifetime of the card and names the device only indirectly, by
+ * the route of its direction the backend plays to.
+ */
+struct hda_uaol_stream {
+	struct sof_intel_hda_dev *hdev;
+	/* the UAOL CPU DAI, NULL while no DAI is bound to this slot */
+	struct snd_soc_dai *dai;
+	int direction;
+	/* the ASoC USB route of @direction this backend plays to */
+	unsigned int route;
+
+	/* device whose stream the DSP owns, NULL when idle */
+	struct usb_device *udev;
+	/* USB PCM of @udev the stream was acquired on */
+	int pcm_index;
+	/* backend substream the stream runs on, its frontends are stopped on unplug */
+	struct snd_pcm_substream *be;
+	/*
+	 * Parameters the first frontend opened the backend with, as it passed
+	 * them in. A frontend joining it, the deep buffer, shares the backend
+	 * and its mixer and has to use the same.
+	 */
+	unsigned int rate;
+	unsigned int channels;
+	snd_pcm_format_t format;
+	/* the format the device runs the stream in, what the backend is set up with */
+	snd_pcm_format_t be_format;
+	/* @rate, @channels and @format are valid, published after they are set */
+	bool params_valid;
+	/* the stream was suspended and has to be reacquired on prepare */
+	bool suspended;
+	/* the USB endpoints were stopped and have to be restarted on start */
+	bool quiesced;
+	/* link DMA the DSP reads the playback feedback endpoint through, if any */
+	struct hdac_ext_stream *fb_hext_stream;
+};
+
 /* represents DSP HDA controller frontend - i.e. host facing control */
 struct sof_intel_hda_dev {
 	bool imrboot_supported;
@@ -522,6 +581,11 @@ struct sof_intel_hda_dev {
 
 	/* the maximum number of streams (playback + capture) supported */
 	u32 stream_max;
+
+	/* USB Audio Offload links on the controller, 0 if UAOL is not present */
+	int uaol_link_count;
+	/* streams a link runs per direction, as reported to the machine driver */
+	unsigned int uaol_stream_num[SNDRV_PCM_STREAM_LAST + 1];
 
 	/*
 	 * ACE2+ link DMA stream allocation constraints (stream index =
@@ -560,6 +624,23 @@ struct sof_intel_hda_dev {
 
 	/* sdw context allocated by SoundWire driver */
 	struct sdw_intel_ctx *sdw;
+
+	/* USB audio offload context allocated by the offload library */
+	struct usb_offload_ctx *uaol;
+
+	/* ASoC USB port, non NULL while the UAOL DAI is bound into a card */
+	struct snd_soc_usb *uaol_usb;
+
+	/* offload capable USB audio devices */
+	struct list_head uaol_devices;
+	/* protects uaol_devices */
+	struct mutex uaol_mutex;
+
+	/* reports whether any offload capable device is connected */
+	struct snd_soc_jack uaol_jack;
+
+	/* one per UAOL CPU DAI, claimed when the DAI probes */
+	struct hda_uaol_stream uaol_streams[SOF_UAOL_NUM_DAIS];
 
 	/* FW clock config, 0:HPRO, 1:LPRO */
 	bool clk_config_lpro;
@@ -931,6 +1012,8 @@ static inline bool hda_common_check_sdw_irq(struct snd_sof_dev *sdev)
 
 #endif
 
+int hda_machine_register(struct snd_sof_dev *sdev, void *pdata);
+
 int sdw_hda_dai_hw_params(struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,
 			  struct snd_soc_dai *cpu_dai,
@@ -1013,6 +1096,8 @@ void hda_unregister_clients(struct snd_sof_dev *sdev);
 struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev);
 void hda_set_mach_params(struct snd_soc_acpi_mach *mach,
 			 struct snd_sof_dev *sdev);
+void hda_finalize_mach_params(struct snd_sof_dev *sdev,
+			      struct snd_soc_acpi_mach_params *params);
 
 /* PCI driver selection and probe */
 int hda_pci_intel_probe(struct pci_dev *pci, const struct pci_device_id *pci_id);
@@ -1098,6 +1183,12 @@ hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidg
 int hda_dai_config(struct snd_soc_dapm_widget *w, unsigned int flags,
 		   struct snd_sof_dai_config_data *data);
 
+struct hdac_ext_stream *hda_uaol_assign_fb_link_stream(struct snd_sof_dev *sdev,
+						       struct snd_pcm_substream *substream,
+						       unsigned int format_val);
+void hda_uaol_release_fb_link_stream(struct snd_sof_dev *sdev,
+				     struct hdac_ext_stream *hext_stream);
+
 static inline struct snd_sof_dev *widget_to_sdev(struct snd_soc_dapm_widget *w)
 {
 	struct snd_sof_widget *swidget = w->dobj.private;
@@ -1105,5 +1196,48 @@ static inline struct snd_sof_dev *widget_to_sdev(struct snd_soc_dapm_widget *w)
 
 	return snd_soc_component_get_drvdata(component);
 }
+
+static inline struct snd_sof_dev *dai_to_sdev(struct snd_pcm_substream *substream,
+					      struct snd_soc_dai *cpu_dai)
+{
+	struct snd_soc_dapm_widget *w = snd_soc_dai_get_widget(cpu_dai, substream->stream);
+
+	return widget_to_sdev(w);
+}
+
+static inline struct sof_ipc4_copier *widget_to_copier(struct snd_soc_dapm_widget *w)
+{
+	struct snd_sof_widget *swidget = w->dobj.private;
+	struct snd_sof_dai *sdai = swidget->private;
+
+	return sdai->private;
+}
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_LINK)
+/* the DAI callbacks the UAOL DAI builds on, shared with the SSP and DMIC DAIs */
+int non_hda_dai_hw_params(struct snd_pcm_substream *substream,
+			  struct snd_pcm_hw_params *params,
+			  struct snd_soc_dai *cpu_dai);
+int non_hda_dai_prepare(struct snd_pcm_substream *substream,
+			struct snd_soc_dai *cpu_dai);
+int hda_dai_hw_free(struct snd_pcm_substream *substream,
+		    struct snd_soc_dai *cpu_dai);
+int hda_dai_trigger(struct snd_pcm_substream *substream, int cmd,
+		    struct snd_soc_dai *dai);
+#endif
+
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
+void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev, struct snd_sof_dsp_ops *ops);
+void hda_apply_constraint_from_be(struct snd_sof_dev *sdev,
+				  struct snd_pcm_substream *substream);
+int hda_uaol_notify_connect(struct device *dev, struct usb_device *udev,
+			    const struct usb_offload_usb_dev_info *id);
+int hda_uaol_notify_disconnect(struct device *dev, struct usb_device *udev);
+#else
+static inline void hda_uaol_set_dai_drv_ops(struct snd_sof_dev *sdev,
+					    struct snd_sof_dsp_ops *ops) { }
+static inline void hda_apply_constraint_from_be(struct snd_sof_dev *sdev,
+						struct snd_pcm_substream *substream) { }
+#endif
 
 #endif

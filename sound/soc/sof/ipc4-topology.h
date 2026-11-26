@@ -326,6 +326,121 @@ struct sof_ipc4_alh_configuration_blob {
 	struct sof_ipc4_dma_stream_ch_map alh_cfg;
 };
 
+/*
+ * The UAOL gateway configuration is a plain list of TLVs, which the firmware
+ * hands over to the UAOL hardware driver as it is. Unknown types are skipped,
+ * so the DMA config TLV can be appended to it like for any other gateway.
+ */
+#define SOF_IPC4_UAOL_XHCI_BDF_ID	0
+#define SOF_IPC4_UAOL_CONFIG_ID		1
+#define SOF_IPC4_UAOL_FIFO_SAO_ID	2
+#define SOF_IPC4_UAOL_EP_INFO_ID	3
+#define SOF_IPC4_UAOL_FEEDBACK_EP_INFO_ID	4
+#define SOF_IPC4_UAOL_ART_DIVIDER_ID	5
+#define SOF_IPC4_UAOL_SERVICE_INTERVAL_ID	6
+
+/* PCI address of the xHCI controller the offloaded device is attached to */
+#define SOF_IPC4_UAOL_XHCI_BDF_BUS	GENMASK(7, 0)
+#define SOF_IPC4_UAOL_XHCI_BDF_DEVICE	GENMASK(12, 8)
+#define SOF_IPC4_UAOL_XHCI_BDF_FUNCTION	GENMASK(15, 13)
+
+/* UAOL link and stream the gateway is bound to */
+#define SOF_IPC4_UAOL_CONFIG_LINK_IDX	GENMASK(7, 0)
+#define SOF_IPC4_UAOL_CONFIG_STREAM_IDX	GENMASK(15, 8)
+#define SOF_IPC4_UAOL_CONFIG_FEEDBACK_IDX	GENMASK(23, 16)
+#define SOF_IPC4_UAOL_CONFIG_FEEDBACK_PERIOD	GENMASK(31, 24)
+
+/* Start offset of each stream within the UAOL FIFO */
+#define SOF_IPC4_UAOL_FIFO_SAO_TX0	GENMASK(11, 0)
+#define SOF_IPC4_UAOL_FIFO_SAO_TX1	GENMASK(27, 16)
+#define SOF_IPC4_UAOL_FIFO_SAO_RX0	GENMASK(11, 0)
+#define SOF_IPC4_UAOL_FIFO_SAO_RX1	GENMASK(27, 16)
+
+/* Streams per direction the FIFO start offsets of the configuration describe */
+#define SOF_IPC4_UAOL_FIFO_SAO_STREAMS	2
+
+/* The firmware rejects a start offset which is not aligned to the IOSF bus */
+#define SOF_IPC4_UAOL_FIFO_BUS_WIDTH	8
+
+/* Identity of the offloaded USB endpoint */
+#define SOF_IPC4_UAOL_EP_INFO_DIRECTION	BIT(0)
+#define SOF_IPC4_UAOL_EP_INFO_NUMBER	GENMASK(4, 1)
+#define SOF_IPC4_UAOL_EP_INFO_SLOT	GENMASK(12, 5)
+#define SOF_IPC4_UAOL_EP_INFO_SPLIT	BIT(13)
+#define SOF_IPC4_UAOL_EP_INFO_HIGH_SPEED	BIT(14)
+#define SOF_IPC4_UAOL_EP_INFO_MAX_PACKET	GENMASK(31, 16)
+
+/* Conversion of the xHCI global time to the DSP always running timer */
+#define SOF_IPC4_UAOL_ART_MULTIPLIER	GENMASK(15, 0)
+#define SOF_IPC4_UAOL_ART_DIVIDER	GENMASK(31, 16)
+
+/**
+ * struct sof_ipc4_uaol_tlv - header of a UAOL gateway configuration TLV
+ * @type: one of the SOF_IPC4_UAOL_*_ID types
+ * @length: size of the value following this header, in bytes
+ */
+struct sof_ipc4_uaol_tlv {
+	u32 type;
+	u32 length;
+} __packed;
+
+/**
+ * struct sof_ipc4_uaol_configuration_blob - UAOL gateway blob
+ * @xhci_bdf_tlv: header of the xHCI controller address
+ * @xhci_bdf: PCI address of the xHCI controller
+ * @config_tlv: header of the link and stream binding
+ * @config: UAOL link, stream and clock feedback binding
+ * @fifo_sao_tlv: header of the FIFO offsets
+ * @fifo_sao_tx: start offset of the two transmit streams
+ * @fifo_sao_rx: start offset of the two receive streams
+ * @ep_info_tlv: header of the data endpoint description
+ * @ep_info: identity of the offloaded data endpoint
+ * @feedback_ep_info_tlv: header of the feedback endpoint description
+ * @feedback_ep_info: identity of the clock feedback endpoint, 0 if there is none
+ * @art_divider_tlv: header of the timestamp conversion factors
+ * @art_divider: multiplier and divider of the xHCI to DSP timestamp conversion
+ * @service_interval_tlv: header of the service interval in microseconds
+ * @service_interval_us: service interval in microseconds, from the USB endpoint descriptor
+ *
+ * The firmware expects all of the TLVs to be present even when the values are
+ * left at zero.
+ */
+struct sof_ipc4_uaol_configuration_blob {
+	struct sof_ipc4_uaol_tlv xhci_bdf_tlv;
+	u32 xhci_bdf;
+	struct sof_ipc4_uaol_tlv config_tlv;
+	u32 config;
+	struct sof_ipc4_uaol_tlv fifo_sao_tlv;
+	u32 fifo_sao_tx;
+	u32 fifo_sao_rx;
+	struct sof_ipc4_uaol_tlv ep_info_tlv;
+	u32 ep_info;
+	struct sof_ipc4_uaol_tlv feedback_ep_info_tlv;
+	u32 feedback_ep_info;
+	struct sof_ipc4_uaol_tlv art_divider_tlv;
+	u32 art_divider;
+	struct sof_ipc4_uaol_tlv service_interval_tlv;
+	u32 service_interval_us;
+} __packed;
+
+/*
+ * The gateway node id addresses a UAOL stream by the HDA link stream it uses.
+ * The mapping between the two is fixed in hardware.
+ */
+static inline int sof_ipc4_uaol_link_stream(unsigned int stream)
+{
+	static const u8 link_stream[] = { 13, 14, 15, 16, 29, 30 };
+
+	if (stream >= ARRAY_SIZE(link_stream))
+		return -EINVAL;
+
+	return link_stream[stream];
+}
+
+int sof_ipc4_uaol_get_fifo_size(struct snd_sof_dev *sdev, int link_idx, int direction);
+int sof_ipc4_uaol_get_stream_counts(struct snd_sof_dev *sdev, int link_idx,
+				    unsigned int *playback, unsigned int *capture);
+
 /**
  * struct sof_ipc4_copier - copier config data
  * @data: IPC copier data

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SND_USB_OFFLOAD
+	tristate "USB Audio Offload library"
+	depends on SND_USB_AUDIO
+	depends on USB_XHCI_HCD && USB_XHCI_SIDEBAND
+	help
+	  Library implementing the lifecycle of an offloaded USB audio
+	  device, for a driver that owns a DSP capable of driving USB
+	  endpoints. A host registers once, is told of the offload capable
+	  devices as they come and go, and acquires their streams for the
+	  DSP on demand.
+
+	  Device ownership stays with snd-usb-audio: the library hooks the
+	  USB-SND platform-op callbacks to pick the PCMs it can offload and
+	  forward offloadable devices to the registered host.
+
+	  The data path is built on the xHCI Audio Sideband: the library
+	  claims a sideband resource for each offloaded endpoint, which makes
+	  the controller route the endpoint's traffic to the DSP.
+
+	  If unsure, say N.

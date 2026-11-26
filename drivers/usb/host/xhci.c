@@ -2884,61 +2884,6 @@ static int xhci_reserve_bandwidth(struct xhci_hcd *xhci,
 }
 
 /*
- * Synchronous XHCI stop endpoint helper.  Issues the stop endpoint command and
- * waits for the command completion before returning.  This does not call
- * xhci_handle_cmd_stop_ep(), which has additional handling for 'context error'
- * cases, along with transfer ring cleanup.
- *
- * xhci_stop_endpoint_sync() is intended to be utilized by clients that manage
- * their own transfer ring, such as offload situations.
- */
-int xhci_stop_endpoint_sync(struct xhci_hcd *xhci, struct xhci_virt_ep *ep, int suspend,
-			    gfp_t gfp_flags)
-{
-	struct xhci_command *command;
-	struct xhci_ep_ctx *ep_ctx;
-	unsigned long flags;
-	int ret = -ENODEV;
-
-	command = xhci_alloc_command(xhci, true, gfp_flags);
-	if (!command)
-		return -ENOMEM;
-
-	spin_lock_irqsave(&xhci->lock, flags);
-
-	/* make sure endpoint exists and is running before stopping it */
-	if (ep->ring) {
-		ep_ctx = xhci_get_ep_ctx(xhci, ep->vdev->out_ctx, ep->ep_index);
-		if (GET_EP_CTX_STATE(ep_ctx) == EP_STATE_RUNNING)
-			ret = xhci_queue_stop_endpoint(xhci, command,
-						       ep->vdev->slot_id,
-						       ep->ep_index, suspend);
-	}
-
-	if (ret < 0) {
-		spin_unlock_irqrestore(&xhci->lock, flags);
-		goto out;
-	}
-
-	xhci_ring_cmd_db(xhci);
-	spin_unlock_irqrestore(&xhci->lock, flags);
-
-	wait_for_completion(command->completion);
-
-	/* No handling for COMP_CONTEXT_STATE_ERROR done at command completion*/
-	if (command->status == COMP_COMMAND_ABORTED ||
-	    command->status == COMP_COMMAND_RING_STOPPED) {
-		xhci_warn(xhci, "Timeout while waiting for stop endpoint command\n");
-		ret = -ETIME;
-	}
-out:
-	xhci_free_command(xhci, command);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(xhci_stop_endpoint_sync);
-
-/*
  * xhci_usb_endpoint_maxp - get endpoint max packet size
  * @host_ep: USB host endpoint to be checked
  *
@@ -5262,6 +5207,95 @@ static int xhci_disable_usb3_lpm_timeout(struct usb_hcd *hcd,
 	return 0;
 }
 #endif	/* CONFIG_PM */
+
+/**
+ * xhci_get_ext_property - issue a Get Extended Property command and wait
+ * @xhci: xHCI host controller
+ * @slot_id: slot ID of the device, or 0 for device independent properties
+ * @ep_id: endpoint id (DCI), only used if @slot_id is set.
+ * @property: Extended Capability Identifier (ECI), PROP_ECI_ALL to list
+ *	      supported extended capabilities
+ * @subtype: command subtype, specific to the extended capability
+ * @buf: buffer for the returned Extended Property Context
+ * @buf_len: size of @buf
+ *
+ * For PROP_ECI_ALL the xHC returns a 16 bit bitmap of supported extended
+ * capabilities in the command completion event, which is copied to @buf.
+ * For all other properties the xHC writes the Extended Property Context
+ * directly to @buf using DMA, so @buf must be DMA-able memory, i.e. not on
+ * the stack or vmalloc'ed.
+ *
+ * Context: Process context. Sleeps until the command completes.
+ *
+ * Return: 0 on success, negative error code otherwise.
+ */
+int xhci_get_ext_property(struct xhci_hcd *xhci, u32 slot_id, u32 ep_id,
+			  u32 property, u32 subtype, void *buf, size_t buf_len)
+{
+	struct device *dev = xhci_to_hcd(xhci)->self.sysdev;
+	struct xhci_command *cmd;
+	dma_addr_t dma = 0;
+	unsigned long flags;
+	int ret;
+
+	if (!buf)
+		return -EINVAL;
+
+	/* PROP_ECI_ALL xHC does not write to buf, data is in event TRB */
+	if (property == PROP_ECI_ALL && (buf_len < sizeof(u16)))
+		return -EINVAL;
+
+	cmd = xhci_alloc_command(xhci, true, GFP_KERNEL);
+	if (!cmd)
+		return -ENOMEM;
+
+	/* xHC writes the Extended Property Context to buf for other properties */
+	if (property != PROP_ECI_ALL) {
+		dma = dma_map_single(dev, buf, buf_len, DMA_FROM_DEVICE);
+		if (dma_mapping_error(dev, dma)) {
+			ret = -ENOMEM;
+			goto free_cmd;
+		}
+	}
+
+	spin_lock_irqsave(&xhci->lock, flags);
+
+	if (slot_id && !xhci->devs[slot_id]) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		ret = -ENODEV;
+		goto unmap;
+	}
+
+	ret = xhci_queue_get_ext_property(xhci, cmd, slot_id, ep_id, dma,
+					  property, subtype);
+	if (ret) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		goto unmap;
+	}
+
+	xhci_ring_cmd_db(xhci);
+	spin_unlock_irqrestore(&xhci->lock, flags);
+
+	wait_for_completion(cmd->completion);
+
+	switch (cmd->status) {
+	case COMP_SUCCESS:
+		/* cmd->comp_param is u32, PROP_ECI_ALL only uses bits 15:0 */
+		if (property == PROP_ECI_ALL)
+			*(u16 *)buf = cmd->comp_param;
+		break;
+	default:
+		xhci_dbg(xhci, "Get ext property command failed %u\n", cmd->status);
+		ret = -EIO;
+	}
+unmap:
+	if (property != PROP_ECI_ALL)
+		dma_unmap_single(dev, dma, buf_len, DMA_FROM_DEVICE);
+free_cmd:
+	xhci_free_command(xhci, cmd);
+
+	return ret;
+}
 
 /*-------------------------------------------------------------------------*/
 

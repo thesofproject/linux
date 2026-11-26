@@ -532,6 +532,36 @@ struct xhci_input_control_ctx {
 #define	EP_IS_DROPPED(ctrl_ctx, i)       \
 	(le32_to_cpu(ctrl_ctx->drop_flags) & (1 << (i + 1)))
 
+/*
+ * xhci_extprop_ctx - union of extended property context structures
+ *
+ * Used with several different types of Get Extended Property commands. See:
+ * 7.9.1.1 Get Extended Property: Get Supported Resources Command
+ * 7.9.1.2 Get Extended Property: Get Endpoint Properties Command
+ * 7.10.3 Get Extended Property: Get Time Stamp Command
+ *
+ * Layout varies, but size is so far always 16 bytes.
+ * Define one extended property context for generic use.
+ * Define one extended property context for audio sideband extended capability
+ * endpoint properties
+ */
+struct xhci_generic_extprop_ctx {
+	u8	byte[16];
+} __packed;
+
+struct xhci_audio_ep_extprop_ctx {
+	u8	rh_port;
+	u8	res_id;
+	u8	port_speed_tt;
+	u8	rsvdz;
+	__le32	rsvdz2[3];
+} __packed;
+
+union xhci_extprop_ctx {
+	struct xhci_generic_extprop_ctx		generic;
+	struct xhci_audio_ep_extprop_ctx	audio_ep;
+};
+
 /* Represents everything that is needed to issue a command on the command ring.
  * It's useful to pre-allocate these for commands that cannot fail due to
  * out-of-memory errors, like freeing streams.
@@ -1022,6 +1052,22 @@ enum xhci_setup_dev {
 #define STREAM_ID_FOR_TRB(p)		((((p)) & 0xffff) << 16)
 #define SCT_FOR_TRB(p)			(((p) & 0x7) << 1)
 
+/* Get/Set Extended Property command TRB fields */
+#define TRB_PROP_ECI			GENMASK(15, 0)
+#define TRB_PROP_ECPARAM		GENMASK(23, 16)
+
+#define TRB_PROP_SUBTYPE		GENMASK(18, 16)
+#define TRB_PROP_EP_ID			GENMASK(23, 19)
+
+#define PROP_ECI_ALL			0	/* use extended capability 0 to list capabilities */
+#define PROP_ECI_AUDIO			BIT(0)	/* Audio sideband extended capability identifier */
+
+/* Get/Set Extended Property Audio sideband subtypes */
+#define AUDIO_SUBTYPE_GET_RES		1	/* Get supported resources */
+#define AUDIO_SUBTYPE_GET_EP_PROP	2	/* Get endpoint properties */
+
+#define AUDIO_SUBTYPE_SET_RES		1	/* Set resource assignment */
+
 /* Link TRB specific fields */
 #define TRB_TC			BIT(1)
 
@@ -1148,7 +1194,11 @@ union xhci_trb {
 #define TRB_FORCE_HEADER	22
 /* No-op Command - not for transfer rings */
 #define TRB_CMD_NOOP		23
-/* TRB IDs 24-31 reserved */
+/* Get Extended Property Command (opt) */
+#define TRB_GET_EXT_PROP	24
+/* Set Extended Property Command (opt) */
+#define TRB_SET_EXT_PROP	25
+/* TRB IDs 26-31 reserved */
 /* Event TRBS */
 /* Transfer Event */
 #define TRB_TRANSFER		32
@@ -1504,6 +1554,11 @@ struct xhci_hub {
 	u8			min_rev;
 };
 
+struct xhci_sideband_idr {
+	struct xarray	id_xa;
+	struct xa_limit	id_lim;
+};
+
 /* There is one xhci_hcd structure per controller */
 struct xhci_hcd {
 	struct usb_hcd *main_hcd;
@@ -1677,7 +1732,8 @@ struct xhci_hcd {
 	struct dentry		*debugfs_root;
 	struct dentry		*debugfs_slots;
 	struct list_head	regset_list;
-
+	/* Sideband controlled endpoint resource ids, xhci 7.9.2.1 */
+	struct xhci_sideband_idr	sideband_idr;
 	void			*dbc;
 	/* platform-specific data -- must come last */
 	unsigned long		priv[] __aligned(sizeof(s64));
@@ -1952,6 +2008,14 @@ int xhci_queue_reset_ep(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		enum xhci_ep_reset_type reset_type);
 int xhci_queue_reset_device(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		u32 slot_id);
+int xhci_queue_get_ext_property(struct xhci_hcd *xhci, struct xhci_command *cmd,
+		u32 slot_id, u32 ep_id, dma_addr_t ctx_dma, u32 property,
+		u32 subtype);
+int xhci_queue_set_ext_property(struct xhci_hcd *xhci, struct xhci_command *cmd,
+		u32 slot_id, u32 ep_id, dma_addr_t ctx_dma, u32 property,
+		u32 subtype, u32 param);
+int xhci_get_ext_property(struct xhci_hcd *xhci, u32 slot_id, u32 ep_id,
+		u32 property, u32 subtype, void *buf, size_t buf_len);
 void xhci_handle_command_timeout(struct work_struct *work);
 
 void xhci_ring_ep_doorbell(struct xhci_hcd *xhci, unsigned int slot_id,
@@ -1963,8 +2027,6 @@ void xhci_cleanup_command_queue(struct xhci_hcd *xhci);
 void inc_deq(struct xhci_hcd *xhci, struct xhci_ring *ring);
 unsigned int count_trbs(u64 addr, u64 len);
 unsigned int xhci_num_trbs_free(struct xhci_ring *ring);
-int xhci_stop_endpoint_sync(struct xhci_hcd *xhci, struct xhci_virt_ep *ep,
-			    int suspend, gfp_t gfp_flags);
 void xhci_process_cancelled_tds(struct xhci_hcd *xhci, struct xhci_virt_ep *ep);
 void xhci_update_erst_dequeue(struct xhci_hcd *xhci,
 			      struct xhci_interrupter *ir,

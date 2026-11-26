@@ -10,10 +10,89 @@
 
 #include <linux/usb/xhci-sideband.h>
 #include <linux/dma-direct.h>
+#include <linux/pci.h>
 
 #include "xhci.h"
 
 /* sideband internal helpers */
+static int
+sideband_res_id_to_ep_index(struct xhci_sideband *sb, unsigned int res_id)
+{
+	int i;
+
+	if (res_id == 0)
+		return -EINVAL;
+
+	for (i = 0; i < EP_CTX_PER_DEV; i++) {
+		if (sb->eps_res_id[i] == res_id)
+			return i;
+	}
+
+	return -ENODEV;
+}
+
+static int
+xhci_sideband_hw_max_resources(struct xhci_hcd *xhci)
+{
+	union xhci_extprop_ctx *ctx;
+	unsigned int res_max;
+	int ret;
+
+	ctx = kzalloc_obj(*ctx, GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	ret = xhci_get_ext_property(xhci, 0, 0, PROP_ECI_AUDIO,
+				    AUDIO_SUBTYPE_GET_RES, ctx, sizeof(*ctx));
+	if (ret < 0) {
+		kfree(ctx);
+		return ret;
+	}
+
+	res_max = ctx->generic.byte[0];
+	kfree(ctx);
+
+	/* Intel hosts sideband resources are capped at 6 */
+	if (xhci->quirks & XHCI_INTEL_HOST)
+		res_max = min(res_max, 6);
+
+	return res_max;
+}
+
+static bool
+xhci_sideband_hw_capable(struct xhci_hcd *xhci)
+{
+	u16 buf = 0;
+	int res_max;
+	int ret;
+
+	/* fastpath, all checks are done if resource limits are set */
+	if (xhci->sideband_idr.id_lim.max > 0)
+		return true;
+
+	/* xHCI 1.2 and later can support GSC bit in hcc_params2 register */
+	if ((xhci->hci_version < 0x120) || !(xhci->hcc_params2 & HCC2_GSC))
+		return false;
+	/*
+	 * Note, normally xHC hardware writes directly to buf, so buf needs to
+	 * be DMA mappable. PROP_ECI_ALL is special and returns 16 bits data in
+	 * the command completion event, which is then copied to buf.
+	 */
+	ret = xhci_get_ext_property(xhci, 0, 0, PROP_ECI_ALL, 0, &buf, sizeof(buf));
+	if (ret < 0 || !(buf & PROP_ECI_AUDIO))
+		return false;
+
+	/* check xHC has at least one resource for endpoint sideband use */
+	res_max = xhci_sideband_hw_max_resources(xhci);
+	if (res_max > 0) {
+		xhci->sideband_idr.id_lim.min = 1;
+		xhci->sideband_idr.id_lim.max = res_max;
+		return true;
+	}
+
+	return false;
+}
+
 static struct sg_table *
 xhci_ring_to_sgtable(struct xhci_sideband *sb, struct xhci_ring *ring)
 {
@@ -75,20 +154,234 @@ err:
 	return NULL;
 }
 
-/* Caller must hold sb->mutex */
-static void
-__xhci_sideband_remove_endpoint(struct xhci_sideband *sb, struct xhci_virt_ep *ep)
+/* Return the current vdev of sb->udev, or NULL if it was freed or reallocated */
+static struct xhci_virt_device *
+sideband_to_vdev(struct xhci_sideband *sb)
 {
+	struct xhci_virt_device *vdev;
+
+	if (!sb->udev || !sb->udev->slot_id)
+		return NULL;
+
+	vdev = sb->xhci->devs[sb->udev->slot_id];
+	if (vdev && vdev->sideband == sb)
+		return vdev;
+
+	return NULL;
+}
+
+static bool
+xhci_sideband_endpoint_belongs(struct xhci_sideband *sb,
+			       struct usb_host_endpoint *host_ep)
+{
+	unsigned int epnum;
+
+	if (!sb || !host_ep)
+		return false;
+
+	epnum = usb_endpoint_num(&host_ep->desc);
+
+	if (usb_endpoint_dir_in(&host_ep->desc))
+		return sb->udev->ep_in[epnum] == host_ep;
+
+	return sb->udev->ep_out[epnum] == host_ep;
+}
+
+/*
+ * Return the current virt ep of sb->udev at ep_index,
+ * or NULL if vdev was freed or reallocated
+ */
+static struct xhci_virt_ep *
+sideband_to_ep(struct xhci_sideband *sb, unsigned int ep_index)
+{
+	struct xhci_virt_device *vdev;
+
+	lockdep_assert_held(&sb->mutex);
+	lockdep_assert_held(&sb->xhci->lock);
+
+	vdev = sideband_to_vdev(sb);
+	if (!vdev)
+		return NULL;
+
+	return &vdev->eps[ep_index];
+}
+
+/*
+ * Synchronous xHCI stop endpoint helper. Issues a stop endpoint command and
+ * waits for the command completion before returning. This does not call
+ * xhci_handle_cmd_stop_ep(), which has additional handling for 'context error'
+ * cases, along with transfer ring cleanup.
+ *
+ * Caller must hold sb->mutex
+ */
+static int
+sideband_stop_endpoint_sync(struct xhci_sideband *sb, unsigned int ep_index,
+			    bool remove)
+{
+	struct xhci_virt_device *vdev;
+	struct xhci_command *cmd;
+	struct xhci_virt_ep *ep;
+	struct xhci_ep_ctx *ctx;
+	unsigned long flags;
+	int ret = -ENODEV;
+
 	lockdep_assert_held(&sb->mutex);
 
-	/*
-	 * Issue a stop endpoint command when an endpoint is removed.
-	 * The stop ep cmd handler will handle the ring cleanup.
-	 */
-	xhci_stop_endpoint_sync(sb->xhci, ep, 0, GFP_KERNEL);
+	cmd = xhci_alloc_command(sb->xhci, true, GFP_KERNEL);
 
-	ep->sideband = NULL;
-	sb->eps[ep->ep_index] = NULL;
+	spin_lock_irqsave(&sb->xhci->lock, flags);
+
+	vdev = sideband_to_vdev(sb);
+	ep = sb->eps[ep_index];
+
+	/* validate that xhci didn't reallocate vdev during reset or resume */
+	if (!vdev || !ep || ep->sideband != sb)
+		goto out_unlock;
+
+	if (remove) {
+		ep->sideband = NULL;
+		/* endpoint is removed, not running is not an error */
+		ret = 0;
+	}
+
+	if (!ep->ring)
+		goto out_unlock;
+
+	/* Stop the endpoint if it's running */
+	ctx = xhci_get_ep_ctx(sb->xhci, vdev->out_ctx, ep_index);
+	if (GET_EP_CTX_STATE(ctx) == EP_STATE_RUNNING) {
+		if (!cmd) {
+			ret = -ENOMEM;
+			goto out_unlock;
+		}
+		ret = xhci_queue_stop_endpoint(sb->xhci, cmd, vdev->slot_id,
+					       ep_index, 0);
+		if (ret)
+			goto out_unlock;
+
+		xhci_ring_cmd_db(sb->xhci);
+		spin_unlock_irqrestore(&sb->xhci->lock, flags);
+		wait_for_completion(cmd->completion);
+
+		if (cmd->status == COMP_COMMAND_ABORTED ||
+		    cmd->status == COMP_COMMAND_RING_STOPPED) {
+			xhci_warn(sb->xhci, "Timeout while waiting for stop endpoint command\n");
+			ret = -ETIME;
+		}
+		xhci_free_command(sb->xhci, cmd);
+		return ret;
+	}
+
+out_unlock:
+	spin_unlock_irqrestore(&sb->xhci->lock, flags);
+	if (cmd)
+		xhci_free_command(sb->xhci, cmd);
+
+	return ret;
+}
+
+/*
+ * Hand an endpoint over to the xHC audio sideband using resource @res_id, or
+ * give it back to xhci if @res_id is 0 (xHCI 7.9.2.1). The vdev is validated
+ * under the same xhci->lock that queues the command. ep->sideband and
+ * sb->eps[] are only updated once the command completed successfully and the
+ * vdev has been validated again.
+ *
+ * Caller must hold sb->mutex
+ */
+static int
+sideband_set_ep_resource_sync(struct xhci_sideband *sb, unsigned int ep_index,
+			      u32 res_id)
+{
+	struct xhci_command *cmd;
+	struct xhci_virt_ep *ep;
+	unsigned long flags;
+	int ret = 0;
+
+	lockdep_assert_held(&sb->mutex);
+
+	cmd = xhci_alloc_command(sb->xhci, true, GFP_KERNEL);
+	if (!cmd)
+		ret = -ENOMEM;
+
+	spin_lock_irqsave(&sb->xhci->lock, flags);
+
+	/* validate that xhci didn't free or reallocate vdev */
+	ep = sideband_to_ep(sb, ep_index);
+	if (!ep) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	/* fail add if ep is already in sideband use, or uses streams */
+	if (res_id) {
+		if (ep->sideband)
+			ret = -EBUSY;
+		else if (ep->ep_state & EP_HAS_STREAMS)
+			ret = -EINVAL;
+	} else if (ep->sideband != sb) {
+		/* fail remove if endpoint isn't part of this sideband */
+		ret = -ENODEV;
+	}
+
+	if (ret)
+		goto out_unlock;
+
+	ret = xhci_queue_set_ext_property(sb->xhci, cmd, sb->udev->slot_id,
+					  ep_index + 1, 0, PROP_ECI_AUDIO,
+					  AUDIO_SUBTYPE_SET_RES, res_id);
+	if (ret)
+		goto out_unlock;
+
+	xhci_ring_cmd_db(sb->xhci);
+	spin_unlock_irqrestore(&sb->xhci->lock, flags);
+
+	wait_for_completion(cmd->completion);
+
+	spin_lock_irqsave(&sb->xhci->lock, flags);
+	ep = sideband_to_ep(sb, ep_index);
+	if (!ep) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	if (cmd->status != COMP_SUCCESS) {
+		ret = -EIO;
+		goto out_unlock;
+	}
+
+	ep->sideband = res_id ? sb : NULL;
+	sb->eps[ep_index] = res_id ? ep : NULL;
+
+out_unlock:
+	spin_unlock_irqrestore(&sb->xhci->lock, flags);
+	if (cmd)
+		xhci_free_command(sb->xhci, cmd);
+
+	return ret;
+}
+
+/* Caller must hold sb->mutex */
+static int
+__xhci_sideband_remove_endpoint(struct xhci_sideband *sb, unsigned int ep_index)
+{
+	int ret = 0;
+
+	lockdep_assert_held(&sb->mutex);
+
+	if (sb->type == XHCI_SIDEBAND_VENDOR) {
+		ret = sideband_stop_endpoint_sync(sb, ep_index, true);
+		sb->eps[ep_index] = NULL;
+	}
+
+	if (sb->type == XHCI_SIDEBAND_AUDIO) {
+		ret = sideband_set_ep_resource_sync(sb, ep_index, 0);
+		/* removed on success or when the endpoint is no longer ours */
+		if (ret == 0 || ret == -ENODEV)
+			sb->eps[ep_index] = NULL;
+	}
+
+	return ret;
 }
 
 /* Caller must hold sb->mutex */
@@ -105,6 +398,213 @@ __xhci_sideband_remove_interrupter(struct xhci_sideband *sb)
 }
 
 /* sideband api functions */
+
+/**
+ * xhci_sideband_get_ep_properties - query xHC properties for an endpoint
+ * @sb: sideband instance for this usb device
+ * @host_ep: usb host endpoint
+ * @properties: returned properties.
+ *
+ * Return: 0 on success, negative error otherwise
+ */
+int
+xhci_sideband_get_ep_properties(struct xhci_sideband *sb,
+				struct usb_host_endpoint *host_ep,
+				struct xhci_sideband_ep_properties *properties)
+{
+	union xhci_extprop_ctx *ctx;
+	unsigned int ep_index;
+	struct device *dev;
+	u32 ep_id;
+	int ret = 0;
+
+	guard(mutex)(&sb->mutex);
+
+	if (!sideband_to_vdev(sb))
+		return -ENODEV;
+
+	if (!xhci_sideband_endpoint_belongs(sb, host_ep))
+		return -EINVAL;
+
+	if (sb->type != XHCI_SIDEBAND_AUDIO || !properties)
+		return -EINVAL;
+
+	memset(properties, 0, sizeof(*properties));
+	ep_index = xhci_get_endpoint_index(&host_ep->desc);
+	dev = xhci_to_hcd(sb->xhci)->self.controller;
+	ep_id = ep_index + 1;
+
+	/* get the PCI B:D:F data of parent xHC */
+	if (dev_is_pci(dev)) {
+		struct pci_dev *pdev = to_pci_dev(dev);
+
+		properties->bus = pdev->bus->number;
+		properties->device = PCI_SLOT(pdev->devfn);
+		properties->function = PCI_FUNC(pdev->devfn);
+	}
+
+	properties->slot_id = sb->udev->slot_id;
+
+	properties->reserved_res_id = sb->eps_res_id[ep_index];
+
+	/* no resource id set for endpoint, don't query ep property */
+	if (properties->reserved_res_id == 0)
+		return 0;
+
+	ctx = kzalloc_obj(*ctx, GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	/* query extended endpoint property from xHC */
+	ret = xhci_get_ext_property(sb->xhci, sb->udev->slot_id, ep_id,
+				    PROP_ECI_AUDIO, AUDIO_SUBTYPE_GET_EP_PROP,
+				    ctx, sizeof(*ctx));
+	if (!ret) {
+		properties->rh_port = ctx->audio_ep.rh_port;
+		properties->res_id = ctx->audio_ep.res_id;
+		properties->port_speed = ctx->audio_ep.port_speed_tt & 0xf;
+		properties->tt = !!(ctx->audio_ep.port_speed_tt & 0x10);
+	}
+
+	kfree(ctx);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(xhci_sideband_get_ep_properties);
+
+/**
+ * xhci_sideband_alloc_resource_id - reserve a resource id to offload an endpoint
+ * @sb: sideband instance for this usb device
+ * @host_ep: usb host endpoint
+ * @min: lowest resource id acceptable to the caller, 0 for no preference
+ * @max: highest resource id acceptable to the caller, 0 for no preference
+ *
+ * Reserves a sideband resource id for this endpoint from the limited set of
+ * xHC resource ids. Only valid for XHCI_SIDEBAND_AUDIO sideband types.
+ * Once an endpoint has a valid resource id then it can be assigned to audio
+ * sideband by calling xhci_sideband_add_endpoint()
+ *
+ * The xHC limits which resources an endpoint of a direction may use. An
+ * offload engine which ties a function to particular resources narrows that
+ * further with @min and @max, which have to lie within the xHC's limits for
+ * the endpoint; the first free resource of the intersection is reserved.
+ * With both 0 the first free resource the xHC allows is reserved.
+ *
+ * An endpoint holds one reservation at a time; it has to be released with
+ * xhci_sideband_free_resource_id() before another one can be made.
+ *
+ * Returns: positive resource id on success, -EBUSY if all resources of the
+ * range are taken or the endpoint already holds a reservation, negative
+ * error otherwise.
+ */
+int
+xhci_sideband_alloc_resource_id(struct xhci_sideband *sb,
+				struct usb_host_endpoint *host_ep,
+				unsigned int min, unsigned int max)
+{
+	struct xhci_sideband_idr *res;
+	struct xa_limit lim;
+	unsigned int ep_index;
+	unsigned int res_id;
+	int ret;
+
+	if (!xhci_sideband_endpoint_belongs(sb, host_ep))
+		return -EINVAL;
+
+	guard(mutex)(&sb->mutex);
+
+	if (sb->type != XHCI_SIDEBAND_AUDIO)
+		return -EINVAL;
+
+	ep_index = xhci_get_endpoint_index(&host_ep->desc);
+	res = &sb->xhci->sideband_idr;
+	lim = res->id_lim;
+
+	/*
+	 * Intel xHC hardware limits resource IDs 1 and 2 to output endpoints.
+	 * IDs 3-6 are for input endpoints
+	 */
+	if (sb->xhci->quirks & XHCI_INTEL_HOST) {
+		if (usb_endpoint_dir_out(&host_ep->desc))
+			lim.max = min(lim.max, 2);
+		else
+			lim.min = 3;
+	}
+
+	if (min) {
+		if (min < lim.min || min > lim.max)
+			return -EINVAL;
+		lim.min = min;
+	}
+
+	if (max) {
+		if (max < lim.min || max > lim.max)
+			return -EINVAL;
+		lim.max = max;
+	}
+
+	if (sb->eps_res_id[ep_index]) {
+		dev_dbg(&sb->udev->dev, "ep %u already holds resource id %u\n",
+			ep_index, sb->eps_res_id[ep_index]);
+		return -EBUSY;
+	}
+
+	ret = xa_alloc(&res->id_xa, &res_id, sb, lim, GFP_KERNEL);
+	if (ret)
+		return ret;
+
+	sb->eps_res_id[ep_index] = res_id;
+
+	dev_dbg(&sb->udev->dev, "allocated sideband resource %u for ep %u\n",
+		res_id, ep_index);
+
+	return res_id;
+}
+EXPORT_SYMBOL_GPL(xhci_sideband_alloc_resource_id);
+
+/**
+ * xhci_sideband_free_resource_id - release a resource id
+ * @sb: sideband instance for this usb device
+ * @res_id: resource id to free
+ *
+ * Free a previously reserved sideband resource id, making it available for
+ * endpoints. Don't release the resource id if the endpoint is in active
+ * sideband use.
+ *
+ * Returns: 0 on success, negative error otherwise.
+ */
+int
+xhci_sideband_free_resource_id(struct xhci_sideband *sb,
+			       unsigned int res_id)
+{
+	struct xhci_sideband_idr *res;
+	int ep_index;
+
+	if (!sb)
+		return -EINVAL;
+
+	res = &sb->xhci->sideband_idr;
+
+	guard(mutex)(&sb->mutex);
+
+	ep_index = sideband_res_id_to_ep_index(sb, res_id);
+	if (ep_index < 0)
+		return -ENODEV;
+
+	if (sb != xa_load(&res->id_xa, res_id))
+		return -ENODEV;
+	if (sb->eps[ep_index])
+		return -EBUSY;
+
+	xa_erase(&res->id_xa, res_id);
+	sb->eps_res_id[ep_index] = 0;
+
+	dev_dbg(&sb->udev->dev, "erase ep %u resource id %u\n",
+		ep_index, res_id);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(xhci_sideband_free_resource_id);
 
 /**
  * xhci_sideband_notify_ep_ring_free - notify client of xfer ring free
@@ -148,17 +648,31 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 {
 	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
+	unsigned int res_id;
+	unsigned long flags;
+	int ret = 0;
 
 	guard(mutex)(&sb->mutex);
 
-	if (!sb->vdev)
-		return -ENODEV;
+	if (!xhci_sideband_endpoint_belongs(sb, host_ep))
+		return -EINVAL;
 
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
-	ep = &sb->vdev->eps[ep_index];
 
-	if (ep->ep_state & EP_HAS_STREAMS)
-		return -EINVAL;
+	if (sb->eps[ep_index])
+		return -EBUSY;
+
+	if (sb->type == XHCI_SIDEBAND_AUDIO) {
+		res_id = sb->eps_res_id[ep_index];
+		if (res_id == 0) {
+			dev_dbg(&sb->udev->dev,
+				"Can't offload endpoint %u, missing resource id\n",
+				ep_index);
+			return -EINVAL;
+		}
+
+		return sideband_set_ep_resource_sync(sb, ep_index, res_id);
+	}
 
 	/*
 	 * Note, we don't know the DMA mask of the audio DSP device, if its
@@ -168,13 +682,24 @@ xhci_sideband_add_endpoint(struct xhci_sideband *sb,
 	 * and let this function add the endpoint and allocate the ring buffer
 	 * with the smallest common DMA mask
 	 */
-	if (sb->eps[ep_index] || ep->sideband)
-		return -EBUSY;
+	spin_lock_irqsave(&sb->xhci->lock, flags);
 
-	ep->sideband = sb;
-	sb->eps[ep_index] = ep;
+	ep = sideband_to_ep(sb, ep_index);
+	if (!ep) {
+		ret = -ENODEV;
+	} else if (ep->sideband) {
+		ret = -EBUSY;
+	} else if (ep->ep_state & EP_HAS_STREAMS) {
+		ret = -EINVAL;
+	} else {
+		/* success */
+		ep->sideband = sb;
+		sb->eps[ep_index] = ep;
+	}
 
-	return 0;
+	spin_unlock_irqrestore(&sb->xhci->lock, flags);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_add_endpoint);
 
@@ -194,20 +719,13 @@ int
 xhci_sideband_remove_endpoint(struct xhci_sideband *sb,
 			      struct usb_host_endpoint *host_ep)
 {
-	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
 
 	guard(mutex)(&sb->mutex);
 
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
-	ep = sb->eps[ep_index];
 
-	if (!ep || !ep->sideband || ep->sideband != sb)
-		return -ENODEV;
-
-	__xhci_sideband_remove_endpoint(sb, ep);
-
-	return 0;
+	return __xhci_sideband_remove_endpoint(sb, ep_index);
 }
 EXPORT_SYMBOL_GPL(xhci_sideband_remove_endpoint);
 
@@ -215,18 +733,51 @@ int
 xhci_sideband_stop_endpoint(struct xhci_sideband *sb,
 			    struct usb_host_endpoint *host_ep)
 {
+	unsigned int ep_index;
+
+	guard(mutex)(&sb->mutex);
+
+	ep_index = xhci_get_endpoint_index(&host_ep->desc);
+
+	return sideband_stop_endpoint_sync(sb, ep_index, false);
+}
+EXPORT_SYMBOL_GPL(xhci_sideband_stop_endpoint);
+
+/**
+ * xhci_sideband_start_endpoint - restart a sideband endpoint
+ * @sb: sideband instance for this usb device
+ * @host_ep: usb host endpoint
+ *
+ * Rings the doorbell of an endpoint stopped with xhci_sideband_stop_endpoint(),
+ * which is what moves a stopped endpoint back to the running state. Ringing
+ * the doorbell of a running endpoint does nothing.
+ *
+ * Return: 0 on success, negative error otherwise.
+ */
+int
+xhci_sideband_start_endpoint(struct xhci_sideband *sb,
+			     struct usb_host_endpoint *host_ep)
+{
 	struct xhci_virt_ep *ep;
 	unsigned int ep_index;
 
+	/* the same locking as stopping the endpoint: sb->eps[] is sb->mutex's */
+	guard(mutex)(&sb->mutex);
+
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
-	ep = sb->eps[ep_index];
 
-	if (!ep || !ep->sideband || ep->sideband != sb)
-		return -EINVAL;
+	guard(spinlock_irqsave)(&sb->xhci->lock);
 
-	return xhci_stop_endpoint_sync(sb->xhci, ep, 0, GFP_KERNEL);
+	/* validate that xhci didn't free or reallocate vdev and its endpoint */
+	ep = sideband_to_ep(sb, ep_index);
+	if (!ep || ep->sideband != sb)
+		return -ENODEV;
+
+	xhci_ring_ep_doorbell(sb->xhci, sb->udev->slot_id, ep_index, 0);
+
+	return 0;
 }
-EXPORT_SYMBOL_GPL(xhci_sideband_stop_endpoint);
+EXPORT_SYMBOL_GPL(xhci_sideband_start_endpoint);
 
 /**
  * xhci_sideband_get_endpoint_buffer - gets the endpoint transfer buffer address
@@ -251,7 +802,7 @@ xhci_sideband_get_endpoint_buffer(struct xhci_sideband *sb,
 	ep_index = xhci_get_endpoint_index(&host_ep->desc);
 	ep = sb->eps[ep_index];
 
-	if (!ep || !ep->ring || !ep->sideband || ep->sideband != sb)
+	if (!sideband_to_vdev(sb) || !ep || !ep->ring || ep->sideband != sb)
 		return NULL;
 
 	return xhci_ring_to_sgtable(sb, ep->ring);
@@ -329,7 +880,7 @@ xhci_sideband_create_interrupter(struct xhci_sideband *sb, int num_seg,
 
 	guard(mutex)(&sb->mutex);
 
-	if (!sb->vdev)
+	if (!sideband_to_vdev(sb))
 		return -ENODEV;
 
 	if (sb->ir)
@@ -408,13 +959,22 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 	struct xhci_virt_device *vdev;
 	struct xhci_sideband *sb;
 
-	/*
-	 * Make sure the usb device is connected to a xhci controller.  Fail
-	 * registration if the type is anything other than  XHCI_SIDEBAND_VENDOR,
-	 * as this is the only type that is currently supported by xhci-sideband.
-	 */
-	if (!udev->slot_id || type != XHCI_SIDEBAND_VENDOR)
+	/* Make sure the usb device is connected to a xhci controller. */
+	if (!udev->slot_id)
 		return NULL;
+
+	switch (type) {
+	case XHCI_SIDEBAND_VENDOR:
+		break;
+	case XHCI_SIDEBAND_AUDIO:
+		if (!xhci_sideband_hw_capable(xhci)) {
+			dev_info(&udev->dev, "Host not sideband capable\n");
+			return NULL;
+		}
+		break;
+	default:
+		return NULL;
+	}
 
 	sb = kzalloc_node(sizeof(*sb), GFP_KERNEL, dev_to_node(hcd->self.sysdev));
 	if (!sb)
@@ -436,13 +996,15 @@ xhci_sideband_register(struct usb_interface *intf, enum xhci_sideband_type type,
 	}
 
 	sb->xhci = xhci;
-	sb->vdev = vdev;
+	sb->udev = udev;
 	sb->intf = intf;
 	sb->type = type;
 	sb->notify_client = notify_client;
 	vdev->sideband = sb;
 
 	spin_unlock_irq(&xhci->lock);
+
+	dev_dbg(&udev->dev, "Registered for sideband use\n");
 
 	return sb;
 }
@@ -462,32 +1024,56 @@ void
 xhci_sideband_unregister(struct xhci_sideband *sb)
 {
 	struct xhci_virt_device *vdev;
+	struct xhci_virt_ep *ep;
+	struct usb_device *udev;
 	struct xhci_hcd *xhci;
+	int res_id;
 	int i;
 
 	if (!sb)
 		return;
 
 	xhci = sb->xhci;
+	udev = sb->udev;
 
-	scoped_guard(mutex, &sb->mutex) {
-		vdev = sb->vdev;
-		if (!vdev)
-			return;
+	mutex_lock(&sb->mutex);
 
-		for (i = 0; i < EP_CTX_PER_DEV; i++)
-			if (sb->eps[i])
-				__xhci_sideband_remove_endpoint(sb, sb->eps[i]);
+	for (i = 0; i < EP_CTX_PER_DEV; i++) {
+		if (sb->eps[i])
+			__xhci_sideband_remove_endpoint(sb, i);
 
-		__xhci_sideband_remove_interrupter(sb);
+		if (sb->type != XHCI_SIDEBAND_AUDIO)
+			continue;
 
-		sb->vdev = NULL;
+		res_id = sb->eps_res_id[i];
+		if (res_id && sb == xa_load(&xhci->sideband_idr.id_xa, res_id)) {
+			dev_dbg(&udev->dev, "%s erase ep %u res_id %u\n",
+				__func__, i, res_id);
+			xa_erase(&xhci->sideband_idr.id_xa, res_id);
+		}
 	}
 
+	__xhci_sideband_remove_interrupter(sb);
+
 	spin_lock_irq(&xhci->lock);
+
+	/* clear endpoint sideband pointers for endpoints that failed removal */
+	for (i = 0; i < EP_CTX_PER_DEV; i++) {
+		ep = sideband_to_ep(sb, i);
+		if (ep && ep->sideband == sb)
+			ep->sideband = NULL;
+		sb->eps[i] = NULL;
+	}
+	vdev = sideband_to_vdev(sb);
+	if (vdev)
+		vdev->sideband = NULL;
+	sb->udev = NULL;
 	sb->xhci = NULL;
-	vdev->sideband = NULL;
 	spin_unlock_irq(&xhci->lock);
+
+	mutex_unlock(&sb->mutex);
+
+	dev_dbg(&udev->dev, "sideband unregistered\n");
 
 	kfree(sb);
 }

@@ -2137,6 +2137,7 @@ void snd_usb_set_format_quirk(struct snd_usb_substream *subs,
 		break;
 	}
 }
+EXPORT_SYMBOL_GPL(snd_usb_set_format_quirk);
 
 int snd_usb_select_mode_quirk(struct snd_usb_audio *chip,
 			      const struct audioformat *fmt)

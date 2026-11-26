@@ -19,6 +19,7 @@
 #include <sound/hda_register.h>
 
 #include <linux/acpi.h>
+#include <linux/bitfield.h>
 #include <linux/debugfs.h>
 #include <linux/module.h>
 #include <linux/soundwire/sdw.h>
@@ -30,9 +31,11 @@
 #include <sound/sof.h>
 #include <sound/sof/xtensa.h>
 #include <sound/hda-mlink.h>
+#include <sound/usb-offload.h>
 #include "../sof-audio.h"
 #include "../sof-pci-dev.h"
 #include "../ops.h"
+#include "../ipc4-priv.h"
 #include "../ipc4-topology.h"
 #include "../../intel/common/sof-function-topology-lib.h"
 #include "hda.h"
@@ -418,6 +421,178 @@ static inline void hda_dsp_sdw_process_mic_privacy(struct snd_sof_dev *sdev) { }
 
 #endif /* IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_SOUNDWIRE) */
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD)
+
+/* Whether the UAOL links of the controller can be put to use at all */
+static bool hda_uaol_available(struct snd_sof_dev *sdev)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+
+	if (sdev->pdata->ipc_type != SOF_IPC_TYPE_4)
+		return false;
+
+	if (!ipc4_data->uaol_supported || !ipc4_data->uaol_caps) {
+		dev_dbg(sdev->dev, "UAOL: no firmware support\n");
+		return false;
+	}
+
+	return true;
+}
+
+/* The stream capabilities the firmware reported for UAOL link @link */
+static int hda_uaol_link_caps(struct snd_sof_dev *sdev, unsigned int link, u32 *caps)
+{
+	struct sof_ipc4_fw_data *ipc4_data = sdev->private;
+	struct sof_ipc4_intel_uaol_caps *uaol_caps;
+
+	if (!hda_uaol_available(sdev))
+		return -ENODEV;
+
+	uaol_caps = ipc4_data->uaol_caps;
+	if (link >= uaol_caps->link_count)
+		return -ENODEV;
+
+	*caps = uaol_caps->link_caps[link].stream_caps;
+
+	return 0;
+}
+
+/*
+ * The link's streams are tied to functions by the firmware's FIFO layout, and
+ * the xHCI resource an endpoint gets decides the stream it runs on (stream =
+ * resource - 1): the output streams come first, then the input streams which
+ * carry audio, and the last ones, one per output stream, carry the clock
+ * feedback. An endpoint has to be placed within the streams of its function.
+ */
+static int uaol_get_resource_range(struct device *dev, int direction, bool feedback,
+				   unsigned int *first, unsigned int *last)
+{
+	unsigned int tx_streams, rx_streams, audio_rx_streams, start, count;
+	struct snd_sof_dev *sdev = dev_get_drvdata(dev);
+	u32 caps;
+	int ret;
+
+	ret = hda_uaol_link_caps(sdev, 0, &caps);
+	if (ret)
+		return ret;
+
+	tx_streams = FIELD_GET(SOF_IPC4_UAOL_OUTPUT_STREAMS_MASK, caps);
+	rx_streams = FIELD_GET(SOF_IPC4_UAOL_INPUT_STREAMS_MASK, caps);
+	audio_rx_streams = rx_streams > tx_streams ? rx_streams - tx_streams : 0;
+
+	if (feedback) {
+		start = tx_streams + audio_rx_streams;
+		count = tx_streams;
+	} else if (direction == SNDRV_PCM_STREAM_PLAYBACK) {
+		start = 0;
+		count = tx_streams;
+	} else {
+		start = tx_streams;
+		count = audio_rx_streams;
+	}
+
+	if (!count)
+		return -ENODEV;
+
+	*first = start + 1;
+	*last = start + count;
+
+	return 0;
+}
+
+static const struct usb_offload_ops uaol_callback = {
+	.notify_connect = hda_uaol_notify_connect,
+	.notify_disconnect = hda_uaol_notify_disconnect,
+	.get_resource_range = uaol_get_resource_range,
+};
+
+/* One offload context in the library is one UAOL link, over which the DSP reaches an xHCI */
+static int hda_uaol_register(struct snd_sof_dev *sdev)
+{
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	struct usb_offload_res res = {
+		.dev = sdev->dev,
+		.ops = &uaol_callback,
+		/*
+		 * SOF's pipeline only has a 24-bit representation as S24_LE
+		 * (24 valid bits in a 4-byte container); a device that only
+		 * packs its 24-bit audio into 3 bytes (S24_3LE) still needs to
+		 * be usable.
+		 */
+		.s24_3le_as_s24_le = true,
+		/*
+		 * The firmware applies the clock feedback of an asynchronous
+		 * playback stream by spreading the samples linearly over the
+		 * service interval, which is audible on the gear that uses
+		 * asynchronous playback in the first place.
+		 */
+		.async_playback_on_host = true,
+	};
+	struct usb_offload_ctx *uaol;
+
+	INIT_LIST_HEAD(&hdev->uaol_devices);
+	mutex_init(&hdev->uaol_mutex);
+
+	if (!hdev->uaol_link_count || !hda_uaol_available(sdev))
+		return 0;
+
+	uaol = usb_offload_register(&res);
+	if (IS_ERR(uaol)) {
+		dev_err(sdev->dev, "USB audio offload registration failed: %ld\n",
+			PTR_ERR(uaol));
+		return PTR_ERR(uaol);
+	}
+
+	hdev->uaol = uaol;
+
+	return 0;
+}
+
+static void hda_uaol_unregister(struct snd_sof_dev *sdev)
+{
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+
+	usb_offload_unregister(hdev->uaol);
+	hdev->uaol = NULL;
+}
+
+#else /* IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD) */
+
+static inline bool hda_uaol_available(struct snd_sof_dev *sdev)
+{
+	return false;
+}
+
+static inline int hda_uaol_link_caps(struct snd_sof_dev *sdev, unsigned int link, u32 *caps)
+{
+	return -ENODEV;
+}
+
+static inline int hda_uaol_register(struct snd_sof_dev *sdev)
+{
+	return 0;
+}
+
+static inline void hda_uaol_unregister(struct snd_sof_dev *sdev) { }
+
+#endif /* IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL_USB_OFFLOAD) */
+
+/*
+ * The firmware configuration, and with it the offload capabilities, is only
+ * parsed once the DSP boot has completed, which is after the post_fw_run
+ * stage. This is the first hook that runs late enough to query it.
+ */
+int hda_machine_register(struct snd_sof_dev *sdev, void *pdata)
+{
+	int ret;
+
+	ret = hda_uaol_register(sdev);
+	if (ret < 0)
+		dev_dbg(sdev->dev, "USB audio offload is not available: %d\n", ret);
+
+	return sof_machine_register(sdev, pdata);
+}
+
 /* pre fw run operations */
 int hda_dsp_pre_fw_run(struct snd_sof_dev *sdev)
 {
@@ -499,6 +674,10 @@ MODULE_PARM_DESC(mclk_id, "SOF SSP mclk_id");
 static int bt_link_mask_override = -1;
 module_param_named(bt_link_mask, bt_link_mask_override, int, 0444);
 MODULE_PARM_DESC(bt_link_mask, "SOF BT offload link mask");
+
+static int uaol_link_mask_override = -1;
+module_param_named(uaol_link_mask, uaol_link_mask_override, int, 0444);
+MODULE_PARM_DESC(uaol_link_mask, "SOF USB audio offload link mask");
 
 static int hda_init(struct snd_sof_dev *sdev)
 {
@@ -637,6 +816,16 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 		dev_err(bus->dev, "error: init chip failed with ret: %d\n",
 			ret);
 		return ret;
+	}
+
+	/* the UAOL links have been enumerated by hda_bus_ml_init() */
+	hdev->uaol_link_count = hdac_bus_eml_get_count(bus, true,
+						       AZX_REG_ML_LEPTR_ID_INTEL_UAOL);
+	if (hdev->uaol_link_count) {
+		/* hda-mlink has no UAOL instance offset, the sublinks all alias to sublink 0 */
+		dev_dbg(sdev->dev, "UAOL links on the controller: %d (usable: 1)\n",
+			hdev->uaol_link_count);
+		hdev->uaol_link_count = 1;
 	}
 
 	/* Skip SoundWire if it is not supported */
@@ -971,6 +1160,8 @@ void hda_dsp_remove(struct snd_sof_dev *sdev)
 		cancel_delayed_work_sync(&hda->d0i3_work);
 
 	hda_codec_device_remove(sdev);
+
+	hda_uaol_unregister(sdev);
 
 	hda_sdw_exit(sdev);
 
@@ -1498,6 +1689,59 @@ void hda_set_mach_params(struct snd_soc_acpi_mach *mach,
 	mach_params->dai_drivers = desc->ops->drv;
 }
 
+/*
+ * The link runs an audio stream per output stream and per input stream not
+ * taken by the clock feedback of an output stream; the DAIs put a ceiling on
+ * how many of them are used. 0 when the link cannot be used.
+ */
+static unsigned int hda_uaol_stream_num(struct snd_sof_dev *sdev, int direction)
+{
+	unsigned int playback, capture;
+
+	/* what the gateway configuration can hold is what the DAIs have to offer */
+	static_assert(SOF_UAOL_MAX_PLAYBACK_STREAMS >= SOF_IPC4_UAOL_FIFO_SAO_STREAMS &&
+		      SOF_UAOL_MAX_CAPTURE_STREAMS >= SOF_IPC4_UAOL_FIFO_SAO_STREAMS);
+
+	if (!hda_uaol_available(sdev))
+		return 0;
+
+	/* the counts the gateway configuration can be built for, see the topology side */
+	if (sof_ipc4_uaol_get_stream_counts(sdev, 0, &playback, &capture))
+		return 0;
+
+	return direction == SNDRV_PCM_STREAM_PLAYBACK ? playback : capture;
+}
+
+void hda_finalize_mach_params(struct snd_sof_dev *sdev,
+			      struct snd_soc_acpi_mach_params *params)
+{
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
+	int i;
+
+	if (!params->uaol_link_mask)
+		return;
+
+	/* the UAOL DAIs size their offload routes by the same counts */
+	for (i = 0; i <= SNDRV_PCM_STREAM_LAST; i++)
+		hdev->uaol_stream_num[i] = hda_uaol_stream_num(sdev, i);
+	params->uaol_playback_num = hdev->uaol_stream_num[SNDRV_PCM_STREAM_PLAYBACK];
+	params->uaol_capture_num = hdev->uaol_stream_num[SNDRV_PCM_STREAM_CAPTURE];
+
+	/*
+	 * The controller's UAOL links are only usable if the booted firmware
+	 * supports them and the DAIs are built.
+	 */
+	if (!params->uaol_playback_num && !params->uaol_capture_num) {
+		dev_dbg(sdev->dev, "UAOL: withdrawing link mask %#x\n",
+			params->uaol_link_mask);
+		params->uaol_link_mask = 0;
+		return;
+	}
+
+	dev_dbg(sdev->dev, "UAOL: link mask %#x, %u playback and %u capture streams per link\n",
+		params->uaol_link_mask, params->uaol_playback_num, params->uaol_capture_num);
+}
+
 static int check_tplg_quirk_mask(struct snd_soc_acpi_mach *mach)
 {
 	u32 dmic_ssp_quirk;
@@ -1537,6 +1781,7 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 	u32 interface_mask = hda_get_interface_mask(sdev);
 	struct snd_sof_pdata *sof_pdata = sdev->pdata;
 	const struct sof_dev_desc *desc = sof_pdata->desc;
+	struct sof_intel_hda_dev *hdev = sdev->pdata->hw_pdata;
 	struct hdac_bus *bus = sof_to_bus(sdev);
 	struct snd_soc_acpi_mach *mach = NULL;
 	enum snd_soc_acpi_intel_codec codec_type, amp_type;
@@ -1591,6 +1836,20 @@ struct snd_soc_acpi_mach *hda_machine_select(struct snd_sof_dev *sdev)
 		dev_warn(sdev->dev, "invalid BT link mask %#x found, reset the mask\n",
 			mach->mach_params.bt_link_mask);
 		mach->mach_params.bt_link_mask = 0;
+	}
+
+	/* report the USB audio offload links enumerated on the controller */
+	if (hdev->uaol_link_count)
+		mach->mach_params.uaol_link_mask = GENMASK(hdev->uaol_link_count - 1, 0);
+
+	/* allow for module parameter override */
+	if (uaol_link_mask_override != -1) {
+		dev_dbg(sdev->dev, "overriding UAOL link mask %#x by kernel param %#x\n",
+			mach->mach_params.uaol_link_mask, uaol_link_mask_override);
+		if (uaol_link_mask_override & ~mach->mach_params.uaol_link_mask)
+			dev_warn(sdev->dev, "UAOL link mask %#x exceeds the links on the controller %#x\n",
+				 uaol_link_mask_override, mach->mach_params.uaol_link_mask);
+		mach->mach_params.uaol_link_mask = uaol_link_mask_override;
 	}
 
 	/*
@@ -1824,3 +2083,4 @@ MODULE_IMPORT_NS("SND_SOC_SDW_UTILS");
 MODULE_IMPORT_NS("SND_SOC_SOF_HDA_MLINK");
 MODULE_IMPORT_NS("SND_SOC_SOF_INTEL_HDA_COMMON");
 MODULE_IMPORT_NS("SND_SOC_ACPI_INTEL_MATCH");
+MODULE_IMPORT_NS("USB_AUDIO_OFFLOAD");
