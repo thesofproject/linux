@@ -215,6 +215,48 @@ static int sof_pcm_stream_free(struct snd_sof_dev *sdev,
 	int ret;
 	int err = 0;
 
+	/*
+	 * A WoV stream that ignored the system suspend has its pipelines still
+	 * running in the firmware. ALSA does not send STOP to a SUSPENDED stream
+	 * before hw_free/prepare, so stop the pipelines here to get the
+	 * started/paused bookkeeping in order. Otherwise the pipeline RESET is
+	 * skipped and the firmware gets asked to unbind a running pipeline.
+	 *
+	 * The BEs also ignored the suspend: DPCM considers them SUSPENDED while
+	 * their pipeline (and link DMA) is still running. Replay what the stack
+	 * missed in the same order as a regular STOP (BEs first, then the FE):
+	 * RESUME takes the BEs out of SUSPENDED and lets them drop their
+	 * suspend_ignored state, STOP then runs the full BE stop sequence.
+	 */
+	if (spcm->stream[dir].suspend_ignored) {
+		spcm->stream[dir].suspend_ignored = false;
+
+		if (free_widget_list && spcm->prepared[substream->stream]) {
+			struct snd_soc_pcm_runtime *fe = snd_soc_substream_to_rtd(substream);
+
+			ret = dpcm_be_dai_trigger(fe, dir, SNDRV_PCM_TRIGGER_RESUME);
+			if (!ret)
+				ret = dpcm_be_dai_trigger(fe, dir, SNDRV_PCM_TRIGGER_STOP);
+			if (ret < 0) {
+				spcm_err(spcm, substream->stream,
+					 "failed to stop the BEs of the suspend ignored stream: %d\n",
+					 ret);
+				err = ret;
+			}
+		}
+
+		if (spcm->prepared[substream->stream] && pcm_ops && pcm_ops->trigger) {
+			ret = pcm_ops->trigger(sdev->component, substream, spcm,
+					       SNDRV_PCM_TRIGGER_STOP, substream->stream);
+			if (ret < 0) {
+				spcm_err(spcm, substream->stream,
+					 "failed to stop the suspend ignored stream: %d\n",
+					 ret);
+				err = ret;
+			}
+		}
+	}
+
 	if (spcm->prepared[substream->stream]) {
 		/* stop DMA first if needed */
 		if (pcm_ops && pcm_ops->platform_stop_during_hw_free)
