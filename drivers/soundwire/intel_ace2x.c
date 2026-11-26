@@ -467,7 +467,8 @@ static void intel_shim_vs_init(struct sdw_intel *sdw)
 	u16p_replace_bits(&act, doais, SDW_SHIM2_INTEL_VS_ACTMCTL_DOAIS);
 	u16p_replace_bits(&act, dodse, SDW_SHIM2_INTEL_VS_ACTMCTL_DODSE);
 	u16p_replace_bits(&act, dods, SDW_SHIM2_INTEL_VS_ACTMCTL_DODS);
-	act |= SDW_SHIM2_INTEL_VS_ACTMCTL_DACTQE;
+	if (!intel_prop->no_dactqe)
+		act |= SDW_SHIM2_INTEL_VS_ACTMCTL_DACTQE;
 	intel_writew(shim_vs, SDW_SHIM2_INTEL_VS_ACTMCTL, act);
 	usleep_range(10, 15);
 }
