@@ -8,6 +8,7 @@
 #include <linux/acpi.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
+#include <linux/dmi.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -158,9 +159,27 @@ static void generic_new_peripheral_assigned(struct sdw_bus *bus,
 		sdw->link_res->hw_ops->program_sdi(sdw, dev_num);
 }
 
+/*
+ * Boards whose SoundWire peripherals do not work with the AC timing
+ * qualifier (DACTQE) enabled and the timing values provided by the BIOS.
+ * driver_data is the mask of affected links.
+ */
+static const struct dmi_system_id intel_no_dactqe_quirk_table[] = {
+	{
+		/* HP OmniBook Ultra 14, TAS2783 amplifiers on links 1 and 2 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "8EB4"),
+		},
+		.driver_data = (void *)(BIT(1) | BIT(2)),
+	},
+	{}
+};
+
 static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 {
 	struct sdw_master_prop *prop = &bus->prop;
+	const struct dmi_system_id *dmi_id;
 	struct sdw_intel_prop *intel_prop;
 	struct fwnode_handle *link;
 	char name[32];
@@ -241,6 +260,13 @@ static int sdw_master_read_intel_prop(struct sdw_bus *bus)
 	fwnode_property_read_u16(link,
 				 "intel-sdw-dods",
 				 &intel_prop->dods);
+
+	dmi_id = dmi_first_match(intel_no_dactqe_quirk_table);
+	if (dmi_id && ((unsigned long)dmi_id->driver_data & BIT(bus->link_id))) {
+		dev_info(bus->dev, "quirk: leaving AC timing qualifier disabled\n");
+		intel_prop->no_dactqe = true;
+	}
+
 	bus->vendor_specific_prop = intel_prop;
 
 	dev_dbg(bus->dev, "doaise %#x doais %#x dodse %#x dods %#x\n",

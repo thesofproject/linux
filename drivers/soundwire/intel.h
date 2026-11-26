@@ -93,6 +93,7 @@ struct sdw_intel_prop {
 	u16 doais;
 	u16 dodse;
 	u16 dods;
+	bool no_dactqe;
 };
 
 enum intel_pdi_type {
