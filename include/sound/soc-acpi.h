@@ -74,6 +74,8 @@ static inline struct snd_soc_acpi_mach *snd_soc_acpi_codec_list(void *arg)
  * @subsystem_id_set: true if a value has been written to
  *		      subsystem_vendor and subsystem_device.
  * @bt_link_mask: BT offload link enabled on the board
+ * @tplg_platform: platform name used in the function topology file names,
+ *		   when it can't be taken from the topology file name
  */
 struct snd_soc_acpi_mach_params {
 	u32 acpi_ipc_irq_index;
@@ -90,6 +92,7 @@ struct snd_soc_acpi_mach_params {
 	unsigned short subsystem_rev;
 	bool subsystem_id_set;
 	u32 bt_link_mask;
+	const char *tplg_platform;
 };
 
 /**

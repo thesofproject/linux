@@ -8,6 +8,7 @@
 
 #include <sound/soc-acpi.h>
 #include <sound/soc-acpi-intel-match.h>
+#include "sof-function-topology-lib.h"
 
 struct snd_soc_acpi_mach snd_soc_acpi_intel_hda_machines[] = {
 	{
@@ -15,6 +16,7 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_hda_machines[] = {
 		.drv_name = "skl_hda_dsp_generic",
 		.sof_tplg_filename = "sof-hda-generic", /* the tplg suffix is added at run time */
 		.tplg_quirk_mask = SND_SOC_ACPI_TPLG_INTEL_DMIC_NUMBER,
+		.get_function_tplg_files = sof_hda_get_tplg_files,
 	},
 	{},
 };
