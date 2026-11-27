@@ -187,9 +187,27 @@ static const struct snd_soc_acpi_adr_device rt1316_2_group1_adr[] = {
 	}
 };
 
+static const struct snd_soc_acpi_adr_device rt1316_2_l_group1_adr[] = {
+	{
+		.adr = 0x000230025D131601ull,
+		.num_endpoints = 1,
+		.endpoints = &spk_l_endpoint,
+		.name_prefix = "rt1316-1"
+	}
+};
+
 static const struct snd_soc_acpi_adr_device rt1316_3_group1_adr[] = {
 	{
 		.adr = 0x000330025D131601ull,
+		.num_endpoints = 1,
+		.endpoints = &spk_r_endpoint,
+		.name_prefix = "rt1316-2"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt1316_3_r_group1_adr[] = {
+	{
+		.adr = 0x000331025D131601ull,
 		.num_endpoints = 1,
 		.endpoints = &spk_r_endpoint,
 		.name_prefix = "rt1316-2"
@@ -253,6 +271,15 @@ static const struct snd_soc_acpi_adr_device rt1316_3_single_adr[] = {
 static const struct snd_soc_acpi_adr_device rt714_0_adr[] = {
 	{
 		.adr = 0x000030025D071401ull,
+		.num_endpoints = 1,
+		.endpoints = &single_endpoint,
+		.name_prefix = "rt714"
+	}
+};
+
+static const struct snd_soc_acpi_adr_device rt714_1_adr[] = {
+	{
+		.adr = 0x000130025D071401ull,
 		.num_endpoints = 1,
 		.endpoints = &single_endpoint,
 		.name_prefix = "rt714"
@@ -345,6 +372,30 @@ static const struct snd_soc_acpi_link_adr adl_sdca_3_in_1[] = {
 		.mask = BIT(3),
 		.num_adr = ARRAY_SIZE(rt1316_3_group1_adr),
 		.adr_d = rt1316_3_group1_adr,
+	},
+	{}
+};
+
+static const struct snd_soc_acpi_link_adr adl_sdw_rt711_link0_rt1316_link23_rt714_link1[] = {
+	{
+		.mask = BIT(0),
+		.num_adr = ARRAY_SIZE(rt711_sdca_0_adr),
+		.adr_d = rt711_sdca_0_adr,
+	},
+	{
+		.mask = BIT(2),
+		.num_adr = ARRAY_SIZE(rt1316_2_l_group1_adr),
+		.adr_d = rt1316_2_l_group1_adr,
+	},
+	{
+		.mask = BIT(3),
+		.num_adr = ARRAY_SIZE(rt1316_3_r_group1_adr),
+		.adr_d = rt1316_3_r_group1_adr,
+	},
+	{
+		.mask = BIT(1),
+		.num_adr = ARRAY_SIZE(rt714_1_adr),
+		.adr_d = rt714_1_adr,
 	},
 	{}
 };
@@ -683,12 +734,6 @@ EXPORT_SYMBOL_GPL(snd_soc_acpi_intel_adl_machines);
 /* this table is used when there is no I2S codec present */
 struct snd_soc_acpi_mach snd_soc_acpi_intel_adl_sdw_machines[] = {
 	{
-		.link_mask = BIT(0) | BIT(2) | BIT(3),
-		.links = adl_cs42l43_l0_cs35l56_l23,
-		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-adl-cs42l43-l0-cs35l56-l23.tplg",
-	},
-	{
 		.link_mask = 0xF, /* 4 active links required */
 		.links = adl_default,
 		.drv_name = "sof_sdw",
@@ -708,9 +753,21 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_adl_sdw_machines[] = {
 	},
 	{
 		.link_mask = 0xF, /* 4 active links required */
+		.links = adl_sdw_rt711_link0_rt1316_link23_rt714_link1,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-adl-rt711-l0-rt1316-l23-rt714-l1.tplg",
+	},
+	{
+		.link_mask = 0xF, /* 4 active links required */
 		.links = adl_sdw_rt711_link2_rt1316_link01_rt714_link3,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-adl-rt711-l2-rt1316-l01-rt714-l3.tplg",
+	},
+	{
+		.link_mask = 0x7, /* rt714 on link0 & two rt1316s on link1 and link2 */
+		.links = adl_sdw_rt1316_link12_rt714_link0,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-adl-rt1316-l12-rt714-l0.tplg",
 	},
 	{
 		.link_mask = 0x7, /* rt1316 on link0 and link1 & rt711 on link2*/
@@ -719,16 +776,10 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_adl_sdw_machines[] = {
 		.sof_tplg_filename = "sof-adl-rt711-l2-rt1316-l01.tplg",
 	},
 	{
-		.link_mask = 0xC, /* rt1316 on link2 & rt714 on link3 */
-		.links = adl_sdw_rt1316_link2_rt714_link3,
+		.link_mask = BIT(0) | BIT(2) | BIT(3),
+		.links = adl_cs42l43_l0_cs35l56_l23,
 		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-adl-rt1316-l2-mono-rt714-l3.tplg",
-	},
-	{
-		.link_mask = 0x7, /* rt714 on link0 & two rt1316s on link1 and link2 */
-		.links = adl_sdw_rt1316_link12_rt714_link0,
-		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-adl-rt1316-l12-rt714-l0.tplg",
+		.sof_tplg_filename = "sof-adl-cs42l43-l0-cs35l56-l23.tplg",
 	},
 	{
 		.link_mask = 0x3, /* rt1316 on link1 & rt714 on link0 */
@@ -743,28 +794,10 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_adl_sdw_machines[] = {
 		.sof_tplg_filename = "sof-adl-rt1316-l2-mono-rt714-l0.tplg",
 	},
 	{
-		.link_mask = 0x9, /* 2 active links required */
-		.links = adl_sdw_rt711_link0_rt1316_link3,
-		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-adl-rt711-l0-rt1316-l3.tplg",
-	},
-	{
 		.link_mask = 0x5, /* 2 active links required */
 		.links = adl_sdw_rt711_link0_rt1316_link2,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-adl-rt711-l0-rt1316-l2.tplg",
-	},
-	{
-		.link_mask = 0x1, /* link0 required */
-		.links = adl_rvp,
-		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-adl-rt711.tplg",
-	},
-	{
-		.link_mask = 0x1, /* link0 required */
-		.links = adlps_rvp,
-		.drv_name = "sof_sdw",
-		.sof_tplg_filename = "sof-adl-rt711.tplg",
 	},
 	{
 		.link_mask = 0x5, /* rt5682 on link0 & 2xmax98373 on link 2 */
@@ -777,6 +810,30 @@ struct snd_soc_acpi_mach snd_soc_acpi_intel_adl_sdw_machines[] = {
 		.links = adl_sdw_rt1316_link02,
 		.drv_name = "sof_sdw",
 		.sof_tplg_filename = "sof-adl-rt1316-l02.tplg",
+	},
+	{
+		.link_mask = 0x9, /* 2 active links required */
+		.links = adl_sdw_rt711_link0_rt1316_link3,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-adl-rt711-l0-rt1316-l3.tplg",
+	},
+	{
+		.link_mask = 0xC, /* rt1316 on link2 & rt714 on link3 */
+		.links = adl_sdw_rt1316_link2_rt714_link3,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-adl-rt1316-l2-mono-rt714-l3.tplg",
+	},
+	{
+		.link_mask = 0x1, /* link0 required */
+		.links = adl_rvp,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-adl-rt711.tplg",
+	},
+	{
+		.link_mask = 0x1, /* link0 required */
+		.links = adlps_rvp,
+		.drv_name = "sof_sdw",
+		.sof_tplg_filename = "sof-adl-rt711.tplg",
 	},
 	{},
 };
