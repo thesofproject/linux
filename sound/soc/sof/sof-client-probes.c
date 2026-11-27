@@ -76,6 +76,8 @@ static int sof_probes_compr_shutdown(struct snd_compr_stream *cstream,
 	size_t num_desc;
 	int i, ret;
 
+	mutex_lock(&priv->lock);
+
 	/* disconnect all probe points */
 	ret = ipc->points_info(cdev, &desc, &num_desc,
 			       PROBES_INFO_ACTIVE_PROBES);
@@ -94,6 +96,8 @@ exit:
 		dev_err(dai->dev, "Failed to deinit probe: %d\n", ret);
 
 	priv->extractor_stream_tag = SOF_PROBES_INVALID_NODE_ID;
+	mutex_unlock(&priv->lock);
+
 	snd_compr_free_pages(cstream);
 
 	ret = ops->shutdown(cdev, cstream, dai);
@@ -286,8 +290,8 @@ static ssize_t sof_probes_dfs_available_points_read(struct file *file,
 }
 
 static ssize_t
-sof_probes_dfs_points_write(struct file *file, const char __user *from,
-			    size_t count, loff_t *ppos)
+sof_probes_dfs_points_write_locked(struct file *file, const char __user *from,
+				   size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
 	struct sof_probes_priv *priv = cdev->data;
@@ -337,6 +341,17 @@ exit:
 	return ret;
 }
 
+static ssize_t
+sof_probes_dfs_points_write(struct file *file, const char __user *from,
+			    size_t count, loff_t *ppos)
+{
+	struct sof_client_dev *cdev = file->private_data;
+	struct sof_probes_priv *priv = cdev->data;
+
+	guard(mutex)(&priv->lock);
+	return sof_probes_dfs_points_write_locked(file, from, count, ppos);
+}
+
 static const struct file_operations sof_probes_active_points_fops = {
 	.open = simple_open,
 	.read = sof_probes_dfs_active_points_read,
@@ -355,8 +370,8 @@ static const struct file_operations sof_probes_available_points_fops = {
 };
 
 static ssize_t
-sof_probes_dfs_points_remove_write(struct file *file, const char __user *from,
-				   size_t count, loff_t *ppos)
+sof_probes_dfs_points_remove_write_locked(struct file *file, const char __user *from,
+					  size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
 	struct sof_probes_priv *priv = cdev->data;
@@ -393,6 +408,17 @@ sof_probes_dfs_points_remove_write(struct file *file, const char __user *from,
 exit:
 	kfree(array);
 	return ret;
+}
+
+static ssize_t
+sof_probes_dfs_points_remove_write(struct file *file, const char __user *from,
+				   size_t count, loff_t *ppos)
+{
+	struct sof_client_dev *cdev = file->private_data;
+	struct sof_probes_priv *priv = cdev->data;
+
+	guard(mutex)(&priv->lock);
+	return sof_probes_dfs_points_remove_write_locked(file, from, count, ppos);
 }
 
 static const struct file_operations sof_probes_points_remove_fops = {
@@ -468,6 +494,10 @@ static int sof_probes_client_probe(struct auxiliary_device *auxdev,
 		return -ENOMEM;
 
 	priv->host_ops = ops;
+
+	ret = devm_mutex_init(dev, &priv->lock);
+	if (ret)
+		return ret;
 
 	switch (sof_client_get_ipc_type(cdev)) {
 #ifdef CONFIG_SND_SOC_SOF_IPC4
