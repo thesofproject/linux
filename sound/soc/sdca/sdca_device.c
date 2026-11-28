@@ -97,6 +97,31 @@ static bool sdca_device_quirk_skip_func_type_patching(struct sdw_slave *slave)
 	return false;
 }
 
+/*
+ * Boards whose firmware omits the DisCo constant (mipi-sdca-control-dc-value)
+ * for the Function Topology control (0x05) of their TI TAS2783 amplifiers,
+ * so the function type cannot be read. The TAS2783 only implements a
+ * SmartAmp function, so it is safe to assume that type on these boards.
+ */
+static const struct dmi_system_id tas2783_smart_amp_func_type_dmi[] = {
+	{
+		/* HP OmniBook Ultra 14 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "8EB4"),
+		},
+	},
+	{}
+};
+
+static bool sdca_device_quirk_tas2783_smart_amp_func_type(struct sdw_slave *slave)
+{
+	if (slave->id.mfg_id != 0x0102 || slave->id.part_id != 0x0000)
+		return false;
+
+	return dmi_check_system(tas2783_smart_amp_func_type_dmi);
+}
+
 bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk)
 {
 	switch (quirk) {
@@ -104,6 +129,8 @@ bool sdca_device_quirk_match(struct sdw_slave *slave, enum sdca_quirk quirk)
 		return sdca_device_quirk_rt712_vb(slave);
 	case SDCA_QUIRKS_SKIP_FUNC_TYPE_PATCHING:
 		return sdca_device_quirk_skip_func_type_patching(slave);
+	case SDCA_QUIRKS_TAS2783_SMART_AMP_FUNC_TYPE:
+		return sdca_device_quirk_tas2783_smart_amp_func_type(slave);
 	default:
 		break;
 	}

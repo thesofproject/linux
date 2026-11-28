@@ -138,8 +138,12 @@ static int find_sdca_function(struct acpi_device *adev, void *data)
 	fwnode_handle_put(control5);
 
 	if (ret < 0) {
-		dev_err(dev, "function type only supported as DisCo constant\n");
-		return ret;
+		if (!sdca_device_quirk_match(slave, SDCA_QUIRKS_TAS2783_SMART_AMP_FUNC_TYPE)) {
+			dev_err(dev, "function type only supported as DisCo constant\n");
+			return ret;
+		}
+		dev_warn(dev, FW_BUG "function type not a DisCo constant, assuming SmartAmp\n");
+		function_type = SDCA_FUNCTION_TYPE_SMART_AMP;
 	}
 
 	if (!sdca_device_quirk_match(slave, SDCA_QUIRKS_SKIP_FUNC_TYPE_PATCHING)) {
